@@ -24,21 +24,23 @@ The agent is designed to troubleshoot distributed microservices by scanning **Cl
 ├── CODELAB.md              # Step-by-step SRE Codelab
 ├── BLOGPOST.md             # High-impact technical blog post
 ├── pyproject.toml          # Python dependencies managed by uv
-├── agent_config.json       # MCP and tool extension configurations
 ├── bootstrap.sh            # Interactive GCP project setup script
 ├── deploy.sh               # Least-privilege GCP Cloud Run deploy script
-├── Dockerfile.agent        # Container config for SRE Agent HTTP API
 ├── simulate_incident.py    # Local standalone simulation script
 │
 ├── app/                    # Target FastAPI Application (Instrumented)
 │   ├── main.py             # App main code with OpenTelemetry
 │   └── Dockerfile          # Container config for the target application
 │
+├── agent/                  # Standalone SRE Agent Service wrapper
+│   ├── Dockerfile          # Container config for SRE Agent HTTP API
+│   ├── agent_config.json   # MCP and tool extension configurations
+│   ├── config.py           # Antigravity Agent safety policies & runtime loader
+│   └── main.py             # FastAPI service wrapper for Cloud Run
+│
 └── skills/                 # Reusable Antigravity Agent Skills
     └── sre_incident_solver/
         ├── SKILL.md        # Skill discovery metadata
-        ├── sre_agent.py    # Antigravity Agent runtime & safety policies
-        ├── sre_agent_service.py # FastAPI service wrapper for Cloud deployment
         ├── sre_workflow.py # ADK multi-agent orchestration
         ├── gcp_tools.py    # Trace and Log query tools (with mock fallback)
         └── registry.py     # Extensible tool decorator registry
@@ -96,13 +98,13 @@ This script automates:
 This codebase highlights how to interact with the SRE agent using the different interfaces in the Antigravity ecosystem:
 
 ### 1. The Antigravity SDK
-Used programmatically in `sre_agent.py` to define the agent's behavior. We configure `LocalAgentConfig` with system instructions, register custom python tools, and declare security policies (e.g. denying all write operations by default and requiring human confirmation for shell execution).
+Used programmatically in `agent/config.py` to define the agent's behavior. We configure `LocalAgentConfig` with system instructions, register custom python tools, and declare security policies (e.g. denying all write operations by default and requiring human confirmation for shell execution).
 
 ### 2. The Antigravity CLI
 Useful for developers to manage and inspect skills from the command line. You can load this workspace skill directly using:
 ```bash
 antigravity skills list
-antigravity run skills/sre_incident_solver/sre_agent.py --prompt "Diagnose recent latency spikes"
+antigravity run agent/config.py --prompt "Diagnose recent latency spikes"
 ```
 
 ### 3. Antigravity 2.0 (Visual Workspace)
