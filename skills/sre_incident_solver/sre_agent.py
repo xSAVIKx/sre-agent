@@ -20,10 +20,12 @@ try:
     from google.antigravity import Agent, LocalAgentConfig
     from google.antigravity.hooks.policy import deny, allow, ask_user
     from google.antigravity.hooks.hooks import OnToolErrorHook, HookContext
-    HAS_ANTIGRAVITY = True
+    HAS_ANTIGRAVITY = "GEMINI_API_KEY" in os.environ
 except ImportError:
     HAS_ANTIGRAVITY = False
-    logger.warning("google-antigravity is not installed. Using simulated agent config fallbacks.")
+
+if not HAS_ANTIGRAVITY:
+    logger.warning("google-antigravity is not active or GEMINI_API_KEY is missing. Using simulated agent config fallbacks.")
 
     class Agent:  # type: ignore
         """Mock Agent context manager for local resilience."""
@@ -40,12 +42,9 @@ except ImportError:
             """Simulates the agent chat response."""
             class MockResponse:
                 async def text(self) -> str:
-                    # Parse prompt to run simulated tools
-                    if "traces" in prompt.lower() or "latency" in prompt.lower():
-                        # Fetch mock traces
+                    if "traces" in prompt.lower() or "latency" in prompt.lower() or "errors" in prompt.lower():
                         from .gcp_tools import query_traces
                         traces = await query_traces()
-                        # Run ADK diagnostics
                         diagnosis = await run_sre_diagnostics(traces)
                         return diagnosis
                     return f"Simulation mode: analyzed prompt '{prompt}'."
