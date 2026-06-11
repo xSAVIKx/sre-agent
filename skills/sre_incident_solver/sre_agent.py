@@ -53,10 +53,17 @@ except ImportError:
 
     class LocalAgentConfig:  # type: ignore
         """Mock LocalAgentConfig for local resilience."""
-        def __init__(self, system_instructions: str, tools: list[Any], hooks: list[Any]) -> None:
+        def __init__(
+            self,
+            system_instructions: str,
+            tools: list[Any],
+            policies: list[Any] | None = None,
+            hooks: list[Any] | None = None,
+        ) -> None:
             self.system_instructions = system_instructions
             self.tools = tools
-            self.hooks = hooks
+            self.policies = policies or []
+            self.hooks = hooks or []
 
     # Mock safety policies
     def deny(target: str) -> Any: return f"deny:{target}"
@@ -177,9 +184,6 @@ def load_agent_config(config_path: str = "agent_config.json") -> LocalAgentConfi
         ask_user("run_command", handler=cli_approval_handler)  # Require confirmation for shell commands
     ]
 
-    # Combine safety policies with custom hooks
-    hooks = safety_policies + [SreToolErrorHook()]
-
     system_instructions = (
         "You are an expert Google Cloud SRE agent specialized in distributed system debugging. "
         "Your task is to analyze system failures by running the 'query_traces' tool to inspect trace summaries, "
@@ -192,5 +196,6 @@ def load_agent_config(config_path: str = "agent_config.json") -> LocalAgentConfi
     return LocalAgentConfig(
         system_instructions=system_instructions,
         tools=tools,
-        hooks=hooks
+        policies=safety_policies,
+        hooks=[SreToolErrorHook()]
     )
