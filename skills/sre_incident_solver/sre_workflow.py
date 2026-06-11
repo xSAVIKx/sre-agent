@@ -79,26 +79,55 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     """
     logger.info("Starting SRE diagnostics workflow...")
 
-    if HAS_ADK:
-        # In a real environment, we call the ADK agents to chat/reason
+    import os
+    if HAS_ADK and "GEMINI_API_KEY" in os.environ:
+        from google.adk.runners import Runner
+        from google.adk.sessions import InMemorySessionService
+        from google.genai import types
+
         try:
-            # 1. Identify trace ID
-            trace_id_response = await trace_analyzer.chat(f"Find the failing trace ID in these traces:\n{traces_json}")
-            trace_id = trace_id_response.strip()
+            # Instantiate session service and runners
+            session_service = InMemorySessionService()
+            trace_runner = Runner(agent=trace_analyzer, session_service=session_service)
+            log_runner = Runner(agent=log_correlator, session_service=session_service)
+
+            # 1. Identify trace ID using Trace Analyzer Agent
+            trace_id = ""
+            msg = types.Content(parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")])
+            async for event in trace_runner.run_async(
+                user_id="sre_user",
+                session_id="session_1",
+                new_message=msg
+            ):
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            trace_id += part.text
+            trace_id = trace_id.strip()
             logger.info(f"Trace Analyzer identified trace ID: {trace_id}")
 
             # 2. Fetch trace details and correlated logs
             trace_details = await get_trace_details(trace_id, project_id)
             logs = await query_logs_by_trace(trace_id, project_id)
 
-            # 3. Correlate and diagnose
+            # 3. Correlate and diagnose using Log Correlator Agent
             analysis_prompt = (
                 f"Trace Spans:\n{trace_details}\n\n"
                 f"Correlated Logs:\n{logs}\n\n"
                 f"Provide a root cause analysis and mitigation plan."
             )
-            diagnosis_response = await log_correlator.chat(analysis_prompt)
-            return str(diagnosis_response)
+            analysis_msg = types.Content(parts=[types.Part.from_text(text=analysis_prompt)])
+            diagnosis = ""
+            async for event in log_runner.run_async(
+                user_id="sre_user",
+                session_id="session_2",
+                new_message=analysis_msg
+            ):
+                if event.content and event.content.parts:
+                    for part in event.content.parts:
+                        if part.text:
+                            diagnosis += part.text
+            return diagnosis
         except Exception as e:
             logger.error(f"Error during ADK execution: {e}")
             return f"### Diagnostic Execution Failure\nAn error occurred while executing the ADK workflow: {e}"
