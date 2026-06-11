@@ -1,12 +1,16 @@
 # Codelab: Building an Autonomous GCP SRE Agent (ADK + Antigravity with `uv`)
 
-This step-by-step codelab guides you through constructing a site reliability engineering (SRE) agent that can troubleshoot distributed application failures in Google Cloud.
+This step-by-step codelab guides you through constructing a site reliability engineering (SRE) agent
+that can troubleshoot distributed application failures in Google Cloud.
 
 ## 🎯 What You Will Build
-* An instrumented **FastAPI Target Application** that generates distributed traces and correlated logs.
+
+* An instrumented **FastAPI Target Application** that generates distributed traces and correlated
+  logs.
 * An **Agent Skill** containing custom python tools that query Cloud Trace and Cloud Logging.
 * A **Google ADK Multi-Agent Workflow** that coordinates trace-scanning and log-analysis.
-* An **Antigravity SDK Runtime Harness** that wraps the ADK workflow, applies safety policies, and deploys as a Cloud Run API.
+* An **Antigravity SDK Runtime Harness** that wraps the ADK workflow, applies safety policies, and
+  deploys as a Cloud Run API.
 * A **Bootstrap and Deploy Pipeline** that enforces least-privilege IAM security.
 
 ---
@@ -22,10 +26,13 @@ This step-by-step codelab guides you through constructing a site reliability eng
 
 ## Step 1: Project Bootstrapping with `uv`
 
-Instead of raw `pip` and standard `venv`, we use **`uv`** for extremely fast virtual environment creation and robust package dependency resolution.
+Instead of raw `pip` and standard `venv`, we use **`uv`** for extremely fast virtual environment
+creation and robust package dependency resolution.
 
 ### 1. Initialize Project Directory
+
 Create a project folder and generate the `pyproject.toml` file in the root:
+
 ```toml
 [project]
 name = "sre-agent-codelab"
@@ -48,28 +55,36 @@ dependencies = [
 ```
 
 ### 2. Create the Virtual Environment
+
 ```bash
 uv venv
 ```
-This initializes a `.venv/` directory. You do not need to manually run `pip install`; `uv` will resolve and sync dependencies automatically when running scripts.
+
+This initializes a `.venv/` directory. You do not need to manually run `pip install`; `uv` will
+resolve and sync dependencies automatically when running scripts.
 
 ---
 
 ## Step 2: Defining the Antigravity Agent Skill
 
-An **Agent Skill** is a packaged, discoverable capability that can be dynamically loaded by the Antigravity ecosystem (including the Antigravity CLI and the Antigravity 2.0 visual desktop app).
+An **Agent Skill** is a packaged, discoverable capability that can be dynamically loaded by the
+Antigravity ecosystem (including the Antigravity CLI and the Antigravity 2.0 visual desktop app).
 
 Create the directory structure:
+
 ```bash
 mkdir -p skills/sre_incident_solver
 ```
 
 ### 1. Declare the Skill Metadata
+
 Create `skills/sre_incident_solver/SKILL.md` to define the skill metadata and triggers:
+
 ```markdown
 # SRE Incident Solver
 
-An autonomous site reliability engineering skill that diagnoses distributed service failures in GCP stacks.
+An autonomous site reliability engineering skill that diagnoses distributed service failures in GCP
+stacks.
 
 ## Skill Definition
 
@@ -77,13 +92,17 @@ An autonomous site reliability engineering skill that diagnoses distributed serv
 * **Version**: `0.1.0`
 * **Entrypoint**: `sre_workflow.py`
 * **Language**: `python`
-* **Description**: Useful for inspecting distributed trace latency, correlating logs, and identifying database connection timeouts in GCP.
+* **Description**: Useful for inspecting distributed trace latency, correlating logs, and
+  identifying database connection timeouts in GCP.
 ```
 
 ### 2. Implement the Extensible Tool Registry
+
 Create `skills/sre_incident_solver/registry.py` to allow dynamic tool loading:
+
 ```python
 from typing import Callable, Any
+
 
 class ToolRegistry:
     def __init__(self) -> None:
@@ -97,7 +116,9 @@ class ToolRegistry:
     def get_tools(self) -> list[Callable[..., Any]]:
         return self._tools
 
+
 registry = ToolRegistry()
+
 
 def register_tool(func: Callable[..., Any]) -> Callable[..., Any]:
     return registry.register(func)
@@ -107,9 +128,11 @@ def register_tool(func: Callable[..., Any]) -> Callable[..., Any]:
 
 ## Step 3: Designing Custom GCP SRE Tools
 
-When building agents, **type hints and docstrings are the actual interface definitions** for the LLM. The Antigravity SDK compiles python function signatures directly into LLM tool schemas.
+When building agents, **type hints and docstrings are the actual interface definitions** for the
+LLM. The Antigravity SDK compiles python function signatures directly into LLM tool schemas.
 
-Create `skills/sre_incident_solver/gcp_tools.py` containing three custom tools. They query Cloud Trace and Cloud Logging APIs, falling back to a local directory simulation if `MOCK_GCP=true`:
+Create `skills/sre_incident_solver/gcp_tools.py` containing three custom tools. They query Cloud
+Trace and Cloud Logging APIs, falling back to a local directory simulation if `MOCK_GCP=true`:
 
 ```python
 import os
@@ -126,6 +149,7 @@ except ImportError:
 
 IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1") or trace_v2 is None
 
+
 @register_tool
 async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
     """Queries recent traces from GCP Cloud Trace.
@@ -141,10 +165,13 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 ## Step 4: Building the ADK Multi-Agent Diagnostics
 
 We use the **Agent Development Kit (ADK)** to orchestrate a multi-agent diagnostic graph:
-1. **Trace Analyzer Agent**: Scans traces, isolates high latency/errors, and extracts the anomalous `traceId`.
+
+1. **Trace Analyzer Agent**: Scans traces, isolates high latency/errors, and extracts the anomalous
+   `traceId`.
 2. **Log Correlator Agent**: Queries trace-correlated logs and parses error stacktraces.
 
 Create `skills/sre_incident_solver/sre_workflow.py`:
+
 ```python
 from google.adk import Agent as AdkAgent
 from google.adk import Workflow as AdkWorkflow
@@ -159,27 +186,34 @@ log_correlator = AdkAgent(
     instruction="Analyze trace spans and correlated logs. Find root cause and output SRE report."
 )
 
+
 async def run_sre_diagnostics(traces_json: str) -> str:
-    # Executed step-by-step logic
+# Executed step-by-step logic
 ```
 
 ---
 
 ## Step 5: Wiring the Antigravity Agent Runtime
 
-The Antigravity SDK handles environment interactions, safety policies, and lifecycle hooks. We decouple the runtime execution wrapper into a dedicated `agent/` directory:
+The Antigravity SDK handles environment interactions, safety policies, and lifecycle hooks. We
+decouple the runtime execution wrapper into a dedicated `agent/` directory:
 
-1. **Safety Config (`agent/config.py`)**: Defines `deny("*")` to secure the agent, and `allow(...)` specific read-only tools. Any command execution is gated by `ask_user("run_command")`.
-2. **HTTP API Server (`agent/main.py`)**: A FastAPI app exposing `/diagnose` and `/health` endpoints.
-3. **Configurations (`agent/agent_config.json`)**: Extensible configurations for third-party MCP servers and tools.
+1. **Safety Config (`agent/config.py`)**: Defines `deny("*")` to secure the agent, and `allow(...)`
+   specific read-only tools. Any command execution is gated by `ask_user("run_command")`.
+2. **HTTP API Server (`agent/main.py`)**: A FastAPI app exposing `/diagnose` and `/health`
+   endpoints.
+3. **Configurations (`agent/agent_config.json`)**: Extensible configurations for third-party MCP
+   servers and tools.
 
 ---
 
 ## Step 6: Developing the FastAPI Example Application
 
 Create `app/main.py`. This simulates a multi-tier microservice: `Gateway -> Backend -> Database`.
+
 * It uses OpenTelemetry to output traces.
-* If a query parameter `trigger_error=true` is passed, the database endpoint simulates a connection timeout and throws a `ConnectionTimeoutError`, logging the trace ID.
+* If a query parameter `trigger_error=true` is passed, the database endpoint simulates a connection
+  timeout and throws a `ConnectionTimeoutError`, logging the trace ID.
 * It outputs structured stdout JSON logs, which Cloud Run automatically maps to GCP trace IDs.
 
 ---
@@ -187,10 +221,14 @@ Create `app/main.py`. This simulates a multi-tier microservice: `Gateway -> Back
 ## Step 7: Testing Standalone Local Simulation
 
 We write a launcher `simulate_incident.py` to test the loop locally:
+
 ```bash
 uv run simulate_incident.py
 ```
-This script executes the FastAPI app internally (generating mock telemetry in `mock_telemetry_data/`), boots the SRE Agent skill locally, executes the ADK diagnostic workflow, and prints the root-cause diagnosis.
+
+This script executes the FastAPI app internally (generating mock telemetry in
+`mock_telemetry_data/`), boots the SRE Agent skill locally, executes the ADK diagnostic workflow,
+and prints the root-cause diagnosis.
 
 ---
 
@@ -199,28 +237,38 @@ This script executes the FastAPI app internally (generating mock telemetry in `m
 To deploy this in GCP following security best practices, we run a two-part setup:
 
 ### 1. Interactive Bootstrapping
+
 Run `./bootstrap.sh` to configure variables:
+
 * Selects or creates your GCP Project.
 * Sets preferred regions.
 * Configures local `.env`.
 
 ### 2. Least-Privilege IAM Deployment
+
 Run `./deploy.sh`. This script:
+
 1. Creates `sre-target-app-sa` (write-only telemetry) and `sre-agent-sa` (read-only telemetry).
 2. Assigns IAM roles:
-   * App: `roles/cloudtrace.agent`, `roles/logging.logWriter`.
-   * Agent: `roles/cloudtrace.user`, `roles/logging.viewer`.
+    * App: `roles/cloudtrace.agent`, `roles/logging.logWriter`.
+    * Agent: `roles/cloudtrace.user`, `roles/logging.viewer`.
 3. Builds the Docker containers via Cloud Build and deploys them to Cloud Run.
 
 ### 3. Verify Deployed Agent
+
 Trigger an incident in the cloud:
+
 ```bash
 curl "https://sre-target-app-<hash>.run.app/api/gateway?trigger_error=true"
 ```
+
 Call the SRE agent API endpoint `/diagnose`:
+
 ```bash
 curl -X POST "https://sre-agent-<hash>.run.app/diagnose" \
      -H "Content-Type: application/json" \
      -d '{"prompt": "Gateway service is throwing errors. Find the root cause."}'
 ```
-The deployed agent will query real Cloud Trace and Cloud Logging APIs using its secure service account, run the multi-agent ADK graph in the container, and return a complete root cause analysis!
+
+The deployed agent will query real Cloud Trace and Cloud Logging APIs using its secure service
+account, run the multi-agent ADK graph in the container, and return a complete root cause analysis!
