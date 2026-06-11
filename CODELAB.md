@@ -75,7 +75,7 @@ An autonomous site reliability engineering skill that diagnoses distributed serv
 
 * **Name**: `sre_incident_solver`
 * **Version**: `0.1.0`
-* **Entrypoint**: `sre_agent.py`
+* **Entrypoint**: `sre_workflow.py`
 * **Language**: `python`
 * **Description**: Useful for inspecting distributed trace latency, correlating logs, and identifying database connection timeouts in GCP.
 ```
@@ -167,11 +167,11 @@ async def run_sre_diagnostics(traces_json: str) -> str:
 
 ## Step 5: Wiring the Antigravity Agent Runtime
 
-The Antigravity SDK handles environment interactions, safety policies, and lifecycle hooks. We package the ADK workflow as a tool inside the Antigravity configuration.
+The Antigravity SDK handles environment interactions, safety policies, and lifecycle hooks. We decouple the runtime execution wrapper into a dedicated `agent/` directory:
 
-Create `skills/sre_incident_solver/sre_agent.py`:
-* **Safety Gating**: Define `deny("*")` to secure the agent, and `allow(...)` specific read-only tools. Any command execution is gated by `ask_user("run_command")`.
-* **Observability Hooks**: Custom `SreToolErrorHook` intercepts API connection errors and suggests fallback remedies.
+1. **Safety Config (`agent/config.py`)**: Defines `deny("*")` to secure the agent, and `allow(...)` specific read-only tools. Any command execution is gated by `ask_user("run_command")`.
+2. **HTTP API Server (`agent/main.py`)**: A FastAPI app exposing `/diagnose` and `/health` endpoints.
+3. **Configurations (`agent/agent_config.json`)**: Extensible configurations for third-party MCP servers and tools.
 
 ---
 
