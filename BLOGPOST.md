@@ -65,7 +65,7 @@ To implement SRE security best practices, our [deploy.sh](file:///d:/Antigravity
 
 A production SRE environment contains many observability tools. To support expansion, we implement an extensible tool structure:
 * **Tool Registry**: A custom `@register_tool` decorator automatically collects new python tools without bloating core config files.
-* **Dynamic MCP Loader**: On startup, the agent reads `agent_config.json`. If a third-party Model Context Protocol (MCP) server is enabled (like a Grafana MCP or SigNoz MCP), the loader dynamically wires it into the agent's capabilities.
+* **Dynamic MCP Loader**: On startup, the agent reads `agent/agent_config.json`. If a third-party Model Context Protocol (MCP) server is enabled (like a Grafana MCP or SigNoz MCP), the loader dynamically wires it into the agent's capabilities.
 
 ---
 
