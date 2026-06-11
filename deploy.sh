@@ -107,7 +107,7 @@ echo -e "${GREEN}✓ Deployed target application to: $TARGET_APP_URL${NC}"
 
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
-gcloud builds submit --tag "gcr.io/${GCP_PROJECT}/sre-agent" -f Dockerfile.agent .
+gcloud builds submit --tag "gcr.io/${GCP_PROJECT}/sre-agent" -f agent/Dockerfile .
 gcloud run deploy sre-agent \
     --image "gcr.io/${GCP_PROJECT}/sre-agent" \
     --port 8080 \

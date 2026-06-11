@@ -25,12 +25,12 @@ COPY pyproject.toml .
 # Install dependencies globally inside the container using uv
 RUN uv pip install --system --no-cache -r pyproject.toml
 
-# Copy agent config and application code
-COPY agent_config.json .
+# Copy SRE skill and agent application runner code
 COPY skills/ ./skills/
+COPY agent/ ./agent/
 
 # Expose port
 EXPOSE 8080
 
 # Command to run the agent HTTP service
-CMD uvicorn skills.sre_incident_solver.sre_agent_service:app --host 0.0.0.0 --port ${PORT}
+CMD uvicorn agent.main:app --host 0.0.0.0 --port ${PORT}
