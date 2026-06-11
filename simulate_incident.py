@@ -33,12 +33,18 @@ async def run_simulation() -> None:
 
     # 1. Generate simulated telemetry
     logger.info("Simulating target application incident (Gateway -> Backend -> Database)...")
+    from fastapi import HTTPException
+    trace_id = None
     try:
-        from app.main import gateway
         # Run gateway request with error=True to trigger database connection error
         # This writes trace details and logs to the local mock directory
-        result = await gateway(trigger_error=True)
-        logger.info(f"Generated incident trace with ID: {result['trace_id']}")
+        await gateway(trigger_error=True)
+    except HTTPException as e:
+        if isinstance(e.detail, dict) and "trace_id" in e.detail:
+            trace_id = e.detail["trace_id"]
+            logger.info(f"Generated simulated incident trace with ID: {trace_id}")
+        else:
+            logger.warning(f"Gateway threw expected exception: {e.detail}")
     except Exception as e:
         logger.error(f"Failed to generate mock telemetry: {e}")
         return
