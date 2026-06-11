@@ -1,0 +1,21 @@
+{
+  "mcp_servers": {
+    "signoz-mcp": {
+      "command": "npx",
+      "args": ["-y", "signoz-mcp-server"],
+      "env": {
+        "SIGNOZ_API_KEY": ""
+      },
+      "enabled": false
+    },
+    "grafana-mcp": {
+      "command": "npx",
+      "args": ["-y", "grafana-mcp-server"],
+      "env": {
+        "GRAFANA_URL": "",
+        "GRAFANA_TOKEN": ""
+      },
+      "enabled": false
+    }
+  }
+}
