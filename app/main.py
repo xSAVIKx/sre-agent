@@ -28,7 +28,7 @@ try:
     from opentelemetry import trace
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.google_cloud_trace import GoogleCloudFormatSpanExporter
+    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
@@ -39,7 +39,7 @@ if HAS_OTEL and not IS_MOCK:
     try:
         provider = TracerProvider()
         # Export traces directly to GCP Cloud Trace
-        exporter = GoogleCloudFormatSpanExporter()
+        exporter = CloudTraceSpanExporter()
         processor = BatchSpanProcessor(exporter)
         provider.add_span_processor(processor)
         trace.set_tracer_provider(provider)
