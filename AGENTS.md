@@ -8,9 +8,10 @@ This repository is designed for "agent-first" software engineering. If you are a
 
 The codebase is split into two main sections:
 1. **Target Stack (`app/`)**: A FastAPI microservice running OpenTelemetry for logging and tracing.
-2. **SRE Skill (`skills/sre_incident_solver/`)**: A reusable Antigravity Agent Skill containing the diagnostics engine.
-   * `google-antigravity` handles OS/GCP access, safety gating (deny-by-default), and HTTP server deployment.
-   * `google-adk` coordinates the multi-agent graph (Trace Analyzer + Log Correlator).
+2. **SRE Skill (`skills/sre_incident_solver/`)**: A reusable Antigravity Agent Skill containing the core diagnostics engine and tools.
+3. **Standalone Agent Service (`agent/`)**: The runnable FastAPI service wrapper.
+   * `google-antigravity` handles OS/GCP access, safety gating (deny-by-default), and HTTP server execution via `agent/config.py` and `agent/main.py`.
+   * `google-adk` coordinates the multi-agent graph (Trace Analyzer + Log Correlator) in the SRE skill.
 
 ---
 
@@ -44,9 +45,9 @@ if IS_MOCK:
 
 ## 🔒 Safety Policies & Hooks
 
-* **Least-Privilege**: The agent configuration enforces a "deny-by-default" posture using the Antigravity policies in `skills/sre_incident_solver/sre_agent.py`.
+* **Least-Privilege**: The agent configuration enforces a "deny-by-default" posture using the Antigravity policies in `agent/config.py`.
 * **Modification Warning**: Do not modify `safety_policies` to bypass user confirmation (e.g. allowing write commands without `ask_user("run_command")`) unless explicitly requested by the human developer.
-* **Hooks**: Customize the `SreToolErrorHook` in `sre_agent.py` to handle any specific API failures or retry mechanisms.
+* **Hooks**: Customize the `SreToolErrorHook` in `agent/config.py` to handle any specific API failures or retry mechanisms.
 
 ---
 
