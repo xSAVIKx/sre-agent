@@ -9,7 +9,7 @@ import os
 import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from .sre_agent import load_agent_config, Agent, HAS_ANTIGRAVITY
+from agent.config import load_agent_config, Agent, HAS_ANTIGRAVITY
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
