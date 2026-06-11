@@ -9,8 +9,8 @@ import os
 import json
 import logging
 from typing import Any
-from .registry import registry, register_tool
-from .sre_workflow import run_sre_diagnostics
+from skills.sre_incident_solver.registry import registry, register_tool
+from skills.sre_incident_solver.sre_workflow import run_sre_diagnostics
 
 # Setup logging
 logger = logging.getLogger("sre_agent")
@@ -43,7 +43,7 @@ if not HAS_ANTIGRAVITY:
             class MockResponse:
                 async def text(self) -> str:
                     if "traces" in prompt.lower() or "latency" in prompt.lower() or "errors" in prompt.lower():
-                        from .gcp_tools import query_traces
+                        from skills.sre_incident_solver.gcp_tools import query_traces
                         traces = await query_traces()
                         diagnosis = await run_sre_diagnostics(traces)
                         return diagnosis
@@ -140,7 +140,7 @@ async def cli_approval_handler(context: Any) -> bool:
         return False
 
 
-def load_agent_config(config_path: str = "agent_config.json") -> LocalAgentConfig:
+def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:
     """Loads safety configurations, tools, and dynamic MCP servers.
 
     Args:

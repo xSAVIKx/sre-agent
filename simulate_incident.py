@@ -53,7 +53,7 @@ async def run_simulation() -> None:
     # 2. Boot the SRE agent
     logger.info("Booting Antigravity SRE Agent...")
     try:
-        from skills.sre_incident_solver.sre_agent import load_agent_config, Agent
+        from agent.config import load_agent_config, Agent
         config = load_agent_config()
 
         logger.info("Invoking agent diagnosis loop...")
