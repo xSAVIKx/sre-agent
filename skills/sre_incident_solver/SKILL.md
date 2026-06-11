@@ -6,7 +6,7 @@ An autonomous site reliability engineering skill that diagnoses distributed serv
 
 * **Name**: `sre_incident_solver`
 * **Version**: `0.1.0`
-* **Entrypoint**: `sre_agent.py`
+* **Entrypoint**: `sre_workflow.py`
 * **Language**: `python`
 * **Description**: Useful for inspecting distributed trace latency, correlating logs, and identifying database connection timeouts in GCP.
 
