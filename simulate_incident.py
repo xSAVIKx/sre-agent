@@ -36,6 +36,7 @@ async def run_simulation() -> None:
     from fastapi import HTTPException
     trace_id = None
     try:
+        from app.main import gateway
         # Run gateway request with error=True to trigger database connection error
         # This writes trace details and logs to the local mock directory
         await gateway(trigger_error=True)
