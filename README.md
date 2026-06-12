@@ -142,3 +142,12 @@ The visual desktop application automatically discovers skills placed in the `ski
 When you open this repository in the Antigravity 2.0 Desktop app, the `sre_incident_solver` skill is
 immediately recognized via `skills/sre_incident_solver/SKILL.md` and added to your visual canvas,
 allowing you to run and audit SRE tasks in a graphical dashboard.
+
+---
+
+## 🧹 Tearing Down the Demo
+
+To prevent any ongoing costs, you can delete all GCP resources (Cloud Run services, service accounts, and IAM roles) created during the deployment by running the cleanup script:
+```bash
+./cleanup.sh
+```

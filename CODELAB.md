@@ -272,3 +272,15 @@ curl -X POST "https://sre-agent-<hash>.run.app/diagnose" \
 
 The deployed agent will query real Cloud Trace and Cloud Logging APIs using its secure service
 account, run the multi-agent ADK graph in the container, and return a complete root cause analysis!
+
+---
+
+## Step 9: Cleaning Up GCP Resources
+
+To avoid incurring charges for running Cloud Run services, clean up the deployed stack. We provide a cleanup script that deletes the Cloud Run services, target app/agent service accounts, and IAM policy bindings:
+
+```bash
+./cleanup.sh
+```
+
+Follow the interactive prompts to optionally delete your local `.env` and `mock_telemetry_data/` files as well.
