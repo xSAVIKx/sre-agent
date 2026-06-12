@@ -1,0 +1,13 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environments (if any)
+.venv
+venv
+env
+
+# Docker configuration
+Dockerfile

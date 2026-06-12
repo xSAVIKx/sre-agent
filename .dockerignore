@@ -1,0 +1,42 @@
+# Version control
+.git
+.gitignore
+
+# Virtual environment and local dependencies
+.venv
+venv
+ENV
+env
+bin
+lib
+share
+
+# Telemetry and dynamic configurations
+mock_telemetry_data
+.env
+.env.local
+
+# Python cache and temporary files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE files
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Docker files
+Dockerfile*
+docker-compose*
+cleanup.sh
+bootstrap.sh
+deploy.sh
