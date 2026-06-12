@@ -17,3 +17,10 @@ stacks.
 This skill should be triggered when a developer reports system errors, slow response times, service
 outages, or specifically requests to diagnose latency spikes or HTTP 5xx failures in their
 microservices stack.
+
+## Dependencies
+
+* **Python Libraries**: Declared in [requirements.txt](file:///d:/AntigravityProjects/TestAntigravity/skills/sre_incident_solver/requirements.txt):
+  - `google-adk>=1.28.1`
+  - `google-cloud-trace>=1.11.0`
+  - `google-cloud-logging>=3.8.0`
