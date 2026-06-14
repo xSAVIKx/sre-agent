@@ -4,7 +4,7 @@ steps:
   args:
   - 'build'
   - '-t'
-  - '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+  - '$_IMAGE'
   - '-f'
   - 'app/Dockerfile'
   - '.'
@@ -13,7 +13,7 @@ steps:
 - name: 'gcr.io/cloud-builders/docker'
   args:
   - 'push'
-  - '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+  - '$_IMAGE'
 
 # 3. Deploy to Cloud Run
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -22,7 +22,7 @@ steps:
   - 'run'
   - 'deploy'
   - '$_SERVICE_NAME'
-  - '--image=$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+  - '--image=$_IMAGE'
   - '--region=$_GCP_REGION'
   - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
   - '--port=8080'
@@ -30,13 +30,15 @@ steps:
   - '--labels=demo=sre-agent-codelab'
 
 images:
-- '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+- '$_IMAGE'
 
 substitutions:
   _SERVICE_NAME: 'sre-chaos-monkey'
   _SA_NAME: 'sre-chaos-monkey-sa'
   _REPO_NAME: 'sre-repo'
   _GCP_REGION: 'us-central1'
+  _IMAGE: '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}'
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
