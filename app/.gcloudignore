@@ -1,0 +1,25 @@
+# This file specifies files and directories that should be ignored when
+# uploading source code context via gcloud from the app directory.
+
+# Version control
+.git/
+.gitignore
+.gcloudignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local environments (if any)
+.venv/
+venv/
+env/
+
+# IDE and local system files
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db

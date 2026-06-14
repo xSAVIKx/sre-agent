@@ -1,0 +1,35 @@
+# This file specifies files and directories that should be ignored when
+# uploading source code context via gcloud (e.g. gcloud builds submit).
+
+# Version control
+.git/
+.gitignore
+.gcloudignore
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Telemetry data and local environment secrets
+mock_telemetry_data/
+.env
+.env.local
+
+# Python caches and build files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# Local system files
+.DS_Store
+Thumbs.db
