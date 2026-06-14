@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antigravity SRE Chat Control</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-glass: rgba(17, 25, 40, 0.75);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --accent-glow: rgba(99, 102, 241, 0.15);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --terminal-bg: #05070c;
+            --card-bg: rgba(255, 255, 255, 0.03);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.2);
+            --danger: #ef4444;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-primary);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(168, 85, 247, 0.08) 0%, transparent 40%);
+        }
+
+        .app-container {
+            width: 100%;
+            max-width: 1100px;
+            height: 90vh;
+            background: var(--bg-glass);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--border-glass);
+            border-radius: 24px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+        }
+
+        /* Header Styling */
+        .app-header {
+            padding: 20px 32px;
+            border-bottom: 1px solid var(--border-glass);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(10, 15, 30, 0.4);
+        }
+
+        .header-title-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-logo {
+            font-size: 24px;
+        }
+
+        .header-title h1 {
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 0%, var(--text-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header-title p {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .agent-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(16, 185, 129, 0.06);
+            border: 1px solid rgba(16, 185, 129, 0.15);
+            padding: 6px 14px;
+            border-radius: 99px;
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--success);
+            box-shadow: 0 0 15px var(--success-glow);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--success);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); }
+            100% { transform: scale(0.9); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* Chat History Area */
+        .chat-history {
+            flex: 1;
+            padding: 32px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            scroll-behavior: smooth;
+        }
+
+        .chat-history::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-history::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-history::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 99px;
+        }
+
+        .chat-history::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        /* Messages */
+        .message-row {
+            display: flex;
+            width: 100%;
+        }
+
+        .message-row.user {
+            justify-content: flex-end;
+        }
+
+        .message-row.agent {
+            justify-content: flex-start;
+        }
+
+        .message-bubble {
+            max-width: 85%;
+            padding: 16px 20px;
+            border-radius: 18px;
+            line-height: 1.5;
+            font-size: 15px;
+            animation: fadeIn 0.3s ease-out forwards;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .message-row.user .message-bubble {
+            background: var(--primary);
+            color: white;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.2);
+        }
+
+        .message-row.agent .message-bubble {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-glass);
+            border-bottom-left-radius: 4px;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        /* A2UI Component Styles */
+        .a2ui-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .a2ui-header {
+            font-size: 18px;
+            font-weight: 600;
+            color: #ffffff;
+            border-left: 3px solid var(--primary);
+            padding-left: 10px;
+            margin-bottom: 4px;
+        }
+
+        .a2ui-text {
+            color: var(--text-main);
+            font-size: 15px;
+            white-space: pre-wrap;
+        }
+
+        /* Rich Component: Card */
+        .a2ui-card {
+            background: var(--card-bg);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .a2ui-card-title {
+            font-size: 13px;
+            text-transform: uppercase;
+            font-weight: 600;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+        }
+
+        .a2ui-card-fields {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+
+        .a2ui-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .a2ui-field-label {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .a2ui-field-value {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            color: var(--text-main);
+            background: rgba(0, 0, 0, 0.2);
+            padding: 6px 10px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.02);
+        }
+
+        /* Rich Component: Section */
+        .a2ui-section {
+            background: rgba(99, 102, 241, 0.02);
+            border-left: 3px solid var(--primary);
+            padding: 14px 16px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .a2ui-section-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 6px;
+        }
+
+        .a2ui-section-content {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* Rich Component: Code Terminal Block */
+        .a2ui-codeblock {
+            background-color: var(--terminal-bg);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .a2ui-codeblock-header {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 10px 16px;
+            font-size: 12px;
+            color: var(--text-muted);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .a2ui-codeblock-dots {
+            display: flex;
+            gap: 6px;
+        }
+
+        .code-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .code-dot.red { background-color: #ff5f56; }
+        .code-dot.yellow { background-color: #ffbd2e; }
+        .code-dot.green { background-color: #27c93f; }
+
+        .a2ui-codeblock-body {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            padding: 16px;
+            color: #a7f3d0;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            line-height: 1.6;
+        }
+
+        /* Rich Component: List */
+        .a2ui-list {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .a2ui-list-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-main);
+            margin-bottom: 10px;
+        }
+
+        .a2ui-list-items {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            list-style: none;
+        }
+
+        .a2ui-list-item {
+            font-size: 14px;
+            color: var(--text-muted);
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .a2ui-list-item-bullet {
+            color: var(--success);
+            font-weight: bold;
+        }
+
+        /* Input Controls Area */
+        .chat-input-area {
+            padding: 24px 32px 32px;
+            border-top: 1px solid var(--border-glass);
+            background: rgba(10, 15, 30, 0.3);
+        }
+
+        .input-form {
+            display: flex;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .input-wrapper {
+            flex: 1;
+            position: relative;
+        }
+
+        .text-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-glass);
+            border-radius: 14px;
+            padding: 16px 20px;
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            outline: none;
+            transition: all 0.25s ease;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .text-input:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25), inset 0 2px 4px rgba(0,0,0,0.2);
+            background: rgba(0, 0, 0, 0.45);
+        }
+
+        .text-input::placeholder {
+            color: #4b5563;
+        }
+
+        .send-button {
+            background: var(--primary);
+            border: none;
+            color: white;
+            border-radius: 14px;
+            padding: 0 28px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.2);
+        }
+
+        .send-button:hover:not(:disabled) {
+            background: var(--primary-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.3);
+        }
+
+        .send-button:active:not(:disabled) {
+            transform: translateY(1px);
+        }
+
+        .send-button:disabled {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-glass);
+            color: #4b5563;
+            cursor: not-allowed;
+            box-shadow: none;
+        }
+
+        .loader {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-title-container">
+                <div class="header-logo">🛸</div>
+                <div class="header-title">
+                    <h1>Antigravity SRE Control</h1>
+                    <p>Stateless Diagnostics Loop & A2UI Render</p>
+                </div>
+            </div>
+            
+            <div class="agent-status">
+                <div class="status-dot"></div>
+                <span>Agent Active</span>
+            </div>
+        </header>
+
+        <!-- Message History -->
+        <main class="chat-history" id="chatHistory">
+            <!-- Initial Agent Message -->
+            <div class="message-row agent">
+                <div class="message-bubble">
+                    <div class="a2ui-container">
+                        <div class="a2ui-text">System initialized. I am ready to monitor systems and analyze correlated telemetry. You can trigger an incident diagnostics report at any time.</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Input Section -->
+        <footer class="chat-input-area">
+            <form class="input-form" id="inputForm">
+                <div class="input-wrapper">
+                    <input type="text" 
+                           id="textInput" 
+                           class="text-input" 
+                           placeholder="Describe the incident (e.g. Gateway database timeouts)..." 
+                           autocomplete="off" 
+                           required>
+                </div>
+                <button type="submit" class="send-button" id="sendBtn">
+                    <span>Send</span>
+                </button>
+            </form>
+        </footer>
+    </div>
+
+    <script>
+        const chatHistory = document.getElementById('chatHistory');
+        const inputForm = document.getElementById('inputForm');
+        const textInput = document.getElementById('textInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        // Stateful conversation tracking
+        let activeConversationId = null;
+
+        // Parse markdown bold tags inside textual components for rich display
+        function formatMarkdownInline(text) {
+            if (!text) return "";
+            return text
+                .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+                .replace(/`([^`]+)`/g, '<code style="font-family: \'JetBrains Mono\', monospace; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">$1</code>');
+        }
+
+        // Render an A2UI payload into HTML components
+        function renderA2UIContainer(payload) {
+            const containerDiv = document.createElement('div');
+            containerDiv.className = 'a2ui-container';
+
+            if (!payload || !payload.components) {
+                return containerDiv;
+            }
+
+            payload.components.forEach(comp => {
+                switch (comp.type) {
+                    case 'header':
+                        const header = document.createElement('div');
+                        header.className = 'a2ui-header';
+                        header.innerHTML = formatMarkdownInline(comp.text);
+                        containerDiv.appendChild(header);
+                        break;
+
+                    case 'text':
+                        const text = document.createElement('div');
+                        text.className = 'a2ui-text';
+                        text.innerHTML = formatMarkdownInline(comp.content);
+                        containerDiv.appendChild(text);
+                        break;
+
+                    case 'card':
+                        const card = document.createElement('div');
+                        card.className = 'a2ui-card';
+                        
+                        const cardTitle = document.createElement('div');
+                        cardTitle.className = 'a2ui-card-title';
+                        cardTitle.innerText = comp.title || "Details";
+                        card.appendChild(cardTitle);
+
+                        const fieldsContainer = document.createElement('div');
+                        fieldsContainer.className = 'a2ui-card-fields';
+
+                        if (comp.fields) {
+                            comp.fields.forEach(field => {
+                                const fieldDiv = document.createElement('div');
+                                fieldDiv.className = 'a2ui-field';
+
+                                const label = document.createElement('div');
+                                label.className = 'a2ui-field-label';
+                                label.innerText = field.label;
+
+                                const val = document.createElement('div');
+                                val.className = 'a2ui-field-value';
+                                val.innerText = field.value;
+
+                                fieldDiv.appendChild(label);
+                                fieldDiv.appendChild(val);
+                                fieldsContainer.appendChild(fieldDiv);
+                            });
+                        }
+
+                        card.appendChild(fieldsContainer);
+                        containerDiv.appendChild(card);
+                        break;
+
+                    case 'section':
+                        const section = document.createElement('div');
+                        section.className = 'a2ui-section';
+
+                        const secTitle = document.createElement('div');
+                        secTitle.className = 'a2ui-section-title';
+                        secTitle.innerHTML = formatMarkdownInline(comp.title);
+                        section.appendChild(secTitle);
+
+                        const secContent = document.createElement('div');
+                        secContent.className = 'a2ui-section-content';
+                        secContent.innerHTML = formatMarkdownInline(comp.content);
+                        section.appendChild(secContent);
+
+                        containerDiv.appendChild(section);
+                        break;
+
+                    case 'code_block':
+                        const cb = document.createElement('div');
+                        cb.className = 'a2ui-codeblock';
+
+                        const cbHeader = document.createElement('div');
+                        cbHeader.className = 'a2ui-codeblock-header';
+                        
+                        const dots = document.createElement('div');
+                        dots.className = 'a2ui-codeblock-dots';
+                        dots.innerHTML = '<div class="code-dot red"></div><div class="code-dot yellow"></div><div class="code-dot green"></div>';
+                        
+                        const titleSpan = document.createElement('span');
+                        titleSpan.innerText = comp.title || "Diagnostics Log";
+                        
+                        cbHeader.appendChild(dots);
+                        cbHeader.appendChild(titleSpan);
+                        cb.appendChild(cbHeader);
+
+                        const cbBody = document.createElement('div');
+                        cbBody.className = 'a2ui-codeblock-body';
+                        cbBody.innerText = comp.code;
+                        cb.appendChild(cbBody);
+
+                        containerDiv.appendChild(cb);
+                        break;
+
+                    case 'list':
+                        const list = document.createElement('div');
+                        list.className = 'a2ui-list';
+
+                        const listTitle = document.createElement('div');
+                        listTitle.className = 'a2ui-list-title';
+                        listTitle.innerHTML = formatMarkdownInline(comp.title);
+                        list.appendChild(listTitle);
+
+                        const listItems = document.createElement('ul');
+                        listItems.className = 'a2ui-list-items';
+
+                        if (comp.items) {
+                            comp.items.forEach(item => {
+                                const li = document.createElement('li');
+                                li.className = 'a2ui-list-item';
+                                li.innerHTML = `<span class="a2ui-list-item-bullet">✓</span> <span>${formatMarkdownInline(item)}</span>`;
+                                listItems.appendChild(li);
+                            });
+                        }
+
+                        list.appendChild(listItems);
+                        containerDiv.appendChild(list);
+                        break;
+                }
+            });
+
+            return containerDiv;
+        }
+
+        // Add message row to history UI
+        function appendMessageRow(sender, element) {
+            const row = document.createElement('div');
+            row.className = `message-row ${sender}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = 'message-bubble';
+            bubble.appendChild(element);
+            
+            row.appendChild(bubble);
+            chatHistory.appendChild(row);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+        }
+
+        // Submit message handler
+        inputForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const prompt = textInput.value.trim();
+            if (!prompt) return;
+
+            // Clear input and disable UI
+            textInput.value = '';
+            textInput.disabled = true;
+            sendBtn.disabled = true;
+            const originalSendBtnHTML = sendBtn.innerHTML;
+            sendBtn.innerHTML = '<span class="loader"></span>';
+
+            // 1. Render User Message bubble
+            const userTextDiv = document.createElement('div');
+            userTextDiv.className = 'a2ui-text';
+            userTextDiv.innerText = prompt;
+            const userContainer = document.createElement('div');
+            userContainer.className = 'a2ui-container';
+            userContainer.appendChild(userTextDiv);
+            appendMessageRow('user', userContainer);
+
+            try {
+                // 2. Fetch SRE Agent response
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: prompt,
+                        conversation_id: activeConversationId,
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP Error ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // 3. Update Conversation ID
+                if (data.conversation_id) {
+                    activeConversationId = data.conversation_id;
+                }
+
+                // 4. Render A2UI response bubble
+                if (data.response_a2ui) {
+                    const agentA2UIDiv = renderA2UIContainer(data.response_a2ui);
+                    appendMessageRow('agent', agentA2UIDiv);
+                } else {
+                    // Fallback to text if missing A2UI payload
+                    const fallbackTextDiv = document.createElement('div');
+                    fallbackTextDiv.className = 'a2ui-text';
+                    fallbackTextDiv.innerText = data.response || "No response text received.";
+                    const fallbackContainer = document.createElement('div');
+                    fallbackContainer.className = 'a2ui-container';
+                    fallbackContainer.appendChild(fallbackTextDiv);
+                    appendMessageRow('agent', fallbackContainer);
+                }
+
+            } catch (err) {
+                // Render Error bubble
+                const errTextDiv = document.createElement('div');
+                errTextDiv.className = 'a2ui-text';
+                errTextDiv.style.color = 'var(--danger)';
+                errTextDiv.innerText = `Error contacting agent: ${err.message}`;
+                const errContainer = document.createElement('div');
+                errContainer.className = 'a2ui-container';
+                errContainer.appendChild(errTextDiv);
+                appendMessageRow('agent', errContainer);
+            } finally {
+                // Re-enable input
+                textInput.disabled = false;
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = originalSendBtnHTML;
+                textInput.focus();
+            }
+        });
+    </script>
+</body>
+</html>
