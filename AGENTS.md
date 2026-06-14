@@ -72,6 +72,27 @@ if IS_MOCK:
 
 ---
 
+## 📦 Dependency & Build Management
+
+### 1. `uv` Workspace Layout
+This repository uses `uv` workspaces to isolate dependencies:
+* **Root `pyproject.toml`**: Configures the workspace and links the packages. Do not add core dependencies here.
+* **`app/pyproject.toml`**: Stores dependencies for the target stack.
+* **`agent/pyproject.toml`**: Stores dependencies for the agent service and core SRE skill.
+
+To synchronize dependencies locally, run:
+```bash
+uv sync --all-packages
+```
+
+### 2. Multi-Stage Docker Optimization
+Container setups utilize multi-stage builds to optimize image size and security:
+* **Builder Stage**: Installs `uv` to resolve and build the Python virtual environment (`.venv`) cleanly.
+* **Runner Stage**: Copies only the pre-compiled `.venv` and source code. `uv` is **not** included in the final runtime container.
+* When editing Dockerfiles, preserve this multi-stage separation.
+
+---
+
 ## 🐍 Python 3.14 Conventions
 
 * Use native container generics (e.g., `list[str]`, `dict[str, Any]`) instead of importing `List` or

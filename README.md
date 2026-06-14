@@ -25,21 +25,28 @@ from **Cloud Logging** to pinpoint the exact root cause.
 ```
 .
 ├── .gitignore
+├── .gcloudignore            # Global deployment exclusions
 ├── README.md               # Repo homepage
 ├── AGENTS.md               # Guidelines for AI agent collaborators
 ├── CODELAB.md              # Step-by-step SRE Codelab
 ├── BLOGPOST.md             # High-impact technical blog post
-├── pyproject.toml          # Python dependencies managed by uv
+├── pyproject.toml          # Root-level uv workspace configuration
 ├── bootstrap.sh            # Interactive GCP project setup script
 ├── deploy.sh               # Least-privilege GCP Cloud Run deploy script
 ├── simulate_incident.py    # Local standalone simulation script
 │
 ├── app/                    # Target FastAPI Application (Instrumented)
 │   ├── main.py             # App main code with OpenTelemetry
-│   └── Dockerfile          # Container config for the target application
+│   ├── Dockerfile          # Multi-stage optimized Docker config
+│   ├── .dockerignore       # App Docker build exclusions
+│   ├── .gcloudignore       # App Cloud Build exclusions
+│   └── pyproject.toml      # Target app dependencies
 │
 ├── agent/                  # Standalone SRE Agent Service wrapper
-│   ├── Dockerfile          # Container config for SRE Agent HTTP API
+│   ├── Dockerfile          # Multi-stage optimized Docker config
+│   ├── .dockerignore       # Agent Docker build exclusions
+│   ├── .gcloudignore       # Agent Cloud Build exclusions
+│   ├── pyproject.toml      # Agent service & skill dependencies
 │   ├── agent_config.json   # MCP and tool extension configurations
 │   ├── config.py           # Antigravity Agent safety policies & runtime loader
 │   └── main.py             # FastAPI service wrapper for Cloud Run
@@ -75,7 +82,7 @@ uv run simulate_incident.py
 
 This single command:
 
-1. Provisions a virtual environment (`.venv`) and installs all dependencies in `pyproject.toml`.
+1. Provisions a virtual environment (`.venv`) and synchronizes all workspace dependencies.
 2. Triggers the mock target app gateway to generate a synthetic incident.
 3. Writes mock traces and logs to a local directory (`mock_telemetry_data/`).
 4. Boots the SRE agent, which queries the mock data, runs the ADK workflow, and prints out a

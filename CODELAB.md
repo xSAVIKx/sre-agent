@@ -24,20 +24,54 @@ that can troubleshoot distributed application failures in Google Cloud.
 
 ---
 
-## Step 1: Project Bootstrapping with `uv`
+## Step 1: Project Bootstrapping with `uv` Workspaces
 
-Instead of raw `pip` and standard `venv`, we use **`uv`** for extremely fast virtual environment
-creation and robust package dependency resolution.
+Instead of raw `pip` and standard `venv`, we use **`uv`** for extremely fast virtual environment creation and workspace package dependency resolution.
 
-### 1. Initialize Project Directory
+### 1. Initialize Project Directory and Workspaces
 
-Create a project folder and generate the `pyproject.toml` file in the root:
+This repository is split into two packages: `app` (FastAPI target app) and `agent` (Antigravity diagnostic service). We define a `uv` workspace in the root directory to link them, and keep their dependencies separate.
+
+Create a root `pyproject.toml` workspace configuration:
 
 ```toml
 [project]
-name = "sre-agent-codelab"
+name = "sre-agent-codelab-workspace"
 version = "0.1.0"
-description = "SRE agent trace & log correlation codelab using Antigravity and ADK"
+description = "SRE agent trace & log correlation codelab workspace"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.uv.workspace]
+members = ["app", "agent"]
+```
+
+Next, create the dependency configuration for the target app in `app/pyproject.toml`:
+
+```toml
+[project]
+name = "sre-chaos-monkey"
+version = "0.1.0"
+description = "SRE Chaos Monkey FastAPI Target Application"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "httpx>=0.27.0",
+    "opentelemetry-sdk>=1.24.0",
+    "opentelemetry-exporter-gcp-trace>=1.12.0",
+]
+```
+
+And the dependency configuration for the agent in `agent/pyproject.toml`:
+
+```toml
+[project]
+name = "sre-agent"
+version = "0.1.0"
+description = "Antigravity Cloud SRE Agent Service"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -48,20 +82,19 @@ dependencies = [
     "fastapi>=0.110.0",
     "uvicorn>=0.28.0",
     "httpx>=0.27.0",
-    "opentelemetry-sdk>=1.24.0",
-    "opentelemetry-exporter-google-cloud-trace>=1.24.0",
-    "tabulate>=0.9.0",
 ]
 ```
 
-### 2. Create the Virtual Environment
+### 2. Create the Workspace Virtual Environment
+
+Initialize the virtual environment and synchronize all workspace packages:
 
 ```bash
 uv venv
+uv sync --all-packages
 ```
 
-This initializes a `.venv/` directory. You do not need to manually run `pip install`; `uv` will
-resolve and sync dependencies automatically when running scripts.
+This initializes a shared `.venv/` directory. `uv` will resolve and sync dependencies automatically across both packages.
 
 ---
 
