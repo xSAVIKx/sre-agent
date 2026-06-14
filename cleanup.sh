@@ -93,6 +93,23 @@ else
     echo "• Service account '$AGENT_SA_EMAIL' does not exist."
 fi
 
+# SRE Build SA Cleanup
+BUILD_SA_EMAIL="sre-build-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
+if gcloud iam service-accounts describe "$BUILD_SA_EMAIL" &>/dev/null; then
+    echo "Removing IAM policy bindings for SRE Build service account..."
+    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/logging.logWriter" &>/dev/null || true
+    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/storage.admin" &>/dev/null || true
+
+    gcloud iam service-accounts delete "$BUILD_SA_EMAIL" --quiet
+    echo -e "${GREEN}✓ Deleted service account: $BUILD_SA_EMAIL${NC}"
+else
+    echo "• Service account '$BUILD_SA_EMAIL' does not exist."
+fi
+
 # 4. Optional local cleanup
 echo -e "\n${BLUE}[3/3] Local cleanup...${NC}"
 read -p "Would you like to delete the local .env and mock telemetry directories? (y/n): " CLEAN_LOCAL

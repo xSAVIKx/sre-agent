@@ -69,6 +69,18 @@ else
     echo -e "${GREEN}✓ Service account already exists: $AGENT_SA_EMAIL${NC}"
 fi
 
+# SRE Build Service Account (GCP Best Practice for Cloud Build)
+BUILD_SA_NAME="sre-build-sa"
+BUILD_SA_EMAIL="${BUILD_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
+if ! gcloud iam service-accounts describe "$BUILD_SA_EMAIL" &>/dev/null; then
+    gcloud iam service-accounts create "$BUILD_SA_NAME" \
+        --description="Service account for Cloud Build [demo=sre-agent-codelab]" \
+        --display-name="SRE Build Service Account"
+    echo -e "${GREEN}✓ Created service account: $BUILD_SA_EMAIL${NC}"
+else
+    echo -e "${GREEN}✓ Service account already exists: $BUILD_SA_EMAIL${NC}"
+fi
+
 # Wait for service account propagation to avoid IAM consistency failures
 echo "Waiting 10 seconds for service account creation to propagate..."
 sleep 10
@@ -96,9 +108,33 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --role="roles/logging.viewer" >/dev/null
 echo -e "${GREEN}✓ Granted roles/cloudtrace.user & roles/logging.viewer to SRE Agent${NC}"
 
+# SRE Build Roles (Least Privilege Cloud Build logging and storage access)
+echo "Assigning roles to SRE Build service account..."
+gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+    --member="serviceAccount:${BUILD_SA_EMAIL}" \
+    --role="roles/logging.logWriter" >/dev/null
+gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+    --member="serviceAccount:${BUILD_SA_EMAIL}" \
+    --role="roles/storage.admin" >/dev/null
+echo -e "${GREEN}✓ Granted roles/logging.logWriter & roles/storage.admin to SRE Build SA${NC}"
+
+# Grant Service Account User to active gcloud account to run the build as the build SA
+ACTIVE_ACCOUNT=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || true)
+if [ -n "$ACTIVE_ACCOUNT" ]; then
+    if [[ "$ACTIVE_ACCOUNT" == *"gserviceaccount.com"* ]]; then
+        MEMBER="serviceAccount:${ACTIVE_ACCOUNT}"
+    else
+        MEMBER="user:${ACTIVE_ACCOUNT}"
+    fi
+    echo "Granting roles/iam.serviceAccountUser to active deployer account ($ACTIVE_ACCOUNT)..."
+    gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA_EMAIL" \
+        --member="$MEMBER" \
+        --role="roles/iam.serviceAccountUser" >/dev/null || true
+fi
+
 # 5. Build and Deploy Target Application (SRE Chaos Monkey)
 echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
-gcloud builds submit --config=app/cloudbuild.yaml .
+gcloud builds submit --config=app/cloudbuild.yaml --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" .
 gcloud run deploy sre-chaos-monkey \
     --image "gcr.io/${GCP_PROJECT}/sre-chaos-monkey" \
     --port 8080 \
@@ -112,7 +148,7 @@ echo -e "${GREEN}✓ Deployed SRE Chaos Monkey to: $TARGET_APP_URL${NC}"
 
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
-gcloud builds submit --config=agent/cloudbuild.yaml .
+gcloud builds submit --config=agent/cloudbuild.yaml --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" .
 gcloud run deploy sre-agent \
     --image "gcr.io/${GCP_PROJECT}/sre-agent" \
     --port 8080 \
