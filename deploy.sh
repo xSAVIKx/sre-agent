@@ -5,6 +5,13 @@
 
 set -euo pipefail
 
+# Add default Windows Google Cloud SDK path to PATH if present (Git Bash or WSL)
+if [ -d "/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin" ]; then
+    export PATH="/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin:$PATH"
+elif [ -d "/mnt/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin" ]; then
+    export PATH="/mnt/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin:$PATH"
+fi
+
 # ANSI color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'

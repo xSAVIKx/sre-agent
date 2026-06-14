@@ -26,6 +26,7 @@ steps:
   - '--region=$_GCP_REGION'
   - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
   - '--port=8080'
+  - '--set-env-vars=GCP_PROJECT=$PROJECT_ID,MOCK_GCP=false'
   - '--allow-unauthenticated'
   - '--labels=demo=sre-agent-codelab'
 

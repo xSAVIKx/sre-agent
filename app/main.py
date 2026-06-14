@@ -13,7 +13,7 @@ import json
 import logging
 import httpx
 from typing import Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -29,6 +29,7 @@ try:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
@@ -184,7 +185,7 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
 
 
 @app.get("/api/gateway")
-async def gateway(trigger_error: bool = Query(default=False)) -> dict[str, Any]:
+async def gateway(request: Request, trigger_error: bool = Query(default=False)) -> dict[str, Any]:
     """API Gateway entrypoint.
 
     Simulates the gateway layer receiving a client request. It generates a trace ID
@@ -207,7 +208,7 @@ async def gateway(trigger_error: bool = Query(default=False)) -> dict[str, Any]:
         time.sleep(0.05)
         # Call mock backend helper directly
         try:
-            backend_response = await backend(trace_id, trigger_error)
+            backend_response = await backend(request, trace_id, trigger_error)
             _log_structured("Gateway received success response from backend", "INFO", trace_id, "span-gateway-111")
             _generate_mock_trace(trace_id, trigger_error=False)
             return {"status": "success", "trace_id": trace_id, "data": backend_response}
@@ -220,28 +221,29 @@ async def gateway(trigger_error: bool = Query(default=False)) -> dict[str, Any]:
     if tracer:
         with tracer.start_as_current_span("/api/gateway") as span:
             span.set_attribute("http.method", "GET")
+            otel_trace_id = f"{span.get_span_context().trace_id:032x}"
             # Call downstream backend service using httpx (injecting trace context headers)
             # In a real deployed setup, the backend URL is fetched from env
             backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
             async with httpx.AsyncClient() as client:
                 headers = {}
                 # Inject tracing headers
-                headers["traceparent"] = f"00-{trace_id}-{span.get_span_context().span_id:016x}-01"
+                headers["traceparent"] = f"00-{otel_trace_id}-{span.get_span_context().span_id:016x}-01"
                 try:
-                    response = await client.get(f"{backend_url}/api/backend?trigger_error={str(trigger_error).lower()}", headers=headers)
+                    response = await client.get(f"{backend_url}/api/backend?trace_id={otel_trace_id}&trigger_error={str(trigger_error).lower()}", headers=headers)
                     if response.status_code != 200:
                         raise HTTPException(status_code=500, detail="Backend failed")
-                    return {"status": "success", "trace_id": trace_id, "data": response.json()}
+                    return {"status": "success", "trace_id": otel_trace_id, "data": response.json()}
                 except Exception as e:
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
+                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id})
 
     return {"status": "success", "trace_id": trace_id, "info": "OTEL disabled"}
 
 
 @app.get("/api/backend")
-async def backend(trace_id: str = Query(...), trigger_error: bool = Query(default=False)) -> dict[str, Any]:
+async def backend(request: Request, trace_id: str = Query(...), trigger_error: bool = Query(default=False)) -> dict[str, Any]:
     """Backend service endpoint.
 
     Delegates the processing logic to the database layer.
@@ -258,16 +260,47 @@ async def backend(trace_id: str = Query(...), trigger_error: bool = Query(defaul
     if IS_MOCK:
         time.sleep(0.02)
         # Delegate to database helper directly
-        db_response = await database(trace_id, trigger_error)
+        db_response = await database(request, trace_id, trigger_error)
         _log_structured("Backend service database query completed", "INFO", trace_id, "span-backend-222")
         return {"service": "backend", "db": db_response}
 
-    # Real OTEL child trace span context would handle this automatically via headers
-    return {"service": "backend", "status": "completed"}
+    # Real OTEL tracing (if active)
+    if tracer:
+        parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
+        with tracer.start_as_current_span("/api/backend", context=parent_context) as span:
+            backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
+            async with httpx.AsyncClient() as client:
+                headers = {}
+                headers["traceparent"] = f"00-{trace_id}-{span.get_span_context().span_id:016x}-01"
+                try:
+                    response = await client.get(
+                        f"{backend_url}/api/database?trace_id={trace_id}&trigger_error={str(trigger_error).lower()}",
+                        headers=headers
+                    )
+                    if response.status_code != 200:
+                        raise HTTPException(status_code=500, detail="Database failed")
+                    return {"service": "backend", "db": response.json()}
+                except Exception as e:
+                    span.record_exception(e)
+                    span.set_status(trace.StatusCode.ERROR, str(e))
+                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
+
+    # Real mode without tracer active
+    backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(
+                f"{backend_url}/api/database?trace_id={trace_id}&trigger_error={str(trigger_error).lower()}"
+            )
+            if response.status_code != 200:
+                raise HTTPException(status_code=500, detail="Database failed")
+            return {"service": "backend", "db": response.json()}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
 
 
 @app.get("/api/database")
-async def database(trace_id: str = Query(...), trigger_error: bool = Query(default=False)) -> dict[str, Any]:
+async def database(request: Request, trace_id: str = Query(...), trigger_error: bool = Query(default=False)) -> dict[str, Any]:
     """Database simulator service.
 
     Simulates the database query layer.
@@ -281,18 +314,30 @@ async def database(trace_id: str = Query(...), trigger_error: bool = Query(defau
     """
     _log_structured("Database connecting to instance: db-primary.gcp.internal:5432", "INFO", trace_id, "span-database-333")
 
-    if trigger_error:
-        # Simulate connection timeout latency
+    if tracer and not IS_MOCK:
+        parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
+        with tracer.start_as_current_span("/api/database", context=parent_context) as span:
+            if trigger_error:
+                time.sleep(10.0)
+                err_msg = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
+                _log_structured(err_msg, "CRITICAL", trace_id, "span-database-333")
+                span.record_exception(Exception(err_msg))
+                span.set_status(trace.StatusCode.ERROR, err_msg)
+                raise HTTPException(status_code=500, detail=err_msg)
+            return {"service": "database", "query": "SELECT * FROM users LIMIT 1", "rows": 1}
+    else:
+        if trigger_error:
+            # Simulate connection timeout latency
+            if IS_MOCK:
+                time.sleep(0.1)  # Keep local execution snappy but record 10s duration in trace logs
+            else:
+                time.sleep(10.0)
+
+            err_msg = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
+            _log_structured(err_msg, "CRITICAL", trace_id, "span-database-333")
+            raise HTTPException(status_code=500, detail=err_msg)
+
+        # Success scenario
         if IS_MOCK:
-            time.sleep(0.1)  # Keep local execution snappy but record 10s duration in trace logs
-        else:
-            time.sleep(10.0)
-
-        err_msg = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
-        _log_structured(err_msg, "CRITICAL", trace_id, "span-database-333")
-        raise HTTPException(status_code=500, detail=err_msg)
-
-    # Success scenario
-    if IS_MOCK:
-        time.sleep(0.01)
-    return {"service": "database", "query": "SELECT * FROM users LIMIT 1", "rows": 1}
+            time.sleep(0.01)
+        return {"service": "database", "query": "SELECT * FROM users LIMIT 1", "rows": 1}

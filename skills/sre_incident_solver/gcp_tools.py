@@ -8,6 +8,7 @@ or projects are not configured.
 import os
 import json
 import logging
+import datetime
 from typing import Any
 from .registry import register_tool
 
@@ -16,9 +17,9 @@ logger = logging.getLogger("sre_tools")
 
 # Fail-safe imports of Google Cloud client libraries
 try:
-    from google.cloud import trace_v2
+    from google.cloud import trace_v1
 except ImportError:
-    trace_v2 = None
+    trace_v1 = None
 
 try:
     from google.cloud import logging as cloud_logging
@@ -27,7 +28,7 @@ except ImportError:
 
 # Determine if we should run in mock/simulator mode
 # Default to mock unless MOCK_GCP is explicitly set to false and client libraries exist
-IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1", "yes") or trace_v2 is None or cloud_logging is None
+IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1", "yes") or trace_v1 is None or cloud_logging is None
 
 # Path to the mock telemetry data
 MOCK_DATA_DIR = os.getenv("MOCK_DATA_DIR", "mock_telemetry_data")
@@ -84,6 +85,107 @@ def _get_project_id(project_id: str | None = None) -> str:
     return "unknown-project"
 
 
+def _parse_timestamp(ts_str: str) -> datetime.datetime | None:
+    """Parses an RFC3339 timestamp string into a datetime object.
+
+    Handles optional fractional seconds.
+
+    Args:
+        ts_str: The timestamp string to parse.
+
+    Returns:
+        A datetime object if parsing was successful, otherwise None.
+    """
+    if not ts_str:
+        return None
+    try:
+        ts_str = ts_str.rstrip('Z')
+        if '.' in ts_str:
+            base, frac = ts_str.split('.')
+            frac = frac[:6]
+            ts_str = f"{base}.{frac}"
+            return datetime.datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f')
+        return datetime.datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
+    except Exception as e:
+        logger.warning(f"Failed to parse timestamp string '{ts_str}': {e}")
+        return None
+
+
+def _calculate_duration_ms(start_time_str: str, end_time_str: str) -> int:
+    """Calculates duration in milliseconds between two timestamp strings.
+
+    Args:
+        start_time_str: Start time timestamp string.
+        end_time_str: End time timestamp string.
+
+    Returns:
+        Duration in milliseconds, or 0 if parsing or calculation fails.
+    """
+    st = _parse_timestamp(start_time_str)
+    et = _parse_timestamp(end_time_str)
+    if st and et:
+        try:
+            return int((et - st).total_seconds() * 1000)
+        except Exception as e:
+            logger.warning(f"Failed to calculate duration: {e}")
+    return 0
+
+
+def _find_root_span(spans: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """Finds the root span from a list of trace spans.
+
+    The root span is identified as having no parent_span_id or a parent_span_id of "0".
+    If no root span matches, the first span in the list is returned as fallback.
+
+    Args:
+        spans: List of span dictionaries.
+
+    Returns:
+        The root span dictionary, or None if the list is empty.
+    """
+    for span in spans:
+        p_id = span.get("parent_span_id", "0")
+        if p_id == "0" or p_id == "" or p_id is None:
+            return span
+    if spans:
+        return spans[0]
+    return None
+
+
+def _check_span_error(span: dict[str, Any]) -> bool:
+    """Checks if a span contains error indicators in its labels/attributes.
+
+    Args:
+        span: Span dictionary.
+
+    Returns:
+        True if the span has errors, False otherwise.
+    """
+    labels = span.get("labels", {})
+    status_code = labels.get("/http/status_code", "")
+    if status_code.startswith("5"):
+        return True
+    for key in labels:
+        if "error" in key.lower():
+            return True
+    return False
+
+
+def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
+    """Checks if any span in the trace contains an error.
+
+    Args:
+        spans: List of span dictionaries.
+
+    Returns:
+        True if any span has an error, False otherwise.
+    """
+    for span in spans:
+        if _check_span_error(span):
+            return True
+    return False
+
+
 @register_tool
 async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
     """Queries recent traces from GCP Cloud Trace.
@@ -109,16 +211,55 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 
     resolved_project = _get_project_id(project_id)
     logger.info(f"[GCP Observability] Querying real GCP Trace API (Project={resolved_project}, limit={limit})")
-    if trace_v2 is None:
+    if trace_v1 is None:
         logger.error("[GCP Observability] google-cloud-trace library is missing")
         return json.dumps({"error": "google-cloud-trace library is not installed."}, indent=2)
 
     try:
-        client = trace_v2.TraceServiceClient()
-        project_path = f"projects/{resolved_project}"
-        # Returns metadata about tracing connection in lieu of standard list
-        logger.info(f"[GCP Observability] Connected to TraceServiceClient. Project path: {project_path}")
-        return json.dumps({"status": "connected", "project": project_path, "traces": []}, indent=2)
+        client = trace_v1.TraceServiceClient()
+        now = datetime.datetime.now(datetime.timezone.utc)
+        start = now - datetime.timedelta(hours=2)
+        req = trace_v1.ListTracesRequest(
+            project_id=resolved_project,
+            start_time=start.strftime('%Y-%m-%dT%H:%M:%SZ'),
+            view=trace_v1.ListTracesRequest.ViewType.COMPLETE
+        )
+        pager = client.list_traces(request=req)
+        
+        traces_list = []
+        for trace_item in pager:
+            if len(traces_list) >= limit:
+                break
+            trace_dict = trace_v1.Trace.to_dict(trace_item)
+            t_id = trace_dict.get("trace_id", "")
+            spans = trace_dict.get("spans", [])
+            
+            root_span = _find_root_span(spans)
+            start_time_str = ""
+            duration_ms = 0
+            root_name = "unknown"
+            
+            if root_span:
+                root_name = root_span.get("name", "unknown")
+                start_time_str = root_span.get("start_time", "")
+                end_time_str = root_span.get("end_time", "")
+                duration_ms = _calculate_duration_ms(start_time_str, end_time_str)
+                        
+            has_error = _check_trace_error(spans)
+                    
+            traces_list.append({
+                "traceId": t_id,
+                "name": root_name,
+                "startTime": start_time_str,
+                "durationMs": duration_ms,
+                "error": has_error
+            })
+            
+        # Sort traces by startTime descending (newest first)
+        traces_list.sort(key=lambda x: x["startTime"], reverse=True)
+            
+        logger.info(f"[GCP Observability] Successfully queried {len(traces_list)} traces from real GCP Trace API")
+        return json.dumps(traces_list, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query real GCP Trace API: {e}")
         return json.dumps({"error": f"GCP Trace API Error: {str(e)}"}, indent=2)
@@ -158,18 +299,56 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 
     resolved_project = _get_project_id(project_id)
     logger.info(f"[GCP Observability] Querying real GCP Cloud Trace details for Trace ID: {trace_id} (Project={resolved_project})")
-    if trace_v2 is None:
+    if trace_v1 is None:
         logger.error("[GCP Observability] google-cloud-trace library is missing")
         return json.dumps({"error": "google-cloud-trace library is not installed."}, indent=2)
 
     try:
-        client = trace_v2.TraceServiceClient()
-        project_path = f"projects/{resolved_project}"
-        trace_name = f"{project_path}/traces/{trace_id}"
-        logger.info(f"[GCP Observability] Requesting trace details: {trace_name}")
-        trace = client.get_trace(name=trace_name)
-        logger.info(f"[GCP Observability] Successfully retrieved trace details for {trace_id}")
-        return json.dumps(trace, indent=2)
+        client = trace_v1.TraceServiceClient()
+        trace = client.get_trace(project_id=resolved_project, trace_id=trace_id)
+        trace_dict = trace_v1.Trace.to_dict(trace)
+        
+        spans_list = []
+        duration_ms = 0
+        root_name = "unknown"
+        
+        spans = trace_dict.get("spans", [])
+        root_span = _find_root_span(spans)
+            
+        if root_span:
+            root_name = root_span.get("name", "unknown")
+            start_time_str = root_span.get("start_time", "")
+            end_time_str = root_span.get("end_time", "")
+            duration_ms = _calculate_duration_ms(start_time_str, end_time_str)
+                    
+        has_error = _check_trace_error(spans)
+
+        for span in spans:
+            span_error = _check_span_error(span)
+            labels = span.get("labels", {})
+            error_message = labels.get("/error/message") or labels.get("error_message") or labels.get("/error/name")
+            p_id = span.get("parent_span_id", "0")
+            parent_span_id = None if (p_id == "0" or p_id == "" or p_id is None) else p_id
+            
+            spans_list.append({
+                "name": span.get("name", ""),
+                "spanId": span.get("span_id", ""),
+                "parentSpanId": parent_span_id,
+                "startTime": span.get("start_time", ""),
+                "endTime": span.get("end_time", ""),
+                "status": "ERROR" if span_error else "OK",
+                "error_message": error_message
+            })
+            
+        result = {
+            "traceId": trace_id,
+            "root_span": root_name,
+            "durationMs": duration_ms,
+            "error": has_error,
+            "spans": spans_list
+        }
+        logger.info(f"[GCP Observability] Successfully formatted trace details for {trace_id}")
+        return json.dumps(result, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to get trace details for {trace_id}: {e}")
         return json.dumps({"error": f"GCP Trace API Error: {str(e)}"}, indent=2)
@@ -193,18 +372,37 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
     if IS_MOCK:
         logger.info(f"[GCP Observability] Querying mock logs for Trace ID: {trace_id} (limit={limit})")
         logs = _load_mock_file(f"logs_{trace_id}.json")
+        if not logs:
+            # Fallback search in general logs.json
+            logger.info(f"[GCP Observability] Logs file logs_{trace_id}.json not found. Searching fallback logs.json...")
+            all_logs = _load_mock_file("logs.json")
+            if all_logs:
+                logs = [log for log in all_logs if log.get("traceId") == trace_id]
+
         if logs:
             logger.info(f"[GCP Observability] Found {len(logs)} mock logs correlated with trace {trace_id}")
-            return json.dumps(logs[:limit], indent=2)
+            formatted_logs = []
+            for log in logs[:limit]:
+                msg = log.get("message", "")
+                is_json = False
+                try:
+                    if isinstance(msg, dict):
+                        is_json = True
+                    elif isinstance(msg, str) and (msg.startswith("{") or msg.startswith("[")):
+                        msg = json.loads(msg)
+                        is_json = True
+                except Exception:
+                    pass
+                
+                formatted_logs.append({
+                    "timestamp": log.get("timestamp"),
+                    "severity": log.get("severity"),
+                    "text_payload": msg if not is_json else None,
+                    "json_payload": msg if is_json else None,
+                    "resource": "cloud_run_revision"
+                })
+            return json.dumps(formatted_logs, indent=2)
 
-        # Fallback search in general logs.json
-        logger.info(f"[GCP Observability] Logs file logs_{trace_id}.json not found. Searching fallback logs.json...")
-        all_logs = _load_mock_file("logs.json")
-        if all_logs:
-            correlated_logs = [log for log in all_logs if log.get("traceId") == trace_id]
-            if correlated_logs:
-                logger.info(f"[GCP Observability] Found {len(correlated_logs)} correlated logs in fallback logs.json")
-                return json.dumps(correlated_logs[:limit], indent=2)
         logger.warning(f"[GCP Observability] No mock logs found for Trace ID: {trace_id}")
         return json.dumps({"error": f"No logs found correlated with Trace ID {trace_id}."}, indent=2)
 
@@ -222,11 +420,12 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
 
         logs_list = []
         for entry in entries:
+            is_json = isinstance(entry.payload, dict)
             logs_list.append({
                 "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
                 "severity": entry.severity,
-                "text_payload": entry.text_payload,
-                "json_payload": entry.json_payload,
+                "text_payload": entry.payload if not is_json else None,
+                "json_payload": entry.payload if is_json else None,
                 "resource": entry.resource.type if entry.resource else None
             })
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")

@@ -36,10 +36,14 @@ async def run_simulation() -> None:
     from fastapi import HTTPException
     trace_id = None
     try:
+        from fastapi import Request
         from app.main import gateway
+        # Create a dummy Request for the FastAPI endpoint
+        scope = {"type": "http", "headers": []}
+        request = Request(scope)
         # Run gateway request with error=True to trigger database connection error
         # This writes trace details and logs to the local mock directory
-        await gateway(trigger_error=True)
+        await gateway(request, trigger_error=True)
     except HTTPException as e:
         if isinstance(e.detail, dict) and "trace_id" in e.detail:
             trace_id = e.detail["trace_id"]
