@@ -23,7 +23,7 @@ except ImportError:
 
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""
-        def __init__(self, name: str, instruction: str, model: str = "gemini-2.5-flash") -> None:
+        def __init__(self, name: str, instruction: str, model: str = "gemini-3-flash-preview") -> None:
             self.name = name
             self.instruction = instruction
             self.model = model
@@ -48,7 +48,7 @@ trace_analyzer = AdkAgent(
         "Extract its traceId and return ONLY the raw 32-character hex traceId. "
         "Do not include any extra text, code block backticks, or explanation."
     ),
-    model="gemini-2.5-flash"
+    model="gemini-3-flash-preview"
 )
 
 log_correlator = AdkAgent(
@@ -59,7 +59,7 @@ log_correlator = AdkAgent(
         "of the issue (such as connection timeouts, resource exhaustion, or "
         "logic errors), and recommend a mitigation plan."
     ),
-    model="gemini-2.5-flash"
+    model="gemini-3-flash-preview"
 )
 
 
