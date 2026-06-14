@@ -20,7 +20,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     MOCK_GCP=false \
     PORT=8080 \
-    PATH="/workspace/.venv/bin:$PATH"
+    PATH="/workspace/.venv/bin:$PATH" \
+    PYTHONPATH="/workspace/agent/src:$PYTHONPATH"
 
 WORKDIR /workspace
 

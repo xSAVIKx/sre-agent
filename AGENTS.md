@@ -13,8 +13,9 @@ The codebase is split into two main sections:
 2. **SRE Skill (`skills/sre_incident_solver/`)**: A reusable Antigravity Agent Skill containing the
    core diagnostics engine and tools.
 3. **Standalone Agent Service (`agent/`)**: The runnable FastAPI service wrapper.
+    * Reorganized using a standard modern Python structure: source code files reside in `agent/src/agent/` and test cases in `agent/test/`.
     * `google-antigravity` handles OS/GCP access, safety gating (deny-by-default), and HTTP server
-      execution via `agent/config.py` and `agent/main.py`.
+      execution via `agent/src/agent/config.py` and `agent/src/agent/main.py`.
     * `google-adk` coordinates the multi-agent graph (Trace Analyzer + Log Correlator) in the SRE
       skill.
 
@@ -90,6 +91,12 @@ Container setups utilize multi-stage builds to optimize image size and security:
 * **Builder Stage**: Installs `uv` to resolve and build the Python virtual environment (`.venv`) cleanly.
 * **Runner Stage**: Copies only the pre-compiled `.venv` and source code. `uv` is **not** included in the final runtime container.
 * When editing Dockerfiles, preserve this multi-stage separation.
+
+### 3. Running Agent Tests
+Since the agent project follows the `src/` and `test/` package layout, run unit tests locally from the workspace root by executing:
+```bash
+PYTHONPATH=agent/src uv run python -m unittest discover -s agent/test
+```
 
 ---
 
