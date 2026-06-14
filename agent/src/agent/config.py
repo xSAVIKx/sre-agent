@@ -83,7 +83,7 @@ if not HAS_ANTIGRAVITY:
                         self._text = f"Simulation mode: analyzed prompt '{self.prompt}'."
                     return self._text
 
-                def cancel(self) -> None:
+                async def cancel(self) -> None:
                     """Cancels mock response generation."""
                     pass
 
@@ -207,8 +207,8 @@ async def cli_approval_handler(context: Any) -> bool:
     automatically allows the call to prevent hanging.
     """
     import sys
-    tool_name = getattr(context, "tool", "unknown_tool")
-    args = getattr(context, "arguments", {})
+    tool_name = getattr(context, "name", "unknown_tool")
+    args = getattr(context, "args", {})
 
     logger.warning(f"Security Alert: Agent wants to run sensitive tool '{tool_name}' with args {args}")
 

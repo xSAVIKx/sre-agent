@@ -148,7 +148,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                     # Check if client has disconnected (e.g. user clicked Stop or closed window)
                     if await fastapi_request.is_disconnected():
                         logger.info("Client disconnected. Cancelling SRE Agent execution.")
-                        response.cancel()
+                        await response.cancel()
                         break
 
                     cls_name = chunk.__class__.__name__
@@ -162,7 +162,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                         tool_count += 1
                         if tool_count > 6:
                             logger.warning(f"Loop prevention triggered: SRE Agent has executed {tool_count} tools in a single turn. Stopping process.")
-                            response.cancel()
+                            await response.cancel()
                             yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Loop prevention triggered: SRE Agent has executed too many tools in a single turn. Stopping process to prevent infinite loop.\n'})}\n\n"
                             yield f"data: {json.dumps({'type': 'error', 'detail': 'Tool execution limit exceeded to prevent infinite loops.'})}\n\n"
                             break
@@ -190,7 +190,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
         except asyncio.CancelledError:
             logger.info("Connection cancelled by client. Terminating SRE Agent execution.")
             if response is not None:
-                response.cancel()
+                await response.cancel()
             raise
         except Exception as e:
             logger.exception("Failed to execute SRE agent chat stream.")

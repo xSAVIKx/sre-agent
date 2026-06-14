@@ -106,15 +106,15 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Uploads updated session files to Firestore and tears down local resources."""
-        # 1. Wait for local strategy exit to flush all writes to disk
-        await self._local_strategy.__aexit__(exc_type, exc_val, exc_tb)
-
-        # 2. Retrieve conversation_id from the established connection
+        # 1. Retrieve conversation_id from the established connection while it's active
         try:
             conn = self._local_strategy.connect()
             active_conversation_id = self.conversation_id or conn.conversation_id
         except Exception:
             active_conversation_id = self.conversation_id
+
+        # 2. Wait for local strategy exit to flush all writes to disk
+        await self._local_strategy.__aexit__(exc_type, exc_val, exc_tb)
 
         if not active_conversation_id:
             logger.warning("No conversation ID resolved. Skipping session persistence upload.")
