@@ -69,6 +69,10 @@ else
     echo -e "${GREEN}✓ Service account already exists: $AGENT_SA_EMAIL${NC}"
 fi
 
+# Wait for service account propagation to avoid IAM consistency failures
+echo "Waiting 10 seconds for service account creation to propagate..."
+sleep 10
+
 # 4. Grant Least-Privilege IAM Roles
 echo -e "\n${BLUE}[3/5] Assigning IAM roles (least-privilege)...${NC}"
 
@@ -94,7 +98,7 @@ echo -e "${GREEN}✓ Granted roles/cloudtrace.user & roles/logging.viewer to SRE
 
 # 5. Build and Deploy Target Application
 echo -e "\n${BLUE}[4/5] Building and deploying SRE Target FastAPI App...${NC}"
-gcloud builds submit --tag "gcr.io/${GCP_PROJECT}/sre-target-app" -f app/Dockerfile .
+gcloud builds submit --config=app/cloudbuild.yaml .
 gcloud run deploy sre-target-app \
     --image "gcr.io/${GCP_PROJECT}/sre-target-app" \
     --port 8080 \
@@ -107,7 +111,7 @@ echo -e "${GREEN}✓ Deployed target application to: $TARGET_APP_URL${NC}"
 
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
-gcloud builds submit --tag "gcr.io/${GCP_PROJECT}/sre-agent" -f agent/Dockerfile .
+gcloud builds submit --config=agent/cloudbuild.yaml .
 gcloud run deploy sre-agent \
     --image "gcr.io/${GCP_PROJECT}/sre-agent" \
     --port 8080 \
