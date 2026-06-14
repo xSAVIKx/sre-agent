@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir uv
 
 # Copy dependency configuration
-COPY pyproject.toml .
+COPY agent/pyproject.toml ./pyproject.toml
 
 # Install dependencies globally inside the container using uv
 RUN uv pip install --system --no-cache -r pyproject.toml

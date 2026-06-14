@@ -1,0 +1,15 @@
+[project]
+name = "sre-agent"
+version = "0.1.0"
+description = "Antigravity Cloud SRE Agent Service"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-antigravity>=0.0.4",
+    "google-adk>=1.28.1",
+    "google-cloud-trace>=1.11.0",
+    "google-cloud-logging>=3.8.0",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "httpx>=0.27.0",
+]
