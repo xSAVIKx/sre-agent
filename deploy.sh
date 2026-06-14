@@ -108,7 +108,7 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --role="roles/logging.viewer" >/dev/null
 echo -e "${GREEN}✓ Granted roles/cloudtrace.user & roles/logging.viewer to SRE Agent${NC}"
 
-# SRE Build Roles (Least Privilege Cloud Build logging and storage access)
+# SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
 echo "Assigning roles to SRE Build service account..."
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --member="serviceAccount:${BUILD_SA_EMAIL}" \
@@ -116,7 +116,20 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --member="serviceAccount:${BUILD_SA_EMAIL}" \
     --role="roles/storage.admin" >/dev/null
-echo -e "${GREEN}✓ Granted roles/logging.logWriter & roles/storage.admin to SRE Build SA${NC}"
+gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+    --member="serviceAccount:${BUILD_SA_EMAIL}" \
+    --role="roles/run.admin" >/dev/null
+echo -e "${GREEN}✓ Granted roles/logging.logWriter, roles/storage.admin & roles/run.admin to SRE Build SA${NC}"
+
+# Allow SRE Build SA to act as the SRE application service accounts
+echo "Allowing SRE Build SA to act as application and agent service accounts..."
+gcloud iam service-accounts add-iam-policy-binding "$APP_SA_EMAIL" \
+    --member="serviceAccount:${BUILD_SA_EMAIL}" \
+    --role="roles/iam.serviceAccountUser" >/dev/null || true
+gcloud iam service-accounts add-iam-policy-binding "$AGENT_SA_EMAIL" \
+    --member="serviceAccount:${BUILD_SA_EMAIL}" \
+    --role="roles/iam.serviceAccountUser" >/dev/null || true
+echo -e "${GREEN}✓ Allowed SRE Build SA to act as target app and agent service accounts${NC}"
 
 # Grant Service Account User to active gcloud account to run the build as the build SA
 ACTIVE_ACCOUNT=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || true)
@@ -134,29 +147,18 @@ fi
 
 # 5. Build and Deploy Target Application (SRE Chaos Monkey)
 echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
-gcloud builds submit --config=app/cloudbuild.yaml --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" .
-gcloud run deploy sre-chaos-monkey \
-    --image "gcr.io/${GCP_PROJECT}/sre-chaos-monkey" \
-    --port 8080 \
-    --service-account "$APP_SA_EMAIL" \
-    --region "$GCP_REGION" \
-    --allow-unauthenticated \
-    --labels="demo=sre-agent-codelab"
+gcloud builds submit --config=app/cloudbuild.yaml \
+    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
+    --substitutions=_GCP_REGION="$GCP_REGION" .
 
 TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" --format="value(status.url)")
 echo -e "${GREEN}✓ Deployed SRE Chaos Monkey to: $TARGET_APP_URL${NC}"
 
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
-gcloud builds submit --config=agent/cloudbuild.yaml --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" .
-gcloud run deploy sre-agent \
-    --image "gcr.io/${GCP_PROJECT}/sre-agent" \
-    --port 8080 \
-    --service-account "$AGENT_SA_EMAIL" \
-    --region "$GCP_REGION" \
-    --set-env-vars "MOCK_GCP=false,GCP_PROJECT=${GCP_PROJECT},BACKEND_SERVICE_URL=${TARGET_APP_URL}" \
-    --allow-unauthenticated \
-    --labels="demo=sre-agent-codelab"
+gcloud builds submit --config=agent/cloudbuild.yaml \
+    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
+    --substitutions=_GCP_REGION="$GCP_REGION",_TARGET_APP_URL="$TARGET_APP_URL" .
 
 AGENT_URL=$(gcloud run services describe sre-agent --region "$GCP_REGION" --format="value(status.url)")
 echo -e "${GREEN}✓ Deployed SRE Agent to: $AGENT_URL${NC}"

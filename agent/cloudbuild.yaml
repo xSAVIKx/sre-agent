@@ -1,6 +1,23 @@
 steps:
+# 1. Build the docker image
 - name: 'gcr.io/cloud-builders/docker'
   args: ['build', '-t', 'gcr.io/$PROJECT_ID/sre-agent', '-f', 'agent/Dockerfile', '.']
+
+# 2. Deploy to Cloud Run
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+  - 'run'
+  - 'deploy'
+  - 'sre-agent'
+  - '--image=gcr.io/$PROJECT_ID/sre-agent'
+  - '--region=$_GCP_REGION'
+  - '--service-account=sre-agent-sa@$PROJECT_ID.iam.gserviceaccount.com'
+  - '--port=8080'
+  - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID,BACKEND_SERVICE_URL=$_TARGET_APP_URL'
+  - '--allow-unauthenticated'
+  - '--labels=demo=sre-agent-codelab'
+
 images:
 - 'gcr.io/$PROJECT_ID/sre-agent'
 
