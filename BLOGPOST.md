@@ -77,7 +77,7 @@ To implement SRE security best practices,
 our [deploy.sh](file:///d:/AntigravityProjects/TestAntigravity/deploy.sh) script deploys the
 services to **Google Cloud Run** using separate, least-privilege service accounts:
 
-* **Target Application Identity** (`sre-target-app-sa`): Runs the FastAPI app. It is restricted to *
+* **Target Application Identity** (`sre-chaos-monkey-sa`): Runs the FastAPI app. It is restricted to **
   *write-only** telemetry roles:
     * `roles/cloudtrace.agent` (Send traces to Cloud Trace)
     * `roles/logging.logWriter` (Write logs to Cloud Logging)

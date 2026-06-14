@@ -48,22 +48,22 @@ else
     echo "• Service 'sre-agent' does not exist."
 fi
 
-if gcloud run services describe sre-target-app --region "$GCP_REGION" &>/dev/null; then
-    gcloud run services delete sre-target-app --region "$GCP_REGION" --quiet
-    echo -e "${GREEN}✓ Deleted Cloud Run service: sre-target-app${NC}"
+if gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" &>/dev/null; then
+    gcloud run services delete sre-chaos-monkey --region "$GCP_REGION" --quiet
+    echo -e "${GREEN}✓ Deleted Cloud Run service: sre-chaos-monkey${NC}"
 else
-    echo "• Service 'sre-target-app' does not exist."
+    echo "• Service 'sre-chaos-monkey' does not exist."
 fi
 
 # 3. Remove IAM Role Bindings & Service Accounts
 echo -e "\n${BLUE}[2/3] Cleaning up IAM policies and Service Accounts...${NC}"
 
-APP_SA_EMAIL="sre-target-app-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
+APP_SA_EMAIL="sre-chaos-monkey-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
 AGENT_SA_EMAIL="sre-agent-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
 
 # Target App SA Cleanup
 if gcloud iam service-accounts describe "$APP_SA_EMAIL" &>/dev/null; then
-    echo "Removing IAM policy bindings for target app service account..."
+    echo "Removing IAM policy bindings for SRE Chaos Monkey service account..."
     gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
         --role="roles/cloudtrace.agent" &>/dev/null || true

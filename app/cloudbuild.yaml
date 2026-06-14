@@ -1,5 +1,5 @@
 steps:
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/sre-target-app', '-f', 'app/Dockerfile', '.']
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/sre-chaos-monkey', '-f', 'app/Dockerfile', '.']
 images:
-- 'gcr.io/$PROJECT_ID/sre-target-app'
+- 'gcr.io/$PROJECT_ID/sre-chaos-monkey'

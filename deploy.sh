@@ -46,12 +46,12 @@ gcloud services enable \
 echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
 
 # Target App Service Account
-APP_SA_NAME="sre-target-app-sa"
+APP_SA_NAME="sre-chaos-monkey-sa"
 APP_SA_EMAIL="${APP_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
 if ! gcloud iam service-accounts describe "$APP_SA_EMAIL" &>/dev/null; then
     gcloud iam service-accounts create "$APP_SA_NAME" \
-        --description="Service account for the SRE Target FastAPI Application" \
-        --display-name="SRE Target App Service Account"
+        --description="Service account for SRE Chaos Monkey [demo=sre-agent-codelab]" \
+        --display-name="SRE Chaos Monkey Service Account"
     echo -e "${GREEN}✓ Created service account: $APP_SA_EMAIL${NC}"
 else
     echo -e "${GREEN}✓ Service account already exists: $APP_SA_EMAIL${NC}"
@@ -62,7 +62,7 @@ AGENT_SA_NAME="sre-agent-sa"
 AGENT_SA_EMAIL="${AGENT_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
 if ! gcloud iam service-accounts describe "$AGENT_SA_EMAIL" &>/dev/null; then
     gcloud iam service-accounts create "$AGENT_SA_NAME" \
-        --description="Service account for SRE Agent (observability reader)" \
+        --description="Service account for SRE Agent (observability reader) [demo=sre-agent-codelab]" \
         --display-name="SRE Agent Service Account"
     echo -e "${GREEN}✓ Created service account: $AGENT_SA_EMAIL${NC}"
 else
@@ -96,18 +96,19 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --role="roles/logging.viewer" >/dev/null
 echo -e "${GREEN}✓ Granted roles/cloudtrace.user & roles/logging.viewer to SRE Agent${NC}"
 
-# 5. Build and Deploy Target Application
-echo -e "\n${BLUE}[4/5] Building and deploying SRE Target FastAPI App...${NC}"
+# 5. Build and Deploy Target Application (SRE Chaos Monkey)
+echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
 gcloud builds submit --config=app/cloudbuild.yaml .
-gcloud run deploy sre-target-app \
-    --image "gcr.io/${GCP_PROJECT}/sre-target-app" \
+gcloud run deploy sre-chaos-monkey \
+    --image "gcr.io/${GCP_PROJECT}/sre-chaos-monkey" \
     --port 8080 \
     --service-account "$APP_SA_EMAIL" \
     --region "$GCP_REGION" \
-    --allow-unauthenticated
+    --allow-unauthenticated \
+    --labels="demo=sre-agent-codelab"
 
-TARGET_APP_URL=$(gcloud run services describe sre-target-app --region "$GCP_REGION" --format="value(status.url)")
-echo -e "${GREEN}✓ Deployed target application to: $TARGET_APP_URL${NC}"
+TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" --format="value(status.url)")
+echo -e "${GREEN}✓ Deployed SRE Chaos Monkey to: $TARGET_APP_URL${NC}"
 
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
@@ -118,7 +119,8 @@ gcloud run deploy sre-agent \
     --service-account "$AGENT_SA_EMAIL" \
     --region "$GCP_REGION" \
     --set-env-vars "MOCK_GCP=false,GCP_PROJECT=${GCP_PROJECT},BACKEND_SERVICE_URL=${TARGET_APP_URL}" \
-    --allow-unauthenticated
+    --allow-unauthenticated \
+    --labels="demo=sre-agent-codelab"
 
 AGENT_URL=$(gcloud run services describe sre-agent --region "$GCP_REGION" --format="value(status.url)")
 echo -e "${GREEN}✓ Deployed SRE Agent to: $AGENT_URL${NC}"

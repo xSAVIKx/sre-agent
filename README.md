@@ -106,7 +106,7 @@ This script automates:
 
 * Enabling Cloud Run, Cloud Build, Trace, and Logging APIs.
 * Provisioning separate service accounts:
-    * `sre-target-app-sa`: Granted **write-only** trace/log roles (`roles/cloudtrace.agent`,
+    * `sre-chaos-monkey-sa`: Granted **write-only** trace/log roles (`roles/cloudtrace.agent`,
       `roles/logging.logWriter`).
     * `sre-agent-sa`: Granted **read-only** trace/log roles (`roles/cloudtrace.user`,
       `roles/logging.viewer`).

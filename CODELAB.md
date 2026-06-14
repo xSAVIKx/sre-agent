@@ -248,7 +248,7 @@ Run `./bootstrap.sh` to configure variables:
 
 Run `./deploy.sh`. This script:
 
-1. Creates `sre-target-app-sa` (write-only telemetry) and `sre-agent-sa` (read-only telemetry).
+1. Creates `sre-chaos-monkey-sa` (write-only telemetry) and `sre-agent-sa` (read-only telemetry).
 2. Assigns IAM roles:
     * App: `roles/cloudtrace.agent`, `roles/logging.logWriter`.
     * Agent: `roles/cloudtrace.user`, `roles/logging.viewer`.
@@ -259,7 +259,7 @@ Run `./deploy.sh`. This script:
 Trigger an incident in the cloud:
 
 ```bash
-curl "https://sre-target-app-<hash>.run.app/api/gateway?trigger_error=true"
+curl "https://sre-chaos-monkey-<hash>.run.app/api/gateway?trigger_error=true"
 ```
 
 Call the SRE agent API endpoint `/diagnose`:
