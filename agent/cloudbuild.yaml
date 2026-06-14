@@ -1,25 +1,44 @@
 steps:
 # 1. Build the docker image
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/sre-repo/sre-agent', '-f', 'agent/Dockerfile', '.']
+  args:
+  - 'build'
+  - '-t'
+  - '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+  - '-f'
+  - 'agent/Dockerfile'
+  - '.'
 
-# 2. Deploy to Cloud Run
+# 2. Push the docker image (to ensure it is available for Cloud Run deploy step)
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'push'
+  - '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+
+# 3. Deploy to Cloud Run
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
   entrypoint: 'gcloud'
   args:
   - 'run'
   - 'deploy'
-  - 'sre-agent'
-  - '--image=$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/sre-repo/sre-agent'
+  - '$_SERVICE_NAME'
+  - '--image=$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
   - '--region=$_GCP_REGION'
-  - '--service-account=sre-agent-sa@$PROJECT_ID.iam.gserviceaccount.com'
+  - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
   - '--port=8080'
   - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID,BACKEND_SERVICE_URL=$_TARGET_APP_URL'
   - '--allow-unauthenticated'
   - '--labels=demo=sre-agent-codelab'
 
 images:
-- '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/sre-repo/sre-agent'
+- '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/$_SERVICE_NAME'
+
+substitutions:
+  _SERVICE_NAME: 'sre-agent'
+  _SA_NAME: 'sre-agent-sa'
+  _REPO_NAME: 'sre-repo'
+  _GCP_REGION: 'us-central1'
+  _TARGET_APP_URL: ''
 
 options:
   logging: CLOUD_LOGGING_ONLY
