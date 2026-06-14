@@ -5,6 +5,18 @@
 
 set -euo pipefail
 
+SKIP_INFRA=false
+
+# Parse flags
+for arg in "$@"; do
+    case $arg in
+        --skip-infra|-s)
+        SKIP_INFRA=true
+        shift
+        ;;
+    esac
+done
+
 # Add default Windows Google Cloud SDK path to PATH if present (Git Bash or WSL)
 if [ -d "/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin" ]; then
     export PATH="/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin:$PATH"
@@ -36,153 +48,162 @@ export $(grep -v '^#' .env | xargs)
 echo "Configuration loaded:"
 echo "GCP Project: $GCP_PROJECT"
 echo "GCP Region:  $GCP_REGION"
+if [ "$SKIP_INFRA" = "true" ]; then
+    echo "Mode:        Redeploy Only (Skipping Infra Setup)"
+else
+    echo "Mode:        Full Infrastructure Setup"
+fi
 echo ""
 
 # Set active project
 gcloud config set project "$GCP_PROJECT"
 
-# 2. Enable Google Cloud APIs
-echo -e "${BLUE}[1/5] Enabling GCP APIs...${NC}"
-gcloud services enable \
-    run.googleapis.com \
-    cloudbuild.googleapis.com \
-    cloudtrace.googleapis.com \
-    logging.googleapis.com \
-    artifactregistry.googleapis.com \
-    firestore.googleapis.com
-
-# 3. Create Service Accounts
-echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
-
-# Target App Service Account
+# Define service account names and emails (always needed for builds)
 APP_SA_NAME="sre-chaos-monkey-sa"
 APP_SA_EMAIL="${APP_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
-if ! gcloud iam service-accounts describe "$APP_SA_EMAIL" &>/dev/null; then
-    gcloud iam service-accounts create "$APP_SA_NAME" \
-        --description="Service account for SRE Chaos Monkey [demo=sre-agent-codelab]" \
-        --display-name="SRE Chaos Monkey Service Account"
-    echo -e "${GREEN}✓ Created service account: $APP_SA_EMAIL${NC}"
-else
-    echo -e "${GREEN}✓ Service account already exists: $APP_SA_EMAIL${NC}"
-fi
-
-# SRE Agent Service Account
 AGENT_SA_NAME="sre-agent-sa"
 AGENT_SA_EMAIL="${AGENT_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
-if ! gcloud iam service-accounts describe "$AGENT_SA_EMAIL" &>/dev/null; then
-    gcloud iam service-accounts create "$AGENT_SA_NAME" \
-        --description="Service account for SRE Agent (observability reader) [demo=sre-agent-codelab]" \
-        --display-name="SRE Agent Service Account"
-    echo -e "${GREEN}✓ Created service account: $AGENT_SA_EMAIL${NC}"
-else
-    echo -e "${GREEN}✓ Service account already exists: $AGENT_SA_EMAIL${NC}"
-fi
-
-# SRE Build Service Account (GCP Best Practice for Cloud Build)
 BUILD_SA_NAME="sre-build-sa"
 BUILD_SA_EMAIL="${BUILD_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
-if ! gcloud iam service-accounts describe "$BUILD_SA_EMAIL" &>/dev/null; then
-    gcloud iam service-accounts create "$BUILD_SA_NAME" \
-        --description="Service account for Cloud Build [demo=sre-agent-codelab]" \
-        --display-name="SRE Build Service Account"
-    echo -e "${GREEN}✓ Created service account: $BUILD_SA_EMAIL${NC}"
-else
-    echo -e "${GREEN}✓ Service account already exists: $BUILD_SA_EMAIL${NC}"
-fi
 
-# Wait for service account propagation to avoid IAM consistency failures
-echo "Waiting 10 seconds for service account creation to propagate..."
-sleep 10
+if [ "$SKIP_INFRA" = "false" ]; then
+    # 2. Enable Google Cloud APIs
+    echo -e "${BLUE}[1/5] Enabling GCP APIs...${NC}"
+    gcloud services enable \
+        run.googleapis.com \
+        cloudbuild.googleapis.com \
+        cloudtrace.googleapis.com \
+        logging.googleapis.com \
+        artifactregistry.googleapis.com \
+        firestore.googleapis.com
 
-# 4. Grant Least-Privilege IAM Roles
-echo -e "\n${BLUE}[3/5] Assigning IAM roles (least-privilege)...${NC}"
+    # 3. Create Service Accounts
+    echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
 
-# Target App Roles (Write-only telemetry)
-echo "Assigning roles to target application service account..."
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${APP_SA_EMAIL}" \
-    --role="roles/cloudtrace.agent" >/dev/null
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${APP_SA_EMAIL}" \
-    --role="roles/logging.logWriter" >/dev/null
-echo -e "${GREEN}✓ Granted roles/cloudtrace.agent & roles/logging.logWriter to target app${NC}"
-
-# SRE Agent Roles (Read-only telemetry & Firestore)
-echo "Assigning roles to SRE agent service account..."
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${AGENT_SA_EMAIL}" \
-    --role="roles/cloudtrace.user" >/dev/null
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${AGENT_SA_EMAIL}" \
-    --role="roles/logging.viewer" >/dev/null
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${AGENT_SA_EMAIL}" \
-    --role="roles/datastore.user" >/dev/null
-echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer & roles/datastore.user to SRE Agent${NC}"
-
-# SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
-echo "Assigning roles to SRE Build service account..."
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${BUILD_SA_EMAIL}" \
-    --role="roles/logging.logWriter" >/dev/null
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${BUILD_SA_EMAIL}" \
-    --role="roles/storage.admin" >/dev/null
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${BUILD_SA_EMAIL}" \
-    --role="roles/run.admin" >/dev/null
-gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
-    --member="serviceAccount:${BUILD_SA_EMAIL}" \
-    --role="roles/artifactregistry.writer" >/dev/null
-echo -e "${GREEN}✓ Granted logging, storage, run admin & artifactregistry.writer roles to SRE Build SA${NC}"
-
-# Allow SRE Build SA to act as the SRE application service accounts
-echo "Allowing SRE Build SA to act as application and agent service accounts..."
-gcloud iam service-accounts add-iam-policy-binding "$APP_SA_EMAIL" \
-    --member="serviceAccount:${BUILD_SA_EMAIL}" \
-    --role="roles/iam.serviceAccountUser" >/dev/null || true
-gcloud iam service-accounts add-iam-policy-binding "$AGENT_SA_EMAIL" \
-    --member="serviceAccount:${BUILD_SA_EMAIL}" \
-    --role="roles/iam.serviceAccountUser" >/dev/null || true
-echo -e "${GREEN}✓ Allowed SRE Build SA to act as target app and agent service accounts${NC}"
-
-# Grant Service Account User to active gcloud account to run the build as the build SA
-ACTIVE_ACCOUNT=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || true)
-if [ -n "$ACTIVE_ACCOUNT" ]; then
-    if [[ "$ACTIVE_ACCOUNT" == *"gserviceaccount.com"* ]]; then
-        MEMBER="serviceAccount:${ACTIVE_ACCOUNT}"
+    # Target App Service Account
+    if ! gcloud iam service-accounts describe "$APP_SA_EMAIL" &>/dev/null; then
+        gcloud iam service-accounts create "$APP_SA_NAME" \
+            --description="Service account for SRE Chaos Monkey [demo=sre-agent-codelab]" \
+            --display-name="SRE Chaos Monkey Service Account"
+        echo -e "${GREEN}✓ Created service account: $APP_SA_EMAIL${NC}"
     else
-        MEMBER="user:${ACTIVE_ACCOUNT}"
+        echo -e "${GREEN}✓ Service account already exists: $APP_SA_EMAIL${NC}"
     fi
-    echo "Granting roles/iam.serviceAccountUser to active deployer account ($ACTIVE_ACCOUNT)..."
-    gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA_EMAIL" \
-        --member="$MEMBER" \
+
+    # SRE Agent Service Account
+    if ! gcloud iam service-accounts describe "$AGENT_SA_EMAIL" &>/dev/null; then
+        gcloud iam service-accounts create "$AGENT_SA_NAME" \
+            --description="Service account for SRE Agent (observability reader) [demo=sre-agent-codelab]" \
+            --display-name="SRE Agent Service Account"
+        echo -e "${GREEN}✓ Created service account: $AGENT_SA_EMAIL${NC}"
+    else
+        echo -e "${GREEN}✓ Service account already exists: $AGENT_SA_EMAIL${NC}"
+    fi
+
+    # SRE Build Service Account (GCP Best Practice for Cloud Build)
+    if ! gcloud iam service-accounts describe "$BUILD_SA_EMAIL" &>/dev/null; then
+        gcloud iam service-accounts create "$BUILD_SA_NAME" \
+            --description="Service account for Cloud Build [demo=sre-agent-codelab]" \
+            --display-name="SRE Build Service Account"
+        echo -e "${GREEN}✓ Created service account: $BUILD_SA_EMAIL${NC}"
+    else
+        echo -e "${GREEN}✓ Service account already exists: $BUILD_SA_EMAIL${NC}"
+    fi
+
+    # Wait for service account propagation to avoid IAM consistency failures
+    echo "Waiting 10 seconds for service account creation to propagate..."
+    sleep 10
+
+    # 4. Grant Least-Privilege IAM Roles
+    echo -e "\n${BLUE}[3/5] Assigning IAM roles (least-privilege)...${NC}"
+
+    # Target App Roles (Write-only telemetry)
+    echo "Assigning roles to target application service account..."
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${APP_SA_EMAIL}" \
+        --role="roles/cloudtrace.agent" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${APP_SA_EMAIL}" \
+        --role="roles/logging.logWriter" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/cloudtrace.agent & roles/logging.logWriter to target app${NC}"
+
+    # SRE Agent Roles (Read-only telemetry & Firestore)
+    echo "Assigning roles to SRE agent service account..."
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/cloudtrace.user" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/logging.viewer" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/datastore.user" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer & roles/datastore.user to SRE Agent${NC}"
+
+    # SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
+    echo "Assigning roles to SRE Build service account..."
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/logging.logWriter" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/storage.admin" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/run.admin" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/artifactregistry.writer" >/dev/null
+    echo -e "${GREEN}✓ Granted logging, storage, run admin & artifactregistry.writer roles to SRE Build SA${NC}"
+
+    # Allow SRE Build SA to act as the SRE application service accounts
+    echo "Allowing SRE Build SA to act as application and agent service accounts..."
+    gcloud iam service-accounts add-iam-policy-binding "$APP_SA_EMAIL" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
         --role="roles/iam.serviceAccountUser" >/dev/null || true
-fi
+    gcloud iam service-accounts add-iam-policy-binding "$AGENT_SA_EMAIL" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/iam.serviceAccountUser" >/dev/null || true
+    echo -e "${GREEN}✓ Allowed SRE Build SA to act as target app and agent service accounts${NC}"
 
-# Create Artifact Registry repository for regional images if it doesn't exist
-echo "Checking SRE Artifact Registry repository in $GCP_REGION..."
-REPO_NAME="sre-repo"
-if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$GCP_REGION" &>/dev/null; then
-    gcloud artifacts repositories create "$REPO_NAME" \
-        --repository-format=docker \
-        --location="$GCP_REGION" \
-        --description="Docker repository for SRE Agent Codelab [demo=sre-agent-codelab]"
-    echo -e "${GREEN}✓ Created Artifact Registry repository: $REPO_NAME in $GCP_REGION${NC}"
-else
-    echo -e "${GREEN}✓ Artifact Registry repository already exists: $REPO_NAME in $GCP_REGION${NC}"
-fi
+    # Grant Service Account User to active gcloud account to run the build as the build SA
+    ACTIVE_ACCOUNT=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || true)
+    if [ -n "$ACTIVE_ACCOUNT" ]; then
+        if [[ "$ACTIVE_ACCOUNT" == *"gserviceaccount.com"* ]]; then
+            MEMBER="serviceAccount:${ACTIVE_ACCOUNT}"
+        else
+            MEMBER="user:${ACTIVE_ACCOUNT}"
+        fi
+        echo "Granting roles/iam.serviceAccountUser to active deployer account ($ACTIVE_ACCOUNT)..."
+        gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA_EMAIL" \
+            --member="$MEMBER" \
+            --role="roles/iam.serviceAccountUser" >/dev/null || true
+    fi
 
-# Create Firestore Native (default) database if it doesn't exist
-echo "Checking Firestore Native database (default)..."
-if ! gcloud firestore databases describe --database="(default)" &>/dev/null; then
-    gcloud firestore databases create \
-        --location="$GCP_REGION" \
-        --type=firestore-native \
-        --database="(default)" || true
-    echo -e "${GREEN}✓ Initiated Firestore Native (default) database creation${NC}"
-else
-    echo -e "${GREEN}✓ Firestore Native (default) database already exists${NC}"
+    # Create Artifact Registry repository for regional images if it doesn't exist
+    echo "Checking SRE Artifact Registry repository in $GCP_REGION..."
+    REPO_NAME="sre-repo"
+    if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$GCP_REGION" &>/dev/null; then
+        gcloud artifacts repositories create "$REPO_NAME" \
+            --repository-format=docker \
+            --location="$GCP_REGION" \
+            --description="Docker repository for SRE Agent Codelab [demo=sre-agent-codelab]"
+        echo -e "${GREEN}✓ Created Artifact Registry repository: $REPO_NAME in $GCP_REGION${NC}"
+    else
+        echo -e "${GREEN}✓ Artifact Registry repository already exists: $REPO_NAME in $GCP_REGION${NC}"
+    fi
+
+    # Create Firestore Native (default) database if it doesn't exist
+    echo "Checking Firestore Native database (default)..."
+    if ! gcloud firestore databases describe --database="(default)" &>/dev/null; then
+        gcloud firestore databases create \
+            --location="$GCP_REGION" \
+            --type=firestore-native \
+            --database="(default)" || true
+        echo -e "${GREEN}✓ Initiated Firestore Native (default) database creation${NC}"
+    else
+        echo -e "${GREEN}✓ Firestore Native (default) database already exists${NC}"
+    fi
 fi
 
 # 5. Build and Deploy Target Application (SRE Chaos Monkey)
