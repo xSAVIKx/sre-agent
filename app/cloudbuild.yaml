@@ -1,7 +1,7 @@
 steps:
 # 1. Build the docker image
 - name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/sre-chaos-monkey', '-f', 'app/Dockerfile', '.']
+  args: ['build', '-t', '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/sre-repo/sre-chaos-monkey', '-f', 'app/Dockerfile', '.']
 
 # 2. Deploy to Cloud Run
 - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -10,7 +10,7 @@ steps:
   - 'run'
   - 'deploy'
   - 'sre-chaos-monkey'
-  - '--image=gcr.io/$PROJECT_ID/sre-chaos-monkey'
+  - '--image=$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/sre-repo/sre-chaos-monkey'
   - '--region=$_GCP_REGION'
   - '--service-account=sre-chaos-monkey-sa@$PROJECT_ID.iam.gserviceaccount.com'
   - '--port=8080'
@@ -18,7 +18,7 @@ steps:
   - '--labels=demo=sre-agent-codelab'
 
 images:
-- 'gcr.io/$PROJECT_ID/sre-chaos-monkey'
+- '$_GCP_REGION-docker.pkg.dev/$PROJECT_ID/sre-repo/sre-chaos-monkey'
 
 options:
   logging: CLOUD_LOGGING_ONLY

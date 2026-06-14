@@ -40,7 +40,8 @@ gcloud services enable \
     run.googleapis.com \
     cloudbuild.googleapis.com \
     cloudtrace.googleapis.com \
-    logging.googleapis.com
+    logging.googleapis.com \
+    artifactregistry.googleapis.com
 
 # 3. Create Service Accounts
 echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
@@ -119,7 +120,10 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --member="serviceAccount:${BUILD_SA_EMAIL}" \
     --role="roles/run.admin" >/dev/null
-echo -e "${GREEN}✓ Granted roles/logging.logWriter, roles/storage.admin & roles/run.admin to SRE Build SA${NC}"
+gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+    --member="serviceAccount:${BUILD_SA_EMAIL}" \
+    --role="roles/artifactregistry.writer" >/dev/null
+echo -e "${GREEN}✓ Granted logging, storage, run admin & artifactregistry.writer roles to SRE Build SA${NC}"
 
 # Allow SRE Build SA to act as the SRE application service accounts
 echo "Allowing SRE Build SA to act as application and agent service accounts..."
@@ -143,6 +147,19 @@ if [ -n "$ACTIVE_ACCOUNT" ]; then
     gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA_EMAIL" \
         --member="$MEMBER" \
         --role="roles/iam.serviceAccountUser" >/dev/null || true
+fi
+
+# Create Artifact Registry repository for regional images if it doesn't exist
+echo "Checking SRE Artifact Registry repository in $GCP_REGION..."
+REPO_NAME="sre-repo"
+if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$GCP_REGION" &>/dev/null; then
+    gcloud artifacts repositories create "$REPO_NAME" \
+        --repository-format=docker \
+        --location="$GCP_REGION" \
+        --description="Docker repository for SRE Agent Codelab [demo=sre-agent-codelab]"
+    echo -e "${GREEN}✓ Created Artifact Registry repository: $REPO_NAME in $GCP_REGION${NC}"
+else
+    echo -e "${GREEN}✓ Artifact Registry repository already exists: $REPO_NAME in $GCP_REGION${NC}"
 fi
 
 # 5. Build and Deploy Target Application (SRE Chaos Monkey)

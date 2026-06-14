@@ -55,6 +55,15 @@ else
     echo "• Service 'sre-chaos-monkey' does not exist."
 fi
 
+# Delete Artifact Registry repository
+REPO_NAME="sre-repo"
+if gcloud artifacts repositories describe "$REPO_NAME" --location="$GCP_REGION" &>/dev/null; then
+    gcloud artifacts repositories delete "$REPO_NAME" --location="$GCP_REGION" --quiet
+    echo -e "${GREEN}✓ Deleted Artifact Registry repository: $REPO_NAME${NC}"
+else
+    echo "• Artifact Registry repository '$REPO_NAME' does not exist."
+fi
+
 # 3. Remove IAM Role Bindings & Service Accounts
 echo -e "\n${BLUE}[2/3] Cleaning up IAM policies and Service Accounts...${NC}"
 
@@ -106,6 +115,9 @@ if gcloud iam service-accounts describe "$BUILD_SA_EMAIL" &>/dev/null; then
     gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
         --role="roles/run.admin" &>/dev/null || true
+    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/artifactregistry.writer" &>/dev/null || true
 
     gcloud iam service-accounts delete "$BUILD_SA_EMAIL" --quiet
     echo -e "${GREEN}✓ Deleted service account: $BUILD_SA_EMAIL${NC}"
