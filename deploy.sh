@@ -148,6 +148,7 @@ fi
 # 5. Build and Deploy Target Application (SRE Chaos Monkey)
 echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
 gcloud builds submit --config=app/cloudbuild.yaml \
+    --region="$GCP_REGION" \
     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
     --substitutions=_GCP_REGION="$GCP_REGION" .
 
@@ -157,6 +158,7 @@ echo -e "${GREEN}✓ Deployed SRE Chaos Monkey to: $TARGET_APP_URL${NC}"
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
 gcloud builds submit --config=agent/cloudbuild.yaml \
+    --region="$GCP_REGION" \
     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
     --substitutions=_GCP_REGION="$GCP_REGION",_TARGET_APP_URL="$TARGET_APP_URL" .
 
