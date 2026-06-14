@@ -20,12 +20,35 @@ try:
     from google.antigravity import Agent, LocalAgentConfig
     from google.antigravity.hooks.policy import deny, allow, ask_user
     from google.antigravity.hooks.hooks import OnToolErrorHook, HookContext
+    from google.antigravity.types import Text, Thought, ToolCall, ToolResult
     HAS_ANTIGRAVITY = "GEMINI_API_KEY" in os.environ
 except ImportError:
     HAS_ANTIGRAVITY = False
 
 if not HAS_ANTIGRAVITY:
     logger.warning("google-antigravity is not active or GEMINI_API_KEY is missing. Using simulated agent config fallbacks.")
+
+    class Text:
+        def __init__(self, text: str, step_index: int = 0) -> None:
+            self.text = text
+            self.step_index = step_index
+
+    class Thought:
+        def __init__(self, text: str, step_index: int = 0) -> None:
+            self.text = text
+            self.step_index = step_index
+
+    class ToolCall:
+        def __init__(self, name: str, args: dict[str, Any], id: str = "mock_tool_call_id") -> None:
+            self.name = name
+            self.args = args
+            self.id = id
+
+    class ToolResult:
+        def __init__(self, name: str, result: str, id: str = "mock_tool_call_id") -> None:
+            self.name = name
+            self.result = result
+            self.id = id
 
     class Agent:  # type: ignore
         """Mock Agent context manager for local resilience."""
@@ -40,15 +63,73 @@ if not HAS_ANTIGRAVITY:
 
         async def chat(self, prompt: str) -> Any:
             """Simulates the agent chat response."""
+            is_diag = any(x in prompt.lower() for x in ("traces", "latency", "errors"))
+            import asyncio
+
             class MockResponse:
+                def __init__(self, is_diag: bool, prompt: str) -> None:
+                    self.is_diag = is_diag
+                    self.prompt = prompt
+                    self._text = None
+
                 async def text(self) -> str:
-                    if "traces" in prompt.lower() or "latency" in prompt.lower() or "errors" in prompt.lower():
+                    if self._text is not None:
+                        return self._text
+                    if self.is_diag:
                         from skills.sre_incident_solver.gcp_tools import query_traces
                         traces = await query_traces()
-                        diagnosis = await run_sre_diagnostics(traces)
-                        return diagnosis
-                    return f"Simulation mode: analyzed prompt '{prompt}'."
-            return MockResponse()
+                        self._text = await run_sre_diagnostics(traces)
+                    else:
+                        self._text = f"Simulation mode: analyzed prompt '{self.prompt}'."
+                    return self._text
+
+                def cancel(self) -> None:
+                    """Cancels mock response generation."""
+                    pass
+
+                @property
+                def chunks(self) -> Any:
+                    async def _gen() -> Any:
+                        if self.is_diag:
+                            # 1. ToolCall for query_traces
+                            yield ToolCall(name="query_traces", args={})
+                            await asyncio.sleep(0.5)
+                            from skills.sre_incident_solver.gcp_tools import query_traces
+                            traces = await query_traces()
+                            # 2. ToolResult for query_traces
+                            yield ToolResult(name="query_traces", result=traces)
+                            await asyncio.sleep(0.5)
+
+                            # 3. ToolCall for run_diagnostics_workflow
+                            yield ToolCall(name="run_diagnostics_workflow", args={"traces_data": traces})
+                            await asyncio.sleep(1.0)
+                            diagnosis = await run_sre_diagnostics(traces)
+                            self._text = diagnosis
+                            # 4. ToolResult for run_diagnostics_workflow
+                            yield ToolResult(name="run_diagnostics_workflow", result=diagnosis)
+                            await asyncio.sleep(0.5)
+
+                            # 5. Thought chunk explaining findings
+                            yield Thought(text="Diagnostics workflow complete. Preparing report details...")
+                            await asyncio.sleep(0.5)
+
+                            # 6. Stream the final diagnosis report text
+                            words = diagnosis.split(" ")
+                            for i, word in enumerate(words):
+                                yield Text(text=word + (" " if i < len(words) - 1 else ""))
+                                await asyncio.sleep(0.02)
+                        else:
+                            yield Thought(text="Simulating basic greeting response...")
+                            await asyncio.sleep(0.5)
+                            response_text = f"Simulation mode: analyzed prompt '{self.prompt}'."
+                            self._text = response_text
+                            words = response_text.split(" ")
+                            for i, word in enumerate(words):
+                                yield Text(text=word + (" " if i < len(words) - 1 else ""))
+                                await asyncio.sleep(0.02)
+                    return _gen()
+
+            return MockResponse(is_diag, prompt)
 
         @property
         def conversation_id(self) -> str | None:

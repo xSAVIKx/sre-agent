@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Antigravity SRE Chat Control</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🛸</text></svg>">
     
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -363,6 +364,36 @@
             font-weight: bold;
         }
 
+        /* Streaming Elements styling */
+        .agent-thinking-box {
+            background: rgba(255, 255, 255, 0.02);
+            border-left: 2px dashed var(--primary);
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            border-radius: 8px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            color: var(--text-muted);
+            white-space: pre-wrap;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .agent-thinking-title {
+            font-weight: 600;
+            color: var(--primary);
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .agent-text-stream {
+            color: var(--text-main);
+            font-size: 15px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+        }
+
         /* Input Controls Area */
         .chat-input-area {
             padding: 24px 32px 32px;
@@ -440,6 +471,16 @@
             box-shadow: none;
         }
 
+        .send-button.stop-mode {
+            background: linear-gradient(135deg, var(--danger) 0%, #b91c1c 100%);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+        }
+
+        .send-button.stop-mode:hover:not(:disabled) {
+            background: linear-gradient(135deg, #ef4444 0%, #991b1b 100%);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.45);
+        }
+
         .loader {
             display: inline-block;
             width: 16px;
@@ -512,6 +553,7 @@
 
         // Stateful conversation tracking
         let activeConversationId = null;
+        let currentAbortController = null;
 
         // Parse markdown bold tags inside textual components for rich display
         function formatMarkdownInline(text) {
@@ -666,20 +708,34 @@
             row.appendChild(bubble);
             chatHistory.appendChild(row);
             chatHistory.scrollTop = chatHistory.scrollHeight;
+            return bubble;
         }
 
         // Submit message handler
         inputForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+
+            // If we are currently processing a request, click acts as a Stop action
+            if (currentAbortController) {
+                currentAbortController.abort();
+                return;
+            }
+
             const prompt = textInput.value.trim();
             if (!prompt) return;
 
-            // Clear input and disable UI
+            // Clear input and disable text field
             textInput.value = '';
             textInput.disabled = true;
-            sendBtn.disabled = true;
+
+            // Initialize AbortController for this request
+            currentAbortController = new AbortController();
+
+            // Style send button as stop button
             const originalSendBtnHTML = sendBtn.innerHTML;
-            sendBtn.innerHTML = '<span class="loader"></span>';
+            sendBtn.innerHTML = '<span>Stop</span>';
+            sendBtn.classList.add('stop-mode');
+            sendBtn.disabled = false; // Must remain clickable!
 
             // 1. Render User Message bubble
             const userTextDiv = document.createElement('div');
@@ -690,58 +746,145 @@
             userContainer.appendChild(userTextDiv);
             appendMessageRow('user', userContainer);
 
+            // Create agent response elements ahead of time
+            const agentBubbleInner = document.createElement('div');
+            agentBubbleInner.className = 'a2ui-container';
+
+            // Thinking Container
+            const thinkingBox = document.createElement('div');
+            thinkingBox.className = 'agent-thinking-box';
+            thinkingBox.style.display = 'none'; // hidden initially
+            
+            const thinkingTitle = document.createElement('div');
+            thinkingTitle.className = 'agent-thinking-title';
+            thinkingTitle.innerHTML = '<span>💭</span> <span>Thinking Process...</span>';
+            thinkingBox.appendChild(thinkingTitle);
+
+            const thinkingContent = document.createElement('div');
+            thinkingBox.appendChild(thinkingContent);
+            agentBubbleInner.appendChild(thinkingBox);
+
+            // Text stream container
+            const textStreamBox = document.createElement('div');
+            textStreamBox.className = 'agent-text-stream';
+            agentBubbleInner.appendChild(textStreamBox);
+
+            // Append agent bubble and get a handle to it
+            const agentBubble = appendMessageRow('agent', agentBubbleInner);
+
             try {
-                // 2. Fetch SRE Agent response
+                // 2. Fetch SRE Agent response with stream
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         prompt: prompt,
                         conversation_id: activeConversationId,
-                    })
+                    }),
+                    signal: currentAbortController.signal
                 });
 
                 if (!response.ok) {
                     throw new Error(`HTTP Error ${response.status}`);
                 }
 
-                const data = await response.json();
-                
-                // 3. Update Conversation ID
-                if (data.conversation_id) {
-                    activeConversationId = data.conversation_id;
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder("utf-8");
+                let buffer = "";
+                let finalMarkdown = "";
+                let finalA2UI = null;
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split("\n");
+                    // Keep the last partial line in buffer
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        const trimmed = line.trim();
+                        if (!trimmed) continue;
+
+                        if (trimmed.startsWith("data: ")) {
+                            const dataStr = trimmed.slice(6);
+                            try {
+                                const event = JSON.parse(dataStr);
+                                
+                                if (event.type === "start") {
+                                    if (event.conversation_id) {
+                                        activeConversationId = event.conversation_id;
+                                    }
+                                } else if (event.type === "thought") {
+                                    thinkingBox.style.display = 'block';
+                                    thinkingContent.innerText += event.text;
+                                    chatHistory.scrollTop = chatHistory.scrollHeight;
+                                } else if (event.type === "chunk") {
+                                    textStreamBox.innerText += event.text;
+                                    chatHistory.scrollTop = chatHistory.scrollHeight;
+                                } else if (event.type === "done") {
+                                    finalMarkdown = event.response;
+                                    finalA2UI = event.response_a2ui;
+                                } else if (event.type === "error") {
+                                    throw new Error(event.detail);
+                                }
+                            } catch (parseErr) {
+                                console.error("Error parsing SSE event:", parseErr, trimmed);
+                            }
+                        }
+                    }
                 }
 
-                // 4. Render A2UI response bubble
-                if (data.response_a2ui) {
-                    const agentA2UIDiv = renderA2UIContainer(data.response_a2ui);
-                    appendMessageRow('agent', agentA2UIDiv);
+                // Stream ended. Transform the bubble!
+                agentBubble.innerHTML = ''; // Clear temporary stream containers
+                
+                if (finalA2UI) {
+                    const finalA2UIDiv = renderA2UIContainer(finalA2UI);
+                    agentBubble.appendChild(finalA2UIDiv);
                 } else {
                     // Fallback to text if missing A2UI payload
                     const fallbackTextDiv = document.createElement('div');
                     fallbackTextDiv.className = 'a2ui-text';
-                    fallbackTextDiv.innerText = data.response || "No response text received.";
+                    fallbackTextDiv.innerText = finalMarkdown || "No response received.";
                     const fallbackContainer = document.createElement('div');
                     fallbackContainer.className = 'a2ui-container';
                     fallbackContainer.appendChild(fallbackTextDiv);
-                    appendMessageRow('agent', fallbackContainer);
+                    agentBubble.appendChild(fallbackContainer);
                 }
+                chatHistory.scrollTop = chatHistory.scrollHeight;
 
             } catch (err) {
-                // Render Error bubble
+                // Clear the bubble and render Error bubble
+                agentBubble.innerHTML = '';
                 const errTextDiv = document.createElement('div');
                 errTextDiv.className = 'a2ui-text';
-                errTextDiv.style.color = 'var(--danger)';
-                errTextDiv.innerText = `Error contacting agent: ${err.message}`;
+                
+                // Render custom message if user manually cancelled
+                const isAborted = err.name === 'AbortError';
+                if (isAborted) {
+                    errTextDiv.style.color = 'var(--text-muted)';
+                    errTextDiv.innerText = '🛑 Diagnostic processing forcefully cancelled by user.';
+                } else {
+                    errTextDiv.style.color = 'var(--danger)';
+                    errTextDiv.innerText = `Error contacting agent: ${err.message}`;
+                }
+
                 const errContainer = document.createElement('div');
                 errContainer.className = 'a2ui-container';
                 errContainer.appendChild(errTextDiv);
-                appendMessageRow('agent', errContainer);
+                agentBubble.appendChild(errContainer);
+                chatHistory.scrollTop = chatHistory.scrollHeight;
             } finally {
-                // Re-enable input
+                // Clear AbortController reference
+                currentAbortController = null;
+
+                // Re-enable text input
                 textInput.disabled = false;
-                sendBtn.disabled = false;
+
+                // Revert send button styling
                 sendBtn.innerHTML = originalSendBtnHTML;
+                sendBtn.classList.remove('stop-mode');
                 textInput.focus();
             }
         });

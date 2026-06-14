@@ -71,6 +71,14 @@ else
     echo "• Artifact Registry repository '$REPO_NAME' does not exist."
 fi
 
+# Delete Secret Manager secret
+if gcloud secrets describe GEMINI_API_KEY &>/dev/null; then
+    gcloud secrets delete GEMINI_API_KEY --quiet
+    echo -e "${GREEN}✓ Deleted secret: GEMINI_API_KEY${NC}"
+else
+    echo "• Secret 'GEMINI_API_KEY' does not exist."
+fi
+
 # 3. Remove IAM Role Bindings & Service Accounts
 echo -e "\n${BLUE}[2/3] Cleaning up IAM policies and Service Accounts...${NC}"
 

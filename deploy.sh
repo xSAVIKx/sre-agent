@@ -75,7 +75,26 @@ if [ "$SKIP_INFRA" = "false" ]; then
         cloudtrace.googleapis.com \
         logging.googleapis.com \
         artifactregistry.googleapis.com \
-        firestore.googleapis.com
+        firestore.googleapis.com \
+        secretmanager.googleapis.com
+
+    # Create GEMINI_API_KEY secret if it doesn't exist
+    echo "Checking GEMINI_API_KEY secret in Secret Manager..."
+    if [ -z "${GEMINI_API_KEY:-}" ]; then
+        echo -e "${RED}Error: GEMINI_API_KEY is not defined in .env${NC}"
+        exit 1
+    fi
+
+    if ! gcloud secrets describe GEMINI_API_KEY &>/dev/null; then
+        gcloud secrets create GEMINI_API_KEY --replication-policy="automatic"
+        echo -n "$GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+        echo -e "${GREEN}✓ Created secret GEMINI_API_KEY and added version 1${NC}"
+    else
+        echo -e "${GREEN}✓ Secret GEMINI_API_KEY already exists${NC}"
+        # Always upload the current .env value as a new version to ensure it is up to date
+        echo -n "$GEMINI_API_KEY" | gcloud secrets versions add GEMINI_API_KEY --data-file=-
+        echo -e "${GREEN}✓ Added new version of GEMINI_API_KEY secret${NC}"
+    fi
 
     # 3. Create Service Accounts
     echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
@@ -138,7 +157,10 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/datastore.user" >/dev/null
-    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer & roles/datastore.user to SRE Agent${NC}"
+    gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/secretmanager.secretAccessor" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer, roles/datastore.user & secretAccessor to SRE Agent${NC}"
 
     # SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
     echo "Assigning roles to SRE Build service account..."
@@ -154,7 +176,10 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
         --role="roles/artifactregistry.writer" >/dev/null
-    echo -e "${GREEN}✓ Granted logging, storage, run admin & artifactregistry.writer roles to SRE Build SA${NC}"
+    gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/secretmanager.secretAccessor" >/dev/null
+    echo -e "${GREEN}✓ Granted logging, storage, run admin, artifactregistry.writer & secretAccessor roles to SRE Build SA${NC}"
 
     # Allow SRE Build SA to act as the SRE application service accounts
     echo "Allowing SRE Build SA to act as application and agent service accounts..."

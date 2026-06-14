@@ -16,6 +16,9 @@ logger = logging.getLogger("sre_workflow")
 try:
     from google.adk import Agent as AdkAgent
     from google.adk import Workflow as AdkWorkflow
+    from google.adk import node
+    from google.adk.workflow import START
+    from google.adk.agents.context import Context
     HAS_ADK = True
 except ImportError:
     HAS_ADK = False
@@ -37,6 +40,16 @@ except ImportError:
         def __init__(self, name: str, edges: list[Any]) -> None:
             self.name = name
             self.edges = edges
+
+    def node(*args: Any, **kwargs: Any) -> Any:
+        def decorator(func: Any) -> Any:
+            return func
+        if args and callable(args[0]):
+            return args[0]
+        return decorator
+
+    START = "START"
+    class Context: pass  # type: ignore
 
 
 # 1. Define SRE specialized ADK agents
@@ -80,44 +93,60 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
+    import os
 
-    try:
-        # Instantiate session service and runners
-        session_service = InMemorySessionService()
-        trace_runner = Runner(agent=trace_analyzer, session_service=session_service)
-        log_runner = Runner(agent=log_correlator, session_service=session_service)
-
-        # 1. Identify trace ID using Trace Analyzer Agent
+    @node(name="fetch_telemetry")
+    async def fetch_telemetry(ctx: Context, node_input: Any) -> str:
+        # Extract trace_id from node_input
         trace_id = ""
-        msg = types.Content(parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")])
-        async for event in trace_runner.run_async(
-            user_id="sre_user",
-            session_id="session_1",
-            new_message=msg
-        ):
-            if event.content and event.content.parts:
-                for part in event.content.parts:
-                    if part.text:
-                        trace_id += part.text
+        if isinstance(node_input, str):
+            trace_id = node_input
+        elif hasattr(node_input, "output") and node_input.output is not None:
+            trace_id = str(node_input.output)
+        elif hasattr(node_input, "parts") and node_input.parts:
+            trace_id = "".join(p.text for p in node_input.parts if p.text)
+        elif isinstance(node_input, dict) and "output" in node_input:
+            trace_id = str(node_input["output"])
+        
         trace_id = trace_id.strip()
-        logger.info(f"Trace Analyzer identified trace ID: {trace_id}")
+        logger.info(f"Workflow: Fetching telemetry for trace ID '{trace_id}'")
 
-        # 2. Fetch trace details and correlated logs
-        trace_details = await get_trace_details(trace_id, project_id)
-        logs = await query_logs_by_trace(trace_id, project_id)
+        # Load project ID
+        proj_id = project_id or os.environ.get("GCP_PROJECT")
 
-        # 3. Correlate and diagnose using Log Correlator Agent
+        # Fetch telemetry
+        trace_details = await get_trace_details(trace_id, proj_id)
+        logs = await query_logs_by_trace(trace_id, proj_id)
+
         analysis_prompt = (
             f"Trace Spans:\n{trace_details}\n\n"
             f"Correlated Logs:\n{logs}\n\n"
             f"Provide a root cause analysis and mitigation plan."
         )
-        analysis_msg = types.Content(parts=[types.Part.from_text(text=analysis_prompt)])
+        return analysis_prompt
+
+    try:
+        # Define the ADK 2.0 graph workflow
+        sre_diagnostics_workflow = AdkWorkflow(
+            name="sre_diagnostics_workflow",
+            edges=[
+                (START, trace_analyzer, fetch_telemetry, log_correlator)
+            ]
+        )
+
+        session_service = InMemorySessionService()
+        runner = Runner(
+            node=sre_diagnostics_workflow,
+            app_name="sre_diagnostics",
+            session_service=session_service
+        )
+
+        msg = types.Content(parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")])
         diagnosis = ""
-        async for event in log_runner.run_async(
+        async for event in runner.run_async(
             user_id="sre_user",
-            session_id="session_2",
-            new_message=analysis_msg
+            session_id="session_1",
+            new_message=msg
         ):
             if event.content and event.content.parts:
                 for part in event.content.parts:

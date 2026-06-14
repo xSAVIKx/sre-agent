@@ -27,6 +27,7 @@ steps:
   - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
   - '--port=8080'
   - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID,BACKEND_SERVICE_URL=$_TARGET_APP_URL'
+  - '--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest'
   - '--allow-unauthenticated'
   - '--labels=demo=sre-agent-codelab'
 
