@@ -50,6 +50,14 @@ if not HAS_ANTIGRAVITY:
                     return f"Simulation mode: analyzed prompt '{prompt}'."
             return MockResponse()
 
+        @property
+        def conversation_id(self) -> str | None:
+            """Returns simulated conversation ID."""
+            if getattr(self.config, "conversation_id", None):
+                return self.config.conversation_id
+            return "mock-conversation-id-123"
+
+
     class LocalAgentConfig:  # type: ignore
         """Mock LocalAgentConfig for local resilience."""
         def __init__(
@@ -200,3 +208,83 @@ def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgen
         policies=safety_policies,
         hooks=[SreToolErrorHook()]
     )
+
+
+def load_firestore_agent_config(
+    conversation_id: str | None = None,
+    config_path: str = "agent/agent_config.json"
+) -> Any:
+    """Loads safety configurations, tools, dynamic MCP servers, and uses Firestore persistence.
+
+    Args:
+        conversation_id: Optional conversation ID to resume.
+        config_path: Path to the agent configuration JSON file.
+
+    Returns:
+        A FirestoreAgentConfig (or mock equivalent) instance.
+    """
+    # 1. Gather all registered python tools
+    tools: list[Any] = []
+    tools.extend(registry.get_tools())
+
+    # 2. Dynamically load MCP configurations from agent_config.json
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = json.load(f)
+
+            mcp_servers = config_data.get("mcp_servers", {})
+            for name, details in mcp_servers.items():
+                if details.get("enabled", False):
+                    logger.info(f"Dynamically loading MCP server configuration: {name}")
+                    tools.append({
+                        "type": "mcp",
+                        "name": name,
+                        "command": details.get("command"),
+                        "args": details.get("args", []),
+                        "env": details.get("env", {})
+                    })
+        except Exception as e:
+            logger.error(f"Failed to load agent configuration file: {e}")
+
+    # 3. Setup safety policies (deny-by-default, allow specific tools, ask before writing)
+    safety_policies = [
+        deny("*"),  # Deny all commands/actions by default
+        allow("query_traces"),
+        allow("get_trace_details"),
+        allow("query_logs_by_trace"),
+        allow("run_diagnostics_workflow"),
+        ask_user("run_command", handler=cli_approval_handler)  # Require confirmation for shell commands
+    ]
+
+    system_instructions = (
+        "You are an expert Google Cloud SRE agent specialized in distributed system debugging. "
+        "You have access to both low-level telemetry tools and a high-level diagnostics workflow tool:\n"
+        "1. For general incident investigation: Retrieve recent traces using 'query_traces', "
+        "then pass the trace summaries to 'run_diagnostics_workflow' to execute a multi-agent diagnostic "
+        "analysis that automatically correlates traces and logs to produce a root cause report.\n"
+        "2. For targeted queries or detailed troubleshooting: Use the low-level tools 'get_trace_details' "
+        "and 'query_logs_by_trace' to inspect specific traces and logs directly.\n"
+        "Always present your final diagnosis or analysis results clearly in markdown."
+    )
+
+    if HAS_ANTIGRAVITY:
+        from agent.firestore_strategy import FirestoreAgentConfig
+        return FirestoreAgentConfig(
+            system_instructions=system_instructions,
+            tools=tools,
+            policies=safety_policies,
+            hooks=[SreToolErrorHook()],
+            conversation_id=conversation_id,
+        )
+    else:
+        # Fallback in local mock mode without Antigravity library
+        config = LocalAgentConfig(
+            system_instructions=system_instructions,
+            tools=tools,
+            policies=safety_policies,
+            hooks=[SreToolErrorHook()],
+        )
+        config.conversation_id = conversation_id
+        return config
+

@@ -48,7 +48,8 @@ gcloud services enable \
     cloudbuild.googleapis.com \
     cloudtrace.googleapis.com \
     logging.googleapis.com \
-    artifactregistry.googleapis.com
+    artifactregistry.googleapis.com \
+    firestore.googleapis.com
 
 # 3. Create Service Accounts
 echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
@@ -106,7 +107,7 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --role="roles/logging.logWriter" >/dev/null
 echo -e "${GREEN}✓ Granted roles/cloudtrace.agent & roles/logging.logWriter to target app${NC}"
 
-# SRE Agent Roles (Read-only telemetry)
+# SRE Agent Roles (Read-only telemetry & Firestore)
 echo "Assigning roles to SRE agent service account..."
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --member="serviceAccount:${AGENT_SA_EMAIL}" \
@@ -114,7 +115,10 @@ gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
 gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
     --member="serviceAccount:${AGENT_SA_EMAIL}" \
     --role="roles/logging.viewer" >/dev/null
-echo -e "${GREEN}✓ Granted roles/cloudtrace.user & roles/logging.viewer to SRE Agent${NC}"
+gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+    --member="serviceAccount:${AGENT_SA_EMAIL}" \
+    --role="roles/datastore.user" >/dev/null
+echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer & roles/datastore.user to SRE Agent${NC}"
 
 # SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
 echo "Assigning roles to SRE Build service account..."
@@ -167,6 +171,18 @@ if ! gcloud artifacts repositories describe "$REPO_NAME" --location="$GCP_REGION
     echo -e "${GREEN}✓ Created Artifact Registry repository: $REPO_NAME in $GCP_REGION${NC}"
 else
     echo -e "${GREEN}✓ Artifact Registry repository already exists: $REPO_NAME in $GCP_REGION${NC}"
+fi
+
+# Create Firestore Native (default) database if it doesn't exist
+echo "Checking Firestore Native database (default)..."
+if ! gcloud firestore databases describe --database="(default)" &>/dev/null; then
+    gcloud firestore databases create \
+        --location="$GCP_REGION" \
+        --type=firestore-native \
+        --database="(default)" || true
+    echo -e "${GREEN}✓ Initiated Firestore Native (default) database creation${NC}"
+else
+    echo -e "${GREEN}✓ Firestore Native (default) database already exists${NC}"
 fi
 
 # 5. Build and Deploy Target Application (SRE Chaos Monkey)

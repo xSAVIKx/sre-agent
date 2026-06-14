@@ -9,7 +9,7 @@ import os
 import logging
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from agent.config import load_agent_config, Agent, HAS_ANTIGRAVITY
+from agent.config import load_agent_config, load_firestore_agent_config, Agent, HAS_ANTIGRAVITY
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -42,6 +42,32 @@ class DiagnoseResponse(BaseModel):
     """
     status: str
     result: str
+
+
+class ChatRequest(BaseModel):
+    """Pydantic model representing a stateful chat request.
+
+    Attributes:
+        prompt: The chat message for the SRE agent.
+        conversation_id: Optional ID of an existing session to resume.
+        project_id: Optional GCP Project ID to override default settings.
+    """
+    prompt: str
+    conversation_id: str | None = None
+    project_id: str | None = None
+
+
+class ChatResponse(BaseModel):
+    """Pydantic model representing a stateful chat response.
+
+    Attributes:
+        status: The execution status.
+        response: The agent response text.
+        conversation_id: The active session ID (useful for follow-up turns).
+    """
+    status: str
+    response: str
+    conversation_id: str | None = None
 
 
 @app.get("/health")
@@ -90,4 +116,45 @@ async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
         raise HTTPException(
             status_code=500,
             detail=f"SRE Agent Execution Failure: {str(e)}"
+        )
+
+
+@app.post("/chat")
+async def chat(request: ChatRequest) -> ChatResponse:
+    """Trigger a stateful agent chat request.
+
+    Starts a new agent conversation or resumes an existing one from remote
+    state persisted in Google Cloud Firestore.
+
+    Args:
+        request: The ChatRequest payload.
+
+    Returns:
+        ChatResponse containing the agent response text and active conversation ID.
+    """
+    logger.info(f"Received SRE chat request (conversation_id={request.conversation_id}): {request.prompt}")
+
+    # Set project ID in environment if provided to affect the tools
+    if request.project_id:
+        os.environ["GCP_PROJECT"] = request.project_id
+
+    try:
+        # Load the Firestore configuration strategy
+        config = load_firestore_agent_config(conversation_id=request.conversation_id)
+
+        # Run the agent in an asynchronous execution loop
+        async with Agent(config) as agent:
+            response = await agent.chat(request.prompt)
+            result = await response.text()
+            # Retrieve the active conversation ID from the agent
+            conv_id = agent.conversation_id
+
+        logger.info(f"Successfully processed chat request. Active conversation ID: {conv_id}")
+        return ChatResponse(status="success", response=result, conversation_id=conv_id)
+
+    except Exception as e:
+        logger.exception("Failed to execute SRE agent chat.")
+        raise HTTPException(
+            status_code=500,
+            detail=f"SRE Agent Chat Execution Failure: {str(e)}"
         )

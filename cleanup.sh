@@ -102,6 +102,9 @@ if gcloud iam service-accounts describe "$AGENT_SA_EMAIL" &>/dev/null; then
     gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/logging.viewer" &>/dev/null || true
+    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/datastore.user" &>/dev/null || true
 
     gcloud iam service-accounts delete "$AGENT_SA_EMAIL" --quiet
     echo -e "${GREEN}✓ Deleted service account: $AGENT_SA_EMAIL${NC}"
