@@ -3,3 +3,6 @@ steps:
   args: ['build', '-t', 'gcr.io/$PROJECT_ID/sre-agent', '-f', 'agent/Dockerfile', '.']
 images:
 - 'gcr.io/$PROJECT_ID/sre-agent'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
