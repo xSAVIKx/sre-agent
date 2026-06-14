@@ -50,6 +50,35 @@ def _load_mock_file(filename: str) -> Any:
             logger.error(f"Error loading mock file {path}: {e}")
     return None
 
+
+def _get_project_id(project_id: str | None = None) -> str:
+    """Helper to resolve the GCP Project ID.
+
+    If project_id is provided, returns it.
+    Otherwise, attempts to read GOOGLE_CLOUD_PROJECT, GCP_PROJECT,
+    or queries google.auth.default().
+    """
+    if project_id:
+        return project_id
+
+    # Try environment variables first
+    for var in ("GOOGLE_CLOUD_PROJECT", "GCP_PROJECT"):
+        val = os.getenv(var)
+        if val:
+            return val
+
+    # Try google.auth
+    try:
+        import google.auth
+        _, default_project = google.auth.default()
+        if default_project:
+            return default_project
+    except Exception:
+        pass
+
+    return "unknown-project"
+
+
 @register_tool
 async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
     """Queries recent traces from GCP Cloud Trace.
@@ -75,7 +104,8 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 
     try:
         client = trace_v2.TraceServiceClient()
-        project_path = f"projects/{project_id or client.project}"
+        resolved_project = _get_project_id(project_id)
+        project_path = f"projects/{resolved_project}"
         # Returns metadata about tracing connection in lieu of standard list
         return json.dumps({"status": "connected", "project": project_path, "traces": []}, indent=2)
     except Exception as e:
@@ -115,7 +145,8 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 
     try:
         client = trace_v2.TraceServiceClient()
-        project_path = f"projects/{project_id or client.project}"
+        resolved_project = _get_project_id(project_id)
+        project_path = f"projects/{resolved_project}"
         trace = client.get_trace(name=f"{project_path}/traces/{trace_id}")
         return json.dumps(trace, indent=2)
     except Exception as e:
@@ -155,7 +186,8 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
         return json.dumps({"error": "google-cloud-logging library is not installed."}, indent=2)
 
     try:
-        client = cloud_logging.Client(project=project_id)
+        resolved_project = _get_project_id(project_id)
+        client = cloud_logging.Client(project=resolved_project)
         filter_str = f'trace="projects/{client.project}/traces/{trace_id}"'
         entries = client.list_entries(filter_=filter_str, max_results=limit)
 
