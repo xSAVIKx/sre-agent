@@ -148,11 +148,21 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         failing_trace = None
         if isinstance(data, list):
             for t in data:
+                name = t.get("name", "").lower()
+                if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
+                    continue
                 if t.get("error") is True or t.get("durationMs", 0) > 5000:
                     failing_trace = t
                     break
             if not failing_trace and data:
-                failing_trace = data[0]
+                # Find first non-diagnose trace as a fallback
+                for t in data:
+                    name = t.get("name", "").lower()
+                    if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
+                        failing_trace = t
+                        break
+                if not failing_trace:
+                    failing_trace = data[0]
 
         if not failing_trace:
             return "### Diagnostics Completed\nNo anomalous traces or errors detected in the recent logs."

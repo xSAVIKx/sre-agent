@@ -228,7 +228,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
         
         traces_list = []
         for trace_item in pager:
-            if len(traces_list) >= limit:
+            if len(traces_list) >= 100:
                 break
             trace_dict = trace_v1.Trace.to_dict(trace_item)
             t_id = trace_dict.get("trace_id", "")
@@ -257,6 +257,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
             
         # Sort traces by startTime descending (newest first)
         traces_list.sort(key=lambda x: x["startTime"], reverse=True)
+        traces_list = traces_list[:limit]
             
         logger.info(f"[GCP Observability] Successfully queried {len(traces_list)} traces from real GCP Trace API")
         return json.dumps(traces_list, indent=2)
