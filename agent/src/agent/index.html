@@ -50,7 +50,7 @@
 
         .app-container {
             width: 100%;
-            max-width: 1100px;
+            max-width: 1150px;
             height: 90vh;
             background: var(--bg-glass);
             backdrop-filter: blur(20px);
@@ -58,7 +58,7 @@
             border: 1px solid var(--border-glass);
             border-radius: 24px;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             box-shadow: 0 20px 50px rgba(0, 0, 0, 0.4);
             overflow: hidden;
         }
@@ -494,55 +494,186 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
+
+        /* Sidebar Styling */
+        .sidebar {
+            width: 280px;
+            background: rgba(10, 15, 30, 0.4);
+            border-right: 1px solid var(--border-glass);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: 1px solid var(--border-glass);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .sidebar-header h2 {
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 0.5px;
+        }
+
+        .new-session-btn {
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px dashed var(--primary);
+            color: var(--text-main);
+            border-radius: 12px;
+            padding: 12px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+
+        .new-session-btn:hover {
+            background: var(--primary);
+            border-color: var(--primary);
+            box-shadow: 0 0 15px var(--accent-glow);
+        }
+
+        .sessions-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .sessions-list::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sessions-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sessions-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 99px;
+        }
+
+        .sessions-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .session-item {
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .session-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: var(--border-glass);
+        }
+
+        .session-item.active {
+            background: rgba(99, 102, 241, 0.12);
+            border-color: var(--primary);
+            box-shadow: 0 0 15px rgba(99, 102, 241, 0.1);
+        }
+
+        .session-title {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-main);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .session-meta {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .main-chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            overflow: hidden;
+        }
     </style>
 </head>
 <body>
 
     <div class="app-container">
-        <!-- Header -->
-        <header class="app-header">
-            <div class="header-title-container">
-                <div class="header-logo">🛸</div>
-                <div class="header-title">
-                    <h1>Antigravity SRE Control</h1>
-                    <p>Stateless Diagnostics Loop & A2UI Render</p>
-                </div>
+        <!-- Sidebar for Sessions -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Diagnostic Sessions</h2>
+                <button class="new-session-btn" id="newSessionBtn">+ New Chat</button>
             </div>
-            
-            <div class="agent-status">
-                <div class="status-dot"></div>
-                <span>Agent Active</span>
+            <div class="sessions-list" id="sessionsList">
+                <!-- Session items loaded dynamically -->
             </div>
-        </header>
+        </aside>
 
-        <!-- Message History -->
-        <main class="chat-history" id="chatHistory">
-            <!-- Initial Agent Message -->
-            <div class="message-row agent">
-                <div class="message-bubble">
-                    <div class="a2ui-container">
-                        <div class="a2ui-text">System initialized. I am ready to monitor systems and analyze correlated telemetry. You can trigger an incident diagnostics report at any time.</div>
+        <!-- Main Chat Area -->
+        <div class="main-chat-area">
+            <!-- Header -->
+            <header class="app-header">
+                <div class="header-title-container">
+                    <div class="header-logo">🛸</div>
+                    <div class="header-title">
+                        <h1>Antigravity SRE Control</h1>
+                        <p>Stateless Diagnostics Loop & A2UI Render</p>
                     </div>
                 </div>
-            </div>
-        </main>
-
-        <!-- Input Section -->
-        <footer class="chat-input-area">
-            <form class="input-form" id="inputForm">
-                <div class="input-wrapper">
-                    <input type="text" 
-                           id="textInput" 
-                           class="text-input" 
-                           placeholder="Describe the incident (e.g. Gateway database timeouts)..." 
-                           autocomplete="off" 
-                           required>
+                
+                <div class="agent-status">
+                    <div class="status-dot"></div>
+                    <span>Agent Active</span>
                 </div>
-                <button type="submit" class="send-button" id="sendBtn">
-                    <span>Send</span>
-                </button>
-            </form>
-        </footer>
+            </header>
+
+            <!-- Message History -->
+            <main class="chat-history" id="chatHistory">
+                <!-- Initial Agent Message -->
+                <div class="message-row agent">
+                    <div class="message-bubble">
+                        <div class="a2ui-container">
+                            <div class="a2ui-text">System initialized. I am ready to monitor systems and analyze correlated telemetry. You can trigger an incident diagnostics report at any time.</div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Input Section -->
+            <footer class="chat-input-area">
+                <form class="input-form" id="inputForm">
+                    <div class="input-wrapper">
+                        <input type="text" 
+                               id="textInput" 
+                               class="text-input" 
+                               placeholder="Describe the incident (e.g. Gateway database timeouts)..." 
+                               autocomplete="off" 
+                               required>
+                    </div>
+                    <button type="submit" class="send-button" id="sendBtn">
+                        <span>Send</span>
+                    </button>
+                </form>
+            </footer>
+        </div>
     </div>
 
     <script>
@@ -550,6 +681,8 @@
         const inputForm = document.getElementById('inputForm');
         const textInput = document.getElementById('textInput');
         const sendBtn = document.getElementById('sendBtn');
+        const sessionsList = document.getElementById('sessionsList');
+        const newSessionBtn = document.getElementById('newSessionBtn');
 
         // Stateful conversation tracking
         let activeConversationId = null;
@@ -814,7 +947,11 @@
                                 
                                 if (event.type === "start") {
                                     if (event.conversation_id) {
+                                        const prevId = activeConversationId;
                                         activeConversationId = event.conversation_id;
+                                        if (prevId !== event.conversation_id) {
+                                            loadSessions();
+                                        }
                                     }
                                 } else if (event.type === "thought") {
                                     thinkingBox.style.display = 'block';
@@ -886,8 +1023,213 @@
                 sendBtn.innerHTML = originalSendBtnHTML;
                 sendBtn.classList.remove('stop-mode');
                 textInput.focus();
+                
+                // Refresh sessions to show any updated timestamps or prompts
+                loadSessions();
             }
         });
+
+        // Sidebar sessions rendering and loading
+        function renderSessionItem(session) {
+            const item = document.createElement('div');
+            item.className = 'session-item';
+            if (session.conversation_id === activeConversationId) {
+                item.classList.add('active');
+            }
+            item.dataset.id = session.conversation_id;
+
+            const title = document.createElement('div');
+            title.className = 'session-title';
+            title.innerText = session.prompt;
+            item.appendChild(title);
+
+            const meta = document.createElement('div');
+            meta.className = 'session-meta';
+            
+            let dateStr = "Recent";
+            if (session.updated_at) {
+                try {
+                    const date = new Date(session.updated_at);
+                    dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                } catch (e) {
+                    dateStr = session.updated_at;
+                }
+            }
+            meta.innerText = dateStr;
+            item.appendChild(meta);
+
+            item.addEventListener('click', () => {
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                }
+                selectSession(session.conversation_id);
+            });
+
+            return item;
+        }
+
+        async function loadSessions() {
+            try {
+                const response = await fetch('/sessions');
+                if (!response.ok) throw new Error(`HTTP Error ${response.status}`);
+                const sessions = await response.json();
+                
+                sessionsList.innerHTML = '';
+                if (sessions.length === 0) {
+                    const empty = document.createElement('div');
+                    empty.className = 'session-meta';
+                    empty.style.textAlign = 'center';
+                    empty.style.padding = '20px 0';
+                    empty.innerText = 'No sessions found.';
+                    sessionsList.appendChild(empty);
+                    return;
+                }
+
+                sessions.forEach(session => {
+                    const item = renderSessionItem(session);
+                    sessionsList.appendChild(item);
+                });
+            } catch (e) {
+                console.error("Failed to load sessions list:", e);
+            }
+        }
+
+        function renderWelcomeMessage() {
+            chatHistory.innerHTML = '';
+            const welcomeTextDiv = document.createElement('div');
+            welcomeTextDiv.className = 'a2ui-text';
+            welcomeTextDiv.innerText = 'System initialized. I am ready to monitor systems and analyze correlated telemetry. You can trigger an incident diagnostics report at any time.';
+            const welcomeContainer = document.createElement('div');
+            welcomeContainer.className = 'a2ui-container';
+            welcomeContainer.appendChild(welcomeTextDiv);
+            appendMessageRow('agent', welcomeContainer);
+        }
+
+        function newSession() {
+            activeConversationId = null;
+            document.querySelectorAll('.session-item').forEach(item => item.classList.remove('active'));
+            renderWelcomeMessage();
+        }
+
+        async function selectSession(conversationId) {
+            activeConversationId = conversationId;
+            
+            document.querySelectorAll('.session-item').forEach(item => {
+                if (item.dataset.id === conversationId) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+
+            chatHistory.innerHTML = '';
+
+            try {
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'a2ui-text';
+                loadingDiv.style.color = 'var(--text-muted)';
+                loadingDiv.innerText = 'Loading conversation history...';
+                const loadingContainer = document.createElement('div');
+                loadingContainer.className = 'a2ui-container';
+                loadingContainer.appendChild(loadingDiv);
+                appendMessageRow('agent', loadingContainer);
+
+                const response = await fetch(`/sessions/${conversationId}/history`);
+                if (!response.ok) throw new Error(`Failed to load history (${response.status})`);
+
+                const data = await response.json();
+                chatHistory.innerHTML = '';
+
+                if (!data.history || data.history.length === 0) {
+                    renderWelcomeMessage();
+                    return;
+                }
+
+                let currentAgentBubbleInner = null;
+                let currentThinkingBox = null;
+                let currentThinkingContent = null;
+                let currentTextStreamBox = null;
+
+                data.history.forEach(step => {
+                    if (step.source === "USER") {
+                        currentAgentBubbleInner = null;
+
+                        const userTextDiv = document.createElement('div');
+                        userTextDiv.className = 'a2ui-text';
+                        userTextDiv.innerText = step.content || "";
+                        const userContainer = document.createElement('div');
+                        userContainer.className = 'a2ui-container';
+                        userContainer.appendChild(userTextDiv);
+                        appendMessageRow('user', userContainer);
+                    } else if (step.source === "MODEL") {
+                        if (!currentAgentBubbleInner) {
+                            currentAgentBubbleInner = document.createElement('div');
+                            currentAgentBubbleInner.className = 'a2ui-container';
+
+                            currentThinkingBox = document.createElement('div');
+                            currentThinkingBox.className = 'agent-thinking-box';
+                            currentThinkingBox.style.display = 'none';
+                            
+                            const thinkingTitle = document.createElement('div');
+                            thinkingTitle.className = 'agent-thinking-title';
+                            thinkingTitle.innerHTML = '<span>💭</span> <span>Thinking Process...</span>';
+                            currentThinkingBox.appendChild(thinkingTitle);
+
+                            currentThinkingContent = document.createElement('div');
+                            currentThinkingBox.appendChild(currentThinkingContent);
+                            currentAgentBubbleInner.appendChild(currentThinkingBox);
+
+                            currentTextStreamBox = document.createElement('div');
+                            currentTextStreamBox.className = 'agent-text-stream';
+                            currentAgentBubbleInner.appendChild(currentTextStreamBox);
+
+                            appendMessageRow('agent', currentAgentBubbleInner);
+                        }
+
+                        if (step.thinking) {
+                            currentThinkingBox.style.display = 'block';
+                            currentThinkingContent.innerText = step.thinking;
+                        }
+
+                        if (step.tool_calls && step.tool_calls.length > 0) {
+                            currentThinkingBox.style.display = 'block';
+                            step.tool_calls.forEach(call => {
+                                let desc = `🔧 Calling tool '${call.name}'`;
+                                if (call.args && Object.keys(call.args).length > 0) {
+                                    desc += ` with arguments ${JSON.stringify(call.args)}`;
+                                }
+                                desc += "...\n✅ Tool completed.\n";
+                                currentThinkingContent.innerText += desc;
+                            });
+                        }
+
+                        if (step.response_a2ui) {
+                            const a2uiDiv = renderA2UIContainer(step.response_a2ui);
+                            currentTextStreamBox.innerHTML = '';
+                            currentTextStreamBox.appendChild(a2uiDiv);
+                        } else if (step.content) {
+                            currentTextStreamBox.innerText = step.content;
+                        }
+                    }
+                });
+
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            } catch (err) {
+                chatHistory.innerHTML = '';
+                const errTextDiv = document.createElement('div');
+                errTextDiv.className = 'a2ui-text';
+                errTextDiv.style.color = 'var(--danger)';
+                errTextDiv.innerText = `Error loading history: ${err.message}`;
+                const errContainer = document.createElement('div');
+                errContainer.className = 'a2ui-container';
+                errContainer.appendChild(errTextDiv);
+                appendMessageRow('agent', errContainer);
+            }
+        }
+
+        // Initialize session controls
+        loadSessions();
+        newSessionBtn.addEventListener('click', newSession);
     </script>
 </body>
 </html>

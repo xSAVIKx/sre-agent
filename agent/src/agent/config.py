@@ -25,6 +25,9 @@ try:
 except ImportError:
     HAS_ANTIGRAVITY = False
 
+# Global database to persist mock session history in local simulation mode
+MOCK_HISTORY_DB: dict[str, list[dict[str, Any]]] = {}
+
 if not HAS_ANTIGRAVITY:
     logger.warning("google-antigravity is not active or GEMINI_API_KEY is missing. Using simulated agent config fallbacks.")
 
@@ -50,16 +53,66 @@ if not HAS_ANTIGRAVITY:
             self.result = result
             self.id = id
 
+    class MockStep:
+        def __init__(self, **kwargs) -> None:
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+        def model_dump(self, mode: str = "json") -> dict[str, Any]:
+            return {
+                "id": getattr(self, "id", None),
+                "step_index": getattr(self, "step_index", 0),
+                "type": getattr(self, "type", "TEXT"),
+                "source": getattr(self, "source", "USER"),
+                "target": getattr(self, "target", "MODEL"),
+                "status": getattr(self, "status", "SUCCESS"),
+                "content": getattr(self, "content", ""),
+                "content_delta": getattr(self, "content_delta", None),
+                "thinking": getattr(self, "thinking", None),
+                "thinking_delta": getattr(self, "thinking_delta", None),
+                "tool_calls": getattr(self, "tool_calls", []),
+                "error": getattr(self, "error", None),
+                "is_complete_response": getattr(self, "is_complete_response", True),
+                "structured_output": getattr(self, "structured_output", None),
+                "usage_metadata": getattr(self, "usage_metadata", None),
+            }
+
+    class MockConversation:
+        def __init__(self, conversation_id: str | None = None) -> None:
+            self.conversation_id = conversation_id or "mock-conversation-id-123"
+
+        @property
+        def history(self) -> list[Any]:
+            history_data = MOCK_HISTORY_DB.get(self.conversation_id, [])
+            steps = []
+            for i, msg in enumerate(history_data):
+                steps.append(MockStep(
+                    step_index=i,
+                    type="TEXT",
+                    source="USER" if msg["role"] == "user" else "MODEL",
+                    target="MODEL" if msg["role"] == "user" else "USER",
+                    content=msg["content"],
+                    status="SUCCESS"
+                ))
+            return steps
+
     class Agent:  # type: ignore
         """Mock Agent context manager for local resilience."""
         def __init__(self, config: Any) -> None:
             self.config = config
+            self._conversation_obj = None
 
         async def __aenter__(self) -> "Agent":
             return self
 
         async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
             pass
+
+        @property
+        def conversation(self) -> MockConversation:
+            if self._conversation_obj is None:
+                self._conversation_obj = MockConversation(conversation_id=self.conversation_id)
+            return self._conversation_obj
 
         async def chat(self, prompt: str) -> Any:
             """Simulates the agent chat response."""

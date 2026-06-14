@@ -33,6 +33,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         save_dir: str,
         collection_name: str = "agent_sessions",
         mock_mode: bool = False,
+        prompt: str | None = None,
     ) -> None:
         """Initializes the FirestoreConnectionStrategy.
 
@@ -42,6 +43,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
             save_dir: The local directory where session files are stored temporarily.
             collection_name: The Firestore collection name.
             mock_mode: If True, uses the local in-memory DB instead of calling Firestore APIs.
+            prompt: The user prompt to save as session metadata.
         """
         self._local_strategy = local_strategy
         self.conversation_id = conversation_id
@@ -49,6 +51,8 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         self._collection_name = collection_name
         self._mock_mode = mock_mode
         self._db: Any = None
+        self.prompt = prompt
+        self._existing_prompt: str | None = None
 
     def connect(self) -> connection.Connection:
         """Returns the established local Connection."""
@@ -82,23 +86,26 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                 except Exception as e:
                     logger.error(f"Failed to retrieve document from Firestore: {e}")
 
-            if session_doc and "files" in session_doc:
-                os.makedirs(self._save_dir, exist_ok=True)
-                for filename, file_data in session_doc["files"].items():
-                    filepath = os.path.join(self._save_dir, filename)
-                    # Retrieve the binary bytes
-                    if isinstance(file_data, str):
-                        try:
-                            import base64
-                            file_bytes = base64.b64decode(file_data)
-                        except Exception:
-                            file_bytes = file_data.encode("utf-8")
-                    else:
-                        file_bytes = file_data
+            if session_doc:
+                if "prompt" in session_doc:
+                    self._existing_prompt = session_doc["prompt"]
+                if "files" in session_doc:
+                    os.makedirs(self._save_dir, exist_ok=True)
+                    for filename, file_data in session_doc["files"].items():
+                        filepath = os.path.join(self._save_dir, filename)
+                        # Retrieve the binary bytes
+                        if isinstance(file_data, str):
+                            try:
+                                import base64
+                                file_bytes = base64.b64decode(file_data)
+                            except Exception:
+                                file_bytes = file_data.encode("utf-8")
+                        else:
+                            file_bytes = file_data
 
-                    with open(filepath, "wb") as f:
-                        f.write(file_bytes)
-                    logger.info(f"Restored file {filename} ({len(file_bytes)} bytes)")
+                        with open(filepath, "wb") as f:
+                            f.write(file_bytes)
+                        logger.info(f"Restored file {filename} ({len(file_bytes)} bytes)")
 
         # 3. Enter the local connection strategy
         await self._local_strategy.__aenter__()
@@ -138,11 +145,13 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         # 4. Upload session files to Firestore/Mock DB
         if files_dict:
             import datetime
+            resolved_prompt = self._existing_prompt or self.prompt
             if self._mock_mode:
                 session_data = {
                     "conversation_id": active_conversation_id,
                     "files": files_dict,
                     "updated_at": datetime.datetime.now(datetime.timezone.utc),
+                    "prompt": resolved_prompt,
                 }
                 MOCK_FIRESTORE_DB[active_conversation_id] = session_data
                 logger.info(f"[Mock] Saved session state for {active_conversation_id}")
@@ -153,6 +162,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                         "conversation_id": active_conversation_id,
                         "files": files_dict,
                         "updated_at": firestore.SERVER_TIMESTAMP,
+                        "prompt": resolved_prompt,
                     }
                     doc_ref = self._db.collection(self._collection_name).document(active_conversation_id)
                     await doc_ref.set(session_data)
@@ -205,4 +215,5 @@ class FirestoreAgentConfig(LocalAgentConfig):
             conversation_id=self.conversation_id,
             save_dir=save_dir,
             mock_mode=mock_gcp,
+            prompt=getattr(self, "prompt", None),
         )

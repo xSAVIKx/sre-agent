@@ -231,15 +231,16 @@ if [ "$SKIP_INFRA" = "false" ]; then
     fi
 fi
 
-# 5. Build and Deploy Target Application (SRE Chaos Monkey)
-echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
-gcloud builds submit --config=app/cloudbuild.yaml \
-    --region="$GCP_REGION" \
-    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-    --substitutions=_GCP_REGION="$GCP_REGION" .
+# 5. Build and Deploy Target Application (SRE Chaos Monkey) - SKIPPED FOR FAST REDEPLOY
+# echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
+# gcloud builds submit --config=app/cloudbuild.yaml \
+#     --region="$GCP_REGION" \
+#     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
+#     --substitutions=_GCP_REGION="$GCP_REGION" .
 
 TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" --format="value(status.url)")
-echo -e "${GREEN}✓ Deployed SRE Chaos Monkey to: $TARGET_APP_URL${NC}"
+TARGET_APP_URL=$(echo "$TARGET_APP_URL" | sed 's/.*http/http/')
+echo -e "${GREEN}✓ SRE Chaos Monkey URL: $TARGET_APP_URL${NC}"
 
 # 6. Build and Deploy SRE Agent
 echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
@@ -249,6 +250,7 @@ gcloud builds submit --config=agent/cloudbuild.yaml \
     --substitutions=_GCP_REGION="$GCP_REGION",_TARGET_APP_URL="$TARGET_APP_URL" .
 
 AGENT_URL=$(gcloud run services describe sre-agent --region "$GCP_REGION" --format="value(status.url)")
+AGENT_URL=$(echo "$AGENT_URL" | sed 's/.*http/http/')
 echo -e "${GREEN}✓ Deployed SRE Agent to: $AGENT_URL${NC}"
 
 echo -e "\n${GREEN}===============================================${NC}"

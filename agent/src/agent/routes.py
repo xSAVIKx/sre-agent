@@ -99,6 +99,83 @@ async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
         )
 
 
+@router.get("/sessions")
+async def get_sessions():
+    """Retrieve all available diagnostic sessions with metadata."""
+    if not HAS_ANTIGRAVITY:
+        from agent.firestore_strategy import MOCK_FIRESTORE_DB
+        sessions = []
+        for conv_id, data in MOCK_FIRESTORE_DB.items():
+            updated_at = data.get("updated_at")
+            updated_at_str = updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at)
+            sessions.append({
+                "conversation_id": conv_id,
+                "prompt": data.get("prompt") or "Untitled Session",
+                "updated_at": updated_at_str
+            })
+        sessions.sort(key=lambda x: x["updated_at"], reverse=True)
+        return sessions
+
+    try:
+        from google.cloud import firestore
+        db = firestore.AsyncClient()
+        collection = db.collection("agent_sessions")
+        # Fetch only metadata fields: conversation_id, updated_at, prompt
+        docs = await collection.select(["conversation_id", "updated_at", "prompt"]).order_by("updated_at", direction=firestore.Query.DESCENDING).limit(50).get()
+        sessions = []
+        for doc in docs:
+            data = doc.to_dict()
+            updated_at = data.get("updated_at")
+            updated_at_str = updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at)
+            sessions.append({
+                "conversation_id": doc.id,
+                "prompt": data.get("prompt") or "Untitled Session",
+                "updated_at": updated_at_str
+            })
+        return sessions
+    except Exception as e:
+        logger.error(f"Failed to fetch Firestore sessions: {e}")
+        return []
+
+
+@router.get("/sessions/{conversation_id}/history")
+async def get_session_history(conversation_id: str):
+    """Retrieve the conversation step history for a specific session."""
+    if not HAS_ANTIGRAVITY:
+        from agent.config import MOCK_HISTORY_DB
+        history_data = MOCK_HISTORY_DB.get(conversation_id, [])
+        steps = []
+        for i, msg in enumerate(history_data):
+            steps.append({
+                "step_index": i,
+                "type": "TEXT",
+                "source": "USER" if msg["role"] == "user" else "MODEL",
+                "target": "MODEL" if msg["role"] == "user" else "USER",
+                "content": msg["content"],
+                "status": "SUCCESS"
+            })
+        return {
+            "conversation_id": conversation_id,
+            "history": steps
+        }
+
+    try:
+        config = load_firestore_agent_config(conversation_id=conversation_id)
+        async with Agent(config) as agent:
+            conv = agent.conversation
+            history_steps = []
+            for step in conv.history:
+                step_dict = step.model_dump(mode="json")
+                history_steps.append(step_dict)
+            return {
+                "conversation_id": conversation_id,
+                "history": history_steps
+            }
+    except Exception as e:
+        logger.error(f"Failed to load session history for {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve session history: {str(e)}")
+
+
 @router.get("/chat", response_class=HTMLResponse)
 async def get_chat_ui() -> HTMLResponse:
     """Serves the rich SRE Chat interface Web page."""
@@ -132,6 +209,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
         response = None
         try:
             config = load_firestore_agent_config(conversation_id=request.conversation_id)
+            config.prompt = request.prompt
 
             async with Agent(config) as agent:
                 response = await agent.chat(request.prompt)
@@ -185,6 +263,18 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                     response_a2ui = translate_markdown_to_a2ui(accumulated_text)
 
                     logger.info(f"Successfully processed chat stream. Active conversation ID: {conv_id}")
+                    if not HAS_ANTIGRAVITY:
+                        from agent.config import MOCK_HISTORY_DB
+                        if conv_id not in MOCK_HISTORY_DB:
+                            MOCK_HISTORY_DB[conv_id] = []
+                        MOCK_HISTORY_DB[conv_id].append({
+                            "role": "user",
+                            "content": request.prompt
+                        })
+                        MOCK_HISTORY_DB[conv_id].append({
+                            "role": "model",
+                            "content": accumulated_text
+                        })
                     yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
 
         except asyncio.CancelledError:
