@@ -23,6 +23,7 @@ from agent.config import (
     ToolResult,
 )
 from agent.a2ui_translator import translate_markdown_to_a2ui
+from skills.sre_incident_solver.gcp_tools import otel_trace
 
 logger = logging.getLogger("sre_agent.routes")
 
@@ -69,6 +70,7 @@ async def favicon() -> Response:
 
 
 @router.post("/diagnose")
+@otel_trace("routes.diagnose")
 async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
     """Trigger the SRE agent diagnostics workflow.
 
@@ -193,6 +195,7 @@ async def get_chat_ui() -> HTMLResponse:
 
 
 @router.post("/chat")
+@otel_trace("routes.chat")
 async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
     """Trigger a stateful agent chat request.
 
@@ -239,10 +242,10 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                     elif cls_name == "ToolCall":
                         tool_count += 1
                         if tool_count > 6:
-                            logger.warning(f"Loop prevention triggered: SRE Agent has executed {tool_count} tools in a single turn. Stopping process.")
+                            logger.warning(f"Loop prevention triggered: SRE Agent has executed {tool_count} tools in a single turn. Suspending to ask user for guidance.")
                             await response.cancel()
-                            yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Loop prevention triggered: SRE Agent has executed too many tools in a single turn. Stopping process to prevent infinite loop.\n'})}\n\n"
-                            yield f"data: {json.dumps({'type': 'error', 'detail': 'Tool execution limit exceeded to prevent infinite loops.'})}\n\n"
+                            response_a2ui = translate_markdown_to_a2ui(accumulated_text)
+                            yield f"data: {json.dumps({'type': 'limit_reached', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
                             break
 
                         # Live feedback of tool execution start

@@ -11,9 +11,47 @@ import logging
 import datetime
 from typing import Any
 from .registry import register_tool
+import contextlib
 
 # Setup basic logging
 logger = logging.getLogger("sre_tools")
+
+# Fail-safe OpenTelemetry imports
+try:
+    from opentelemetry import trace
+    from opentelemetry.trace import StatusCode
+    HAS_OTEL = True
+except ImportError:
+    HAS_OTEL = False
+
+
+@contextlib.contextmanager
+def start_span(name: str):
+    """Context manager to start an OpenTelemetry span safely."""
+    if HAS_OTEL:
+        tracer = trace.get_tracer("sre_agent")
+        with tracer.start_as_current_span(name) as span:
+            try:
+                yield span
+                span.set_status(StatusCode.OK)
+            except Exception as e:
+                span.record_exception(e)
+                span.set_status(StatusCode.ERROR, str(e))
+                raise
+    else:
+        yield None
+
+
+def otel_trace(span_name: str):
+    """Decorator to wrap a function call in a custom OpenTelemetry span."""
+    def decorator(func):
+        import functools
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            with start_span(span_name):
+                return await func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Fail-safe imports of Google Cloud client libraries
 try:
@@ -187,6 +225,7 @@ def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
 
 
 @register_tool
+@otel_trace("query_traces")
 async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
     """Queries recent traces from GCP Cloud Trace.
 
@@ -267,6 +306,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 
 
 @register_tool
+@otel_trace("get_trace_details")
 async def get_trace_details(trace_id: str, project_id: str | None = None) -> str:
     """Retrieves full span details for a specific trace ID from Cloud Trace.
 
@@ -356,6 +396,7 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 
 
 @register_tool
+@otel_trace("query_logs_by_trace")
 async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limit: int = 50) -> str:
     """Queries GCP Cloud Logging for logs correlated with a specific trace ID.
 
@@ -433,4 +474,140 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
         return json.dumps(logs_list, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query GCP Logging API for trace {trace_id}: {e}")
+        return json.dumps({"error": f"GCP Logging API Error: {str(e)}"}, indent=2)
+
+
+@register_tool
+@otel_trace("query_logs")
+async def query_logs(query: str, project_id: str | None = None, limit: int = 50) -> str:
+    """Queries GCP Cloud Logging with a custom filter query.
+
+    Retrieves log entries across services, allowing flexible filtering using
+    GCP Cloud Logging syntax.
+
+    Args:
+        query: The Cloud Logging filter expression (e.g. 'severity=ERROR' or service indicators).
+        project_id: The GCP Project ID. If None, uses default configuration.
+        limit: The maximum number of log entries to retrieve.
+
+    Returns:
+        A formatted JSON string containing a list of matching log entries.
+    """
+    if IS_MOCK:
+        # Check if the query is for self diagnostics of the SRE Agent itself
+        if any(x in query.lower() for x in ("sre-agent", "sre_agent", "self")):
+            logger.info("[GCP Observability] Performing self-diagnostic log review in mock mode.")
+            # Return both positive and negative execution outcomes
+            mock_agent_logs = [
+                {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "severity": "INFO",
+                    "message": "Antigravity SRE Agent version 0.1.0 starting up...",
+                },
+                {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "severity": "INFO",
+                    "message": "Successfully registered safety policy: denyAllExceptObservability",
+                },
+                {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "severity": "INFO",
+                    "message": "Successfully connected to Firestore default database (native).",
+                },
+                {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "severity": "WARNING",
+                    "message": "SRE Agent database fetch timeout when reading session metadata (1500ms). Retrying...",
+                },
+                {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "severity": "ERROR",
+                    "message": "FirestoreStrategyException: Failed to update document session_9999 - write transaction aborted.",
+                },
+                {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "severity": "INFO",
+                    "message": "Retrying Firestore update for session_9999: attempt 2 succeeded.",
+                }
+            ]
+            return json.dumps(mock_agent_logs, indent=2)
+
+        logger.info(f"[GCP Observability] Querying mock logs for filter '{query}' (limit={limit})")
+        logs = _load_mock_file("logs.json") or []
+        filtered_logs = []
+        
+        # Clean query to extract keywords for filter matching
+        clean_query = query.lower()
+        for term in ("and", "or", "resource.type", "severity", "resource.labels.service_name", "=", "\"", "'"):
+            clean_query = clean_query.replace(term, " ")
+        keywords = [k.strip() for k in clean_query.split() if k.strip()]
+        
+        # Parse severity
+        severity_filter = None
+        for sev in ("error", "critical", "warning", "info", "debug"):
+            if sev in query.lower():
+                severity_filter = sev.upper()
+                break
+
+        for log in logs:
+            msg = log.get("message", "")
+            msg_str = str(msg).lower()
+            sev_str = str(log.get("severity", "")).upper()
+            
+            if severity_filter and severity_filter != sev_str:
+                continue
+                
+            if keywords:
+                matches_keywords = True
+                for kw in keywords:
+                    if kw not in msg_str and kw not in sev_str.lower():
+                        matches_keywords = False
+                        break
+                if not matches_keywords:
+                    continue
+            
+            is_json = isinstance(msg, dict)
+            try:
+                if isinstance(msg, str) and (msg.startswith("{") or msg.startswith("[")):
+                    msg = json.loads(msg)
+                    is_json = True
+            except Exception:
+                pass
+                
+            filtered_logs.append({
+                "timestamp": log.get("timestamp"),
+                "severity": log.get("severity"),
+                "text_payload": msg if not is_json else None,
+                "json_payload": msg if is_json else None,
+                "resource": "cloud_run_revision"
+            })
+            
+        logger.info(f"[GCP Observability] Filtered {len(filtered_logs)} mock logs for query '{query}'")
+        return json.dumps(filtered_logs[:limit], indent=2)
+
+    resolved_project = _get_project_id(project_id)
+    logger.info(f"[GCP Observability] Querying real GCP Cloud Logging with query: {query} (Project={resolved_project}, limit={limit})")
+    if cloud_logging is None:
+        logger.error("[GCP Observability] google-cloud-logging library is missing")
+        return json.dumps({"error": "google-cloud-logging library is not installed."}, indent=2)
+
+    try:
+        client = cloud_logging.Client(project=resolved_project)
+        logger.info(f"[GCP Observability] Running list_entries with query filter: {query}")
+        entries = client.list_entries(filter_=query, max_results=limit)
+
+        logs_list = []
+        for entry in entries:
+            is_json = isinstance(entry.payload, dict)
+            logs_list.append({
+                "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+                "severity": entry.severity,
+                "text_payload": entry.payload if not is_json else None,
+                "json_payload": entry.payload if is_json else None,
+                "resource": entry.resource.type if entry.resource else None
+            })
+        logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
+        return json.dumps(logs_list, indent=2)
+    except Exception as e:
+        logger.error(f"[GCP Observability] Failed to query GCP Logging API with query '{query}': {e}")
         return json.dumps({"error": f"GCP Logging API Error: {str(e)}"}, indent=2)

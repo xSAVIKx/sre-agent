@@ -7,7 +7,7 @@ This module orchestrates two specialized ADK agents:
 
 import logging
 from typing import Any
-from .gcp_tools import get_trace_details, query_logs_by_trace
+from .gcp_tools import get_trace_details, query_logs_by_trace, otel_trace
 
 # Setup logger
 logger = logging.getLogger("sre_workflow")
@@ -77,6 +77,7 @@ log_correlator = AdkAgent(
 
 
 # 2. Orchestrate the diagnostic workflow
+@otel_trace("_run_adk_diagnostics")
 async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) -> str:
     """Runs the real multi-agent ADK reasoning workflow.
 
@@ -158,6 +159,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         return f"### Diagnostic Execution Failure\nAn error occurred while executing the ADK workflow: {e}"
 
 
+@otel_trace("_run_simulated_diagnostics")
 async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = None) -> str:
     """Runs a simulated diagnostics fallback loop.
 
@@ -233,6 +235,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         return f"### Diagnostic Simulation Failure\nFailed to parse traces or logs during simulation: {e}"
 
 
+@otel_trace("run_sre_diagnostics")
 async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -> str:
     """Executes the SRE diagnostic workflow using ADK agents.
 

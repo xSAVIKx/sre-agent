@@ -12,6 +12,16 @@ from typing import Any
 from skills.sre_incident_solver.registry import registry, register_tool
 from skills.sre_incident_solver.sre_workflow import run_sre_diagnostics
 
+# Fail-safe OpenTelemetry imports for tracer initialization
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+    HAS_OTEL = True
+except ImportError:
+    HAS_OTEL = False
+
 # Setup logging
 logger = logging.getLogger("sre_agent")
 
@@ -291,6 +301,23 @@ def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgen
     Returns:
         A LocalAgentConfig instance configured for SRE diagnostics.
     """
+    # Initialize OpenTelemetry if available and not in mock mode
+    IS_MOCK_ENV = os.getenv("MOCK_GCP", "true").lower() in ("true", "1", "yes")
+    if HAS_OTEL and not IS_MOCK_ENV:
+        try:
+            # Check if tracer provider is already set
+            try:
+                trace.get_tracer_provider()
+            except Exception:
+                provider = TracerProvider()
+                exporter = CloudTraceSpanExporter()
+                processor = BatchSpanProcessor(exporter)
+                provider.add_span_processor(processor)
+                trace.set_tracer_provider(provider)
+                logger.info("Successfully initialized agent OpenTelemetry tracer provider.")
+        except Exception as e:
+            logger.error(f"Failed to initialize agent OpenTelemetry: {e}")
+
     # 1. Gather all registered python tools
     tools: list[Any] = []
     tools.extend(registry.get_tools())
@@ -322,17 +349,22 @@ def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgen
         allow("get_trace_details"),
         allow("query_logs_by_trace"),
         allow("run_diagnostics_workflow"),
+        allow("query_logs"),
         ask_user("run_command", handler=cli_approval_handler)  # Require confirmation for shell commands
     ]
 
     system_instructions = (
         "You are an expert Google Cloud SRE agent specialized in distributed system debugging. "
-        "You have access to both low-level telemetry tools and a high-level diagnostics workflow tool:\n"
-        "1. For general incident investigation: Retrieve recent traces using 'query_traces', "
+        "You have access to low-level telemetry tools (traces, log search) and a high-level diagnostics workflow tool:\n"
+        "1. For general trace-based investigation: Retrieve recent traces using 'query_traces', "
         "then pass the trace summaries to 'run_diagnostics_workflow' to execute a multi-agent diagnostic "
         "analysis that automatically correlates traces and logs to produce a root cause report.\n"
-        "2. For targeted queries or detailed troubleshooting: Use the low-level tools 'get_trace_details' "
-        "and 'query_logs_by_trace' to inspect specific traces and logs directly.\n"
+        "2. For log-based investigation: Use 'query_logs' to perform custom log searches (e.g. searching for error keywords, "
+        "specific services, or severity levels). You can find correlated trace IDs within the logs to perform deeper tracing "
+        "using 'get_trace_details' and 'query_logs_by_trace'.\n"
+        "3. For self diagnostics: Use 'query_logs' with query 'sre-agent' to fetch and diagnose your own agent execution logs.\n"
+        "4. Obtain more details: If the user request is vague or ambiguous (e.g. missing product names or service details), "
+        "ask the user for clarifying details (such as service name or product area of interest) to refine your diagnostic queries.\n"
         "Always present your final diagnosis or analysis results clearly in markdown."
     )
 

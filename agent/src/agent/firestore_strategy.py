@@ -14,6 +14,7 @@ from google.antigravity.connections.local.local_connection_config import LocalAg
 from google.antigravity.connections.local.local_connection import LocalConnectionStrategy
 
 logger = logging.getLogger("sre_agent.firestore_strategy")
+from skills.sre_incident_solver.gcp_tools import otel_trace
 
 # Global in-memory DB for local testing/mock mode
 MOCK_FIRESTORE_DB: dict[str, dict[str, Any]] = {}
@@ -58,6 +59,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         """Returns the established local Connection."""
         return self._local_strategy.connect()
 
+    @otel_trace("firestore_strategy.connect")
     async def __aenter__(self) -> "FirestoreConnectionStrategy":
         """Downloads session files from Firestore and starts the local strategy."""
         # 1. Setup Firestore client if not in mock mode
@@ -111,6 +113,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         await self._local_strategy.__aenter__()
         return self
 
+    @otel_trace("firestore_strategy.disconnect")
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         """Uploads updated session files to Firestore and tears down local resources."""
         # 1. Retrieve conversation_id from the established connection while it's active
@@ -185,6 +188,7 @@ class FirestoreAgentConfig(LocalAgentConfig):
     Extends LocalAgentConfig to wrap the LocalConnectionStrategy with
     FirestoreConnectionStrategy remote backup/restore capability.
     """
+    prompt: str | None = None
 
     def create_strategy(
         self,

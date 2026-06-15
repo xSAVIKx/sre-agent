@@ -47,9 +47,12 @@ class TestA2uiTranslator(unittest.TestCase):
         components = a2ui["components"]
         self.assertEqual(len(components), 5)
 
-        # 1. Header
-        self.assertEqual(components[0]["type"], "header")
-        self.assertEqual(components[0]["text"], "🚨 SRE Incident Diagnosis Report")
+        # 1. Alert component
+        self.assertEqual(components[0]["type"], "alert")
+        self.assertEqual(components[0]["level"], "error")
+        self.assertEqual(components[0]["title"], "Incident Detected")
+        self.assertIn("abc123traceid", components[0]["text"])
+        self.assertIn("/api/gateway", components[0]["text"])
 
         # 2. Metadata Card
         self.assertEqual(components[1]["type"], "card")

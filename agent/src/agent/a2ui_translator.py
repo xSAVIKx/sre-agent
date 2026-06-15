@@ -75,8 +75,10 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
     if trace_id or root_service:
         components: list[dict[str, Any]] = [
             {
-                "type": "header",
-                "text": "🚨 SRE Incident Diagnosis Report"
+                "type": "alert",
+                "level": "error",
+                "title": "Incident Detected",
+                "text": f"Service failure detected on root service `{root_service or 'unknown'}`. Anomalous trace `{trace_id or 'unknown'}` indicates a backend exception or timeout."
             },
             {
                 "type": "card",
@@ -114,7 +116,24 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
             "components": components
         }
 
-    # 4. Standard Text Chat Fallback
+    # 4. Success / Health Check Alert Fallback
+    if any(x in text.lower() for x in ("no anomalous traces", "diagnostics completed", "successfully connected", "redeploy completed")):
+        title = "Diagnostics Clean"
+        if "successfully connected" in text.lower():
+            title = "Agent Health Clean"
+        return {
+            "type": "container",
+            "components": [
+                {
+                    "type": "alert",
+                    "level": "success",
+                    "title": title,
+                    "text": text
+                }
+            ]
+        }
+
+    # 5. Standard Text Chat Fallback
     return {
         "type": "container",
         "components": [

@@ -26,6 +26,8 @@
             --success: #10b981;
             --success-glow: rgba(16, 185, 129, 0.2);
             --danger: #ef4444;
+            --warning: #f59e0b;
+            --warning-glow: rgba(245, 158, 11, 0.2);
         }
 
         * {
@@ -211,6 +213,47 @@
             border-left: 3px solid var(--primary);
             padding-left: 10px;
             margin-bottom: 4px;
+        }
+
+        .a2ui-alert {
+            padding: 14px 18px;
+            border-radius: 12px;
+            border-left: 4px solid var(--primary);
+            background: rgba(99, 102, 241, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-left-width: 4px;
+            color: var(--text-main);
+            margin-bottom: 8px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .a2ui-alert.error {
+            border-left-color: var(--danger);
+            background: rgba(239, 68, 68, 0.08);
+            border-color: rgba(239, 68, 68, 0.15);
+        }
+        .a2ui-alert.warning {
+            border-left-color: var(--warning);
+            background: rgba(245, 158, 11, 0.08);
+            border-color: rgba(245, 158, 11, 0.15);
+        }
+        .a2ui-alert.success {
+            border-left-color: var(--success);
+            background: rgba(16, 185, 129, 0.08);
+            border-color: rgba(16, 185, 129, 0.15);
+        }
+        .a2ui-alert-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        .a2ui-alert-text {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.5;
         }
 
         .a2ui-text {
@@ -707,6 +750,31 @@
 
             payload.components.forEach(comp => {
                 switch (comp.type) {
+                    case 'alert':
+                        const alertDiv = document.createElement('div');
+                        alertDiv.className = `a2ui-alert ${comp.level || 'info'}`;
+                        
+                        const alertTitle = document.createElement('div');
+                        alertTitle.className = 'a2ui-alert-title';
+                        
+                        let icon = 'ℹ️';
+                        if (comp.level === 'error') icon = '🚨';
+                        else if (comp.level === 'warning') icon = '⚠️';
+                        else if (comp.level === 'success') icon = '✅';
+                        
+                        alertTitle.innerHTML = `<span>${icon}</span> <span>${formatMarkdownInline(comp.title || 'Notification')}</span>`;
+                        alertDiv.appendChild(alertTitle);
+                        
+                        if (comp.text) {
+                            const alertText = document.createElement('div');
+                            alertText.className = 'a2ui-alert-text';
+                            alertText.innerHTML = formatMarkdownInline(comp.text);
+                            alertDiv.appendChild(alertText);
+                        }
+                        
+                        containerDiv.appendChild(alertDiv);
+                        break;
+
                     case 'header':
                         const header = document.createElement('div');
                         header.className = 'a2ui-header';
@@ -926,6 +994,7 @@
                 let buffer = "";
                 let finalMarkdown = "";
                 let finalA2UI = null;
+                let limitReachedObj = null;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -960,6 +1029,8 @@
                                 } else if (event.type === "chunk") {
                                     textStreamBox.innerText += event.text;
                                     chatHistory.scrollTop = chatHistory.scrollHeight;
+                                } else if (event.type === "limit_reached") {
+                                    limitReachedObj = event;
                                 } else if (event.type === "done") {
                                     finalMarkdown = event.response;
                                     finalA2UI = event.response_a2ui;
@@ -976,7 +1047,111 @@
                 // Stream ended. Transform the bubble!
                 agentBubble.innerHTML = ''; // Clear temporary stream containers
                 
-                if (finalA2UI) {
+                if (limitReachedObj) {
+                    const res = limitReachedObj.response_a2ui;
+                    if (res) {
+                        agentBubble.appendChild(renderA2UIContainer(res));
+                    } else {
+                        const fallbackTextDiv = document.createElement('div');
+                        fallbackTextDiv.className = 'a2ui-text';
+                        fallbackTextDiv.innerText = limitReachedObj.response || "Suspended due to tool limit.";
+                        const fallbackContainer = document.createElement('div');
+                        fallbackContainer.className = 'a2ui-container';
+                        fallbackContainer.appendChild(fallbackTextDiv);
+                        agentBubble.appendChild(fallbackContainer);
+                    }
+
+                    // Append interactive decision panel
+                    const panel = document.createElement('div');
+                    panel.className = 'limit-reached-panel';
+                    panel.style.marginTop = '15px';
+                    panel.style.padding = '15px';
+                    panel.style.background = 'rgba(245, 158, 11, 0.05)';
+                    panel.style.borderRadius = '12px';
+                    panel.style.border = '1px solid rgba(245, 158, 11, 0.2)';
+                    
+                    const title = document.createElement('div');
+                    title.style.color = 'var(--warning)';
+                    title.style.fontWeight = '600';
+                    title.style.marginBottom = '8px';
+                    title.style.fontSize = '15px';
+                    title.style.display = 'flex';
+                    title.style.alignItems = 'center';
+                    title.style.gap = '8px';
+                    title.innerHTML = '<span>⚠️</span> <span>Tool execution limit reached (6 tools)</span>';
+                    panel.appendChild(title);
+
+                    const desc = document.createElement('div');
+                    desc.style.fontSize = '13.5px';
+                    desc.style.color = 'var(--text-muted)';
+                    desc.style.marginBottom = '15px';
+                    desc.style.lineHeight = '1.4';
+                    desc.innerText = 'To prevent infinite loops, processing has paused. Choose how you want to proceed:';
+                    panel.appendChild(desc);
+
+                    const btnGroup = document.createElement('div');
+                    btnGroup.style.display = 'flex';
+                    btnGroup.style.gap = '10px';
+                    btnGroup.style.flexWrap = 'wrap';
+
+                    const continueBtn = document.createElement('button');
+                    continueBtn.className = 'send-button';
+                    continueBtn.style.padding = '8px 16px';
+                    continueBtn.style.fontSize = '13px';
+                    continueBtn.style.height = 'auto';
+                    continueBtn.style.width = 'auto';
+                    continueBtn.style.background = 'rgba(245, 158, 11, 0.15)';
+                    continueBtn.style.border = '1px solid var(--warning)';
+                    continueBtn.style.color = 'var(--warning)';
+                    continueBtn.style.borderRadius = '8px';
+                    continueBtn.innerText = '🔄 Continue diagnostics';
+                    continueBtn.addEventListener('click', () => {
+                        panel.remove();
+                        // Automatically submit a continuation prompt
+                        textInput.value = 'Please continue the investigation.';
+                        inputForm.dispatchEvent(new Event('submit'));
+                    });
+                    btnGroup.appendChild(continueBtn);
+
+                    const clarifyBtn = document.createElement('button');
+                    clarifyBtn.className = 'send-button';
+                    clarifyBtn.style.padding = '8px 16px';
+                    clarifyBtn.style.fontSize = '13px';
+                    clarifyBtn.style.height = 'auto';
+                    clarifyBtn.style.width = 'auto';
+                    clarifyBtn.style.background = 'rgba(255, 255, 255, 0.05)';
+                    clarifyBtn.style.border = '1px solid var(--border-glass)';
+                    clarifyBtn.style.color = 'var(--text-main)';
+                    clarifyBtn.style.borderRadius = '8px';
+                    clarifyBtn.innerText = '🔍 Refine scope / clarify';
+                    clarifyBtn.addEventListener('click', () => {
+                        panel.remove();
+                        textInput.value = 'Focus search on service: [enter service name]';
+                        textInput.focus();
+                        const len = textInput.value.length;
+                        textInput.setSelectionRange(len - 20, len);
+                    });
+                    btnGroup.appendChild(clarifyBtn);
+
+                    const stopBtn = document.createElement('button');
+                    stopBtn.className = 'send-button';
+                    stopBtn.style.padding = '8px 16px';
+                    stopBtn.style.fontSize = '13px';
+                    stopBtn.style.height = 'auto';
+                    stopBtn.style.width = 'auto';
+                    stopBtn.style.background = 'rgba(239, 68, 68, 0.15)';
+                    stopBtn.style.border = '1px solid var(--danger)';
+                    stopBtn.style.color = 'var(--danger)';
+                    stopBtn.style.borderRadius = '8px';
+                    stopBtn.innerText = '➕ Start new chat';
+                    stopBtn.addEventListener('click', () => {
+                        newSession();
+                    });
+                    btnGroup.appendChild(stopBtn);
+
+                    panel.appendChild(btnGroup);
+                    agentBubble.appendChild(panel);
+                } else if (finalA2UI) {
                     const finalA2UIDiv = renderA2UIContainer(finalA2UI);
                     agentBubble.appendChild(finalA2UIDiv);
                 } else {
