@@ -84,6 +84,19 @@ class TestA2uiTranslator(unittest.TestCase):
         self.assertEqual(items[0], "**Check Database Health**: Run health checks on PostgreSQL.")
         self.assertEqual(items[1], "**Adjust Connection Pools**: Scale up pool limits.")
 
+    def test_translate_healthy_diagnostics_report(self) -> None:
+        """Verifies that a clean system health report maps to a success alert."""
+        text = "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        a2ui = translate_markdown_to_a2ui(text)
+
+        self.assertEqual(a2ui["type"], "container")
+        components = a2ui["components"]
+        self.assertEqual(len(components), 1)
+        self.assertEqual(components[0]["type"], "alert")
+        self.assertEqual(components[0]["level"], "success")
+        self.assertEqual(components[0]["title"], "Diagnostics Clean")
+        self.assertEqual(components[0]["text"], text)
+
 
 if __name__ == "__main__":
     unittest.main()

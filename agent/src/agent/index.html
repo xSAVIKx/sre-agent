@@ -647,6 +647,17 @@
             color: var(--text-muted);
         }
 
+        .session-item:hover .edit-title-btn,
+        .session-item:hover .delete-session-btn {
+            opacity: 1 !important;
+        }
+        .edit-title-btn:hover {
+            color: var(--primary) !important;
+        }
+        .delete-session-btn:hover {
+            color: var(--danger) !important;
+        }
+
         .main-chat-area {
             flex: 1;
             display: flex;
@@ -1213,10 +1224,54 @@
             }
             item.dataset.id = session.conversation_id;
 
+            const header = document.createElement('div');
+            header.className = 'session-header';
+            header.style.display = 'flex';
+            header.style.justifyContent = 'space-between';
+            header.style.alignItems = 'center';
+            header.style.width = '100%';
+            header.style.gap = '8px';
+
             const title = document.createElement('div');
             title.className = 'session-title';
+            title.style.flex = '1';
             title.innerText = session.prompt;
-            item.appendChild(title);
+            header.appendChild(title);
+
+            const actionContainer = document.createElement('div');
+            actionContainer.className = 'session-actions';
+            actionContainer.style.display = 'flex';
+            actionContainer.style.gap = '6px';
+            actionContainer.style.alignItems = 'center';
+
+            const editBtn = document.createElement('button');
+            editBtn.className = 'edit-title-btn';
+            editBtn.innerHTML = '✏️';
+            editBtn.style.background = 'none';
+            editBtn.style.border = 'none';
+            editBtn.style.color = 'var(--text-muted)';
+            editBtn.style.cursor = 'pointer';
+            editBtn.style.fontSize = '12px';
+            editBtn.style.opacity = '0';
+            editBtn.style.transition = 'opacity 0.2s, color 0.2s';
+            editBtn.style.padding = '2px';
+            actionContainer.appendChild(editBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'delete-session-btn';
+            deleteBtn.innerHTML = '🗑️';
+            deleteBtn.style.background = 'none';
+            deleteBtn.style.border = 'none';
+            deleteBtn.style.color = 'var(--text-muted)';
+            deleteBtn.style.cursor = 'pointer';
+            deleteBtn.style.fontSize = '12px';
+            deleteBtn.style.opacity = '0';
+            deleteBtn.style.transition = 'opacity 0.2s, color 0.2s';
+            deleteBtn.style.padding = '2px';
+            actionContainer.appendChild(deleteBtn);
+
+            header.appendChild(actionContainer);
+            item.appendChild(header);
 
             const meta = document.createElement('div');
             meta.className = 'session-meta';
@@ -1238,6 +1293,94 @@
                     currentAbortController.abort();
                 }
                 selectSession(session.conversation_id);
+            });
+
+            editBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'session-title-input';
+                input.value = title.innerText;
+                input.style.flex = '1';
+                input.style.background = 'rgba(255, 255, 255, 0.05)';
+                input.style.border = '1px solid var(--primary)';
+                input.style.borderRadius = '6px';
+                input.style.color = 'var(--text-main)';
+                input.style.fontSize = '14px';
+                input.style.padding = '2px 6px';
+                input.style.outline = 'none';
+                
+                header.replaceChild(input, title);
+                actionContainer.style.display = 'none';
+                input.focus();
+                input.select();
+                
+                const saveTitle = async () => {
+                    const newTitle = input.value.trim();
+                    if (newTitle && newTitle !== session.prompt) {
+                        try {
+                            const res = await fetch(`/sessions/${session.conversation_id}/title`, {
+                                method: 'PUT',
+                                headers: {
+                                    'Content-Type': 'application/json'
+                                },
+                                body: JSON.stringify({ title: newTitle })
+                            });
+                            if (res.ok) {
+                                session.prompt = newTitle;
+                                title.innerText = newTitle;
+                            } else {
+                                console.error('Failed to save session title');
+                            }
+                        } catch (err) {
+                            console.error('Failed to save session title:', err);
+                        }
+                    }
+                    if (header.contains(input)) {
+                        header.replaceChild(title, input);
+                    }
+                    actionContainer.style.display = 'flex';
+                };
+                
+                input.addEventListener('keydown', (evt) => {
+                    if (evt.key === 'Enter') {
+                        saveTitle();
+                    } else if (evt.key === 'Escape') {
+                        if (header.contains(input)) {
+                            header.replaceChild(title, input);
+                        }
+                        actionContainer.style.display = 'flex';
+                    }
+                });
+                
+                input.addEventListener('blur', () => {
+                    saveTitle();
+                });
+            });
+
+            deleteBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                
+                const confirmDelete = confirm(`Are you sure you want to delete this session ("${session.prompt || 'Untitled Session'}")?`);
+                if (!confirmDelete) return;
+                
+                try {
+                    const res = await fetch(`/sessions/${session.conversation_id}`, {
+                        method: 'DELETE'
+                    });
+                    if (res.ok) {
+                        if (session.conversation_id === activeConversationId) {
+                            newSession();
+                        }
+                        loadSessions();
+                    } else {
+                        alert('Failed to delete session');
+                    }
+                } catch (err) {
+                    console.error('Failed to delete session:', err);
+                    alert('Error deleting session');
+                }
             });
 
             return item;

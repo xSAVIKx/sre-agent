@@ -140,38 +140,84 @@ async def get_sessions():
         return []
 
 
+class RenameSessionRequest(BaseModel):
+    title: str
+
+
+@router.put("/sessions/{conversation_id}/title")
+async def rename_session(conversation_id: str, request: RenameSessionRequest):
+    """Rename/modify the title of an existing session."""
+    logger.info(f"Renaming session {conversation_id} to: {request.title}")
+
+    if not HAS_ANTIGRAVITY:
+        from agent.firestore_strategy import MOCK_FIRESTORE_DB
+        if conversation_id in MOCK_FIRESTORE_DB:
+            MOCK_FIRESTORE_DB[conversation_id]["prompt"] = request.title
+            return {"status": "success", "conversation_id": conversation_id, "title": request.title}
+        else:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+    try:
+        from google.cloud import firestore
+        db = firestore.AsyncClient()
+        doc_ref = db.collection("agent_sessions").document(conversation_id)
+        await doc_ref.set({"prompt": request.title}, merge=True)
+        return {"status": "success", "conversation_id": conversation_id, "title": request.title}
+    except Exception as e:
+        logger.error(f"Failed to rename Firestore session {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to rename session: {str(e)}")
+
+
+@router.delete("/sessions/{conversation_id}")
+async def delete_session(conversation_id: str):
+    """Delete an existing session."""
+    logger.info(f"Deleting session: {conversation_id}")
+
+    if not HAS_ANTIGRAVITY:
+        from agent.firestore_strategy import MOCK_FIRESTORE_DB
+        if conversation_id in MOCK_FIRESTORE_DB:
+            del MOCK_FIRESTORE_DB[conversation_id]
+        return {"status": "success", "conversation_id": conversation_id}
+
+    try:
+        from google.cloud import firestore
+        db = firestore.AsyncClient()
+        doc_ref = db.collection("agent_sessions").document(conversation_id)
+        await doc_ref.delete()
+        return {"status": "success", "conversation_id": conversation_id}
+    except Exception as e:
+        logger.error(f"Failed to delete Firestore session {conversation_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+
+
 @router.get("/sessions/{conversation_id}/history")
 async def get_session_history(conversation_id: str):
     """Retrieve the conversation step history for a specific session."""
     if not HAS_ANTIGRAVITY:
-        from agent.config import MOCK_HISTORY_DB
-        history_data = MOCK_HISTORY_DB.get(conversation_id, [])
-        steps = []
-        for i, msg in enumerate(history_data):
-            steps.append({
-                "step_index": i,
-                "type": "TEXT",
-                "source": "USER" if msg["role"] == "user" else "MODEL",
-                "target": "MODEL" if msg["role"] == "user" else "USER",
-                "content": msg["content"],
-                "status": "SUCCESS"
-            })
+        from agent.firestore_strategy import MOCK_FIRESTORE_DB
+        session = MOCK_FIRESTORE_DB.get(conversation_id, {})
+        steps = session.get("history", [])
         return {
             "conversation_id": conversation_id,
             "history": steps
         }
 
     try:
-        config = load_firestore_agent_config(conversation_id=conversation_id)
-        async with Agent(config) as agent:
-            conv = agent.conversation
-            history_steps = []
-            for step in conv.history:
-                step_dict = step.model_dump(mode="json")
-                history_steps.append(step_dict)
+        from google.cloud import firestore
+        db = firestore.AsyncClient()
+        doc_ref = db.collection("agent_sessions").document(conversation_id)
+        doc = await doc_ref.get()
+        if doc.exists:
+            data = doc.to_dict()
+            steps = data.get("history", [])
             return {
                 "conversation_id": conversation_id,
-                "history": history_steps
+                "history": steps
+            }
+        else:
+            return {
+                "conversation_id": conversation_id,
+                "history": []
             }
     except Exception as e:
         logger.error(f"Failed to load session history for {conversation_id}: {e}")
@@ -215,6 +261,34 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
             config.prompt = request.prompt
 
             async with Agent(config) as agent:
+                conv_id = agent.conversation_id or request.conversation_id
+
+                # Load existing history steps and populate agent.conversation._steps
+                if conv_id:
+                    if not HAS_ANTIGRAVITY:
+                        from agent.firestore_strategy import MOCK_FIRESTORE_DB
+                        session = MOCK_FIRESTORE_DB.get(conv_id, {})
+                        history_data = session.get("history", [])
+                        from agent.config import MockStep
+                        agent.conversation._steps = [MockStep(**step_dict) for step_dict in history_data]
+                    else:
+                        try:
+                            from google.cloud import firestore
+                            db = firestore.AsyncClient()
+                            doc = await db.collection("agent_sessions").document(conv_id).get()
+                            if doc.exists:
+                                data = doc.to_dict()
+                                history_data = data.get("history", [])
+                                from google.antigravity.types import Step
+                                agent.conversation._steps = []
+                                for step_dict in history_data:
+                                    try:
+                                        agent.conversation._steps.append(Step(**step_dict))
+                                    except Exception as ex:
+                                        logger.error(f"Failed to deserialize history step: {ex}, step_dict: {step_dict}")
+                        except Exception as e:
+                            logger.error(f"Failed to load history from Firestore for context preservation: {e}")
+
                 response = await agent.chat(request.prompt)
                 conv_id = agent.conversation_id
 
@@ -266,18 +340,44 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                     response_a2ui = translate_markdown_to_a2ui(accumulated_text)
 
                     logger.info(f"Successfully processed chat stream. Active conversation ID: {conv_id}")
+
+                    # Capture updated history steps
+                    steps = []
+                    for step in agent.conversation.history:
+                        step_dict = step.model_dump(mode="json")
+                        # Add response_a2ui to the final model response step if applicable
+                        if step.source == "MODEL" and getattr(step, "is_complete_response", True):
+                            step_dict["response_a2ui"] = response_a2ui
+                        steps.append(step_dict)
+
                     if not HAS_ANTIGRAVITY:
-                        from agent.config import MOCK_HISTORY_DB
-                        if conv_id not in MOCK_HISTORY_DB:
-                            MOCK_HISTORY_DB[conv_id] = []
-                        MOCK_HISTORY_DB[conv_id].append({
-                            "role": "user",
-                            "content": request.prompt
-                        })
-                        MOCK_HISTORY_DB[conv_id].append({
-                            "role": "model",
-                            "content": accumulated_text
-                        })
+                        from agent.firestore_strategy import MOCK_FIRESTORE_DB
+                        if conv_id not in MOCK_FIRESTORE_DB:
+                            MOCK_FIRESTORE_DB[conv_id] = {}
+                        MOCK_FIRESTORE_DB[conv_id]["history"] = steps
+                        if not MOCK_FIRESTORE_DB[conv_id].get("prompt") or MOCK_FIRESTORE_DB[conv_id]["prompt"] == "Untitled Session":
+                            MOCK_FIRESTORE_DB[conv_id]["prompt"] = request.prompt
+                    else:
+                        try:
+                            from google.cloud import firestore
+                            db = firestore.AsyncClient()
+                            doc_ref = db.collection("agent_sessions").document(conv_id)
+                            doc = await doc_ref.get()
+                            current_prompt = None
+                            if doc.exists:
+                                current_prompt = doc.to_dict().get("prompt")
+                            
+                            update_data = {
+                                "history": steps,
+                                "updated_at": firestore.SERVER_TIMESTAMP
+                            }
+                            if not current_prompt or current_prompt == "Untitled Session":
+                                update_data["prompt"] = request.prompt
+                            
+                            await doc_ref.set(update_data, merge=True)
+                        except Exception as e:
+                            logger.error(f"Failed to save history/prompt to Firestore: {e}")
+
                     yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
 
         except asyncio.CancelledError:

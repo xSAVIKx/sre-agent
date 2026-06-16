@@ -185,18 +185,31 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
                 if t.get("error") is True or t.get("durationMs", 0) > 5000:
                     failing_trace = t
                     break
-            if not failing_trace and data:
-                # Find first non-diagnose trace as a fallback
-                for t in data:
-                    name = t.get("name", "").lower()
-                    if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
-                        failing_trace = t
+            if not failing_trace:
+                # Check if there are mock logs with ERROR/CRITICAL severity in the database
+                from .gcp_tools import _load_mock_file
+                mock_logs = _load_mock_file("logs.json") or []
+                has_error_logs = False
+                for log in mock_logs:
+                    if log.get("severity") in ("ERROR", "CRITICAL"):
+                        has_error_logs = True
                         break
-                if not failing_trace:
-                    failing_trace = data[0]
+                
+                if not has_error_logs:
+                    return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+                
+                # If there are error logs, fallback to first non-diagnose trace to analyze it
+                if data:
+                    for t in data:
+                        name = t.get("name", "").lower()
+                        if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
+                            failing_trace = t
+                            break
+                    if not failing_trace:
+                        failing_trace = data[0]
 
         if not failing_trace:
-            return "### Diagnostics Completed\nNo anomalous traces or errors detected in the recent logs."
+            return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
 
         trace_id = failing_trace.get("traceId", "unknown_trace_id")
         logger.info(f"[Simulation] Identified trace ID: {trace_id}")
@@ -250,6 +263,43 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
         A markdown-formatted SRE incident diagnosis report.
     """
     logger.info("Starting SRE diagnostics workflow...")
+
+    # 1. Parse traces and check if there are any failed or slow traces
+    has_problems = False
+    try:
+        import json
+        traces = json.loads(traces_json)
+        if isinstance(traces, list):
+            for t in traces:
+                name = t.get("name", "").lower()
+                # Skip system agent paths
+                if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
+                    continue
+                if t.get("error") is True or t.get("durationMs", 0) > 5000:
+                    has_problems = True
+                    break
+    except Exception as e:
+        logger.warning(f"Failed to parse traces in pre-check: {e}")
+
+    # 2. If traces look clean, check recent logs for ERROR/CRITICAL severity
+    if not has_problems:
+        logger.info("No anomalous traces found. Checking logs for recent errors...")
+        try:
+            from .gcp_tools import query_logs
+            log_res = await query_logs(query="severity=ERROR OR severity=CRITICAL", project_id=project_id, limit=5)
+            logs = json.loads(log_res)
+            if isinstance(logs, list) and len(logs) > 0:
+                for log in logs:
+                    if log.get("severity") in ("ERROR", "CRITICAL"):
+                        has_problems = True
+                        break
+        except Exception as e:
+            logger.warning(f"Failed to query logs in pre-check: {e}")
+
+    # 3. If everything is healthy, return clean report
+    if not has_problems:
+        logger.info("Diagnostics workflow found no anomalous traces or error logs. All systems healthy.")
+        return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
 
     import os
     if HAS_ADK and "GEMINI_API_KEY" in os.environ:

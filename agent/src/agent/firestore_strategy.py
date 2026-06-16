@@ -156,7 +156,9 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                     "updated_at": datetime.datetime.now(datetime.timezone.utc),
                     "prompt": resolved_prompt,
                 }
-                MOCK_FIRESTORE_DB[active_conversation_id] = session_data
+                if active_conversation_id not in MOCK_FIRESTORE_DB:
+                    MOCK_FIRESTORE_DB[active_conversation_id] = {}
+                MOCK_FIRESTORE_DB[active_conversation_id].update(session_data)
                 logger.info(f"[Mock] Saved session state for {active_conversation_id}")
             else:
                 try:
@@ -168,7 +170,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                         "prompt": resolved_prompt,
                     }
                     doc_ref = self._db.collection(self._collection_name).document(active_conversation_id)
-                    await doc_ref.set(session_data)
+                    await doc_ref.set(session_data, merge=True)
                     logger.info(f"Uploaded session state to Firestore for {active_conversation_id}")
                 except Exception as e:
                     logger.exception(f"Failed to upload session state to Firestore: {e}")

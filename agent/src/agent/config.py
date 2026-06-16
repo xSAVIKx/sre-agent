@@ -65,46 +65,60 @@ if not HAS_ANTIGRAVITY:
 
     class MockStep:
         def __init__(self, **kwargs) -> None:
+            self.id = ""
+            self.step_index = 0
+            self.type = "TEXT_RESPONSE"
+            self.source = "USER"
+            self.target = "TARGET_UNSPECIFIED"
+            self.status = "DONE"
+            self.content = ""
+            self.content_delta = None
+            self.thinking = None
+            self.thinking_delta = None
+            self.tool_calls = []
+            self.error = None
+            self.is_complete_response = True
+            self.structured_output = None
+            self.usage_metadata = None
+
             for k, v in kwargs.items():
+                if k == "type" and v == "TEXT":
+                    v = "TEXT_RESPONSE"
+                elif k == "status" and v == "SUCCESS":
+                    v = "DONE"
+                elif k == "target" and v == "MODEL":
+                    v = "TARGET_UNSPECIFIED"
+                elif k == "target" and v == "USER":
+                    v = "TARGET_USER"
                 setattr(self, k, v)
 
         def model_dump(self, mode: str = "json") -> dict[str, Any]:
             return {
-                "id": getattr(self, "id", None),
-                "step_index": getattr(self, "step_index", 0),
-                "type": getattr(self, "type", "TEXT"),
-                "source": getattr(self, "source", "USER"),
-                "target": getattr(self, "target", "MODEL"),
-                "status": getattr(self, "status", "SUCCESS"),
-                "content": getattr(self, "content", ""),
-                "content_delta": getattr(self, "content_delta", None),
-                "thinking": getattr(self, "thinking", None),
-                "thinking_delta": getattr(self, "thinking_delta", None),
-                "tool_calls": getattr(self, "tool_calls", []),
-                "error": getattr(self, "error", None),
-                "is_complete_response": getattr(self, "is_complete_response", True),
-                "structured_output": getattr(self, "structured_output", None),
-                "usage_metadata": getattr(self, "usage_metadata", None),
+                "id": self.id,
+                "step_index": self.step_index,
+                "type": self.type,
+                "source": self.source,
+                "target": self.target,
+                "status": self.status,
+                "content": self.content,
+                "content_delta": self.content_delta,
+                "thinking": self.thinking,
+                "thinking_delta": self.thinking_delta,
+                "tool_calls": self.tool_calls,
+                "error": self.error,
+                "is_complete_response": self.is_complete_response,
+                "structured_output": self.structured_output,
+                "usage_metadata": self.usage_metadata,
             }
 
     class MockConversation:
         def __init__(self, conversation_id: str | None = None) -> None:
             self.conversation_id = conversation_id or "mock-conversation-id-123"
+            self._steps: list[Any] = []
 
         @property
         def history(self) -> list[Any]:
-            history_data = MOCK_HISTORY_DB.get(self.conversation_id, [])
-            steps = []
-            for i, msg in enumerate(history_data):
-                steps.append(MockStep(
-                    step_index=i,
-                    type="TEXT",
-                    source="USER" if msg["role"] == "user" else "MODEL",
-                    target="MODEL" if msg["role"] == "user" else "USER",
-                    content=msg["content"],
-                    status="SUCCESS"
-                ))
-            return steps
+            return self._steps
 
     class Agent:  # type: ignore
         """Mock Agent context manager for local resilience."""
@@ -129,10 +143,22 @@ if not HAS_ANTIGRAVITY:
             is_diag = any(x in prompt.lower() for x in ("traces", "latency", "errors"))
             import asyncio
 
+            # Append user step
+            user_step = MockStep(
+                step_index=len(self.conversation._steps),
+                type="TEXT_RESPONSE",
+                source="USER",
+                target="TARGET_UNSPECIFIED",
+                status="DONE",
+                content=prompt
+            )
+            self.conversation._steps.append(user_step)
+
             class MockResponse:
-                def __init__(self, is_diag: bool, prompt: str) -> None:
+                def __init__(self, is_diag: bool, prompt: str, conversation: Any) -> None:
                     self.is_diag = is_diag
                     self.prompt = prompt
+                    self.conversation = conversation
                     self._text = None
 
                 async def text(self) -> str:
@@ -181,6 +207,21 @@ if not HAS_ANTIGRAVITY:
                             for i, word in enumerate(words):
                                 yield Text(text=word + (" " if i < len(words) - 1 else ""))
                                 await asyncio.sleep(0.02)
+
+                            model_step = MockStep(
+                                step_index=len(self.conversation._steps),
+                                type="TEXT_RESPONSE",
+                                source="MODEL",
+                                target="TARGET_USER",
+                                status="DONE",
+                                content=self._text,
+                                thinking="Diagnostics workflow complete. Preparing report details...",
+                                tool_calls=[
+                                    {"name": "query_traces", "args": {}},
+                                    {"name": "run_diagnostics_workflow", "args": {"traces_data": "<omitted>"}}
+                                ]
+                            )
+                            self.conversation._steps.append(model_step)
                         else:
                             yield Thought(text="Simulating basic greeting response...")
                             await asyncio.sleep(0.5)
@@ -190,9 +231,20 @@ if not HAS_ANTIGRAVITY:
                             for i, word in enumerate(words):
                                 yield Text(text=word + (" " if i < len(words) - 1 else ""))
                                 await asyncio.sleep(0.02)
+
+                            model_step = MockStep(
+                                step_index=len(self.conversation._steps),
+                                type="TEXT_RESPONSE",
+                                source="MODEL",
+                                target="TARGET_USER",
+                                status="DONE",
+                                content=self._text,
+                                thinking="Simulating basic greeting response..."
+                            )
+                            self.conversation._steps.append(model_step)
                     return _gen()
 
-            return MockResponse(is_diag, prompt)
+            return MockResponse(is_diag, prompt, self.conversation)
 
         @property
         def conversation_id(self) -> str | None:
