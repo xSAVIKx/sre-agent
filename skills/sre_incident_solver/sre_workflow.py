@@ -16,9 +16,8 @@ logger = logging.getLogger("sre_workflow")
 try:
     from google.adk import Agent as AdkAgent
     from google.adk import Workflow as AdkWorkflow
-    from google.adk import node
-    from google.adk.workflow import START
-    from google.adk.agents.context import Context
+    from google.adk.workflow import node, START
+    from google.adk import Context
     HAS_ADK = True
 except ImportError as e:
     HAS_ADK = False
