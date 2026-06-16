@@ -249,9 +249,10 @@ if not HAS_ANTIGRAVITY:
         @property
         def conversation_id(self) -> str | None:
             """Returns simulated conversation ID."""
-            if getattr(self.config, "conversation_id", None):
-                return self.config.conversation_id
-            return "mock-conversation-id-123"
+            if not getattr(self.config, "conversation_id", None):
+                import uuid
+                self.config.conversation_id = f"mock-{uuid.uuid4().hex}"
+            return self.config.conversation_id
 
 
     class LocalAgentConfig:  # type: ignore
