@@ -1,0 +1,2 @@
+"""Inventory Agent Service package.
+"""

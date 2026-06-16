@@ -7,4 +7,5 @@ requires-python = ">=3.11"
 dependencies = []
 
 [tool.uv.workspace]
-members = ["app", "agent"]
+members = ["app", "agent", "sre_agent", "inventory_agent", "sre_common"]
+

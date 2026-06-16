@@ -1,0 +1,77 @@
+version: '3.8'
+
+services:
+  firestore-emulator:
+    image: google/cloud-sdk:emulators
+    container_name: firestore-emulator
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+    ports:
+      - "8084:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  inventory-agent:
+    build:
+      context: .
+      dockerfile: inventory_agent/Dockerfile
+    container_name: inventory-agent
+    ports:
+      - "8083:8080"
+    environment:
+      - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      - GCP_PROJECT=${GCP_PROJECT}
+      - MOCK_GCP=true
+    depends_on:
+      firestore-emulator:
+        condition: service_healthy
+
+  sre-agent:
+    build:
+      context: .
+      dockerfile: sre_agent/Dockerfile
+    container_name: sre-agent
+    ports:
+      - "8082:8082"
+    environment:
+      - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      - INVENTORY_AGENT_URL=http://inventory-agent:8080
+      - GCP_PROJECT=${GCP_PROJECT}
+      - MOCK_GCP=true
+    depends_on:
+      firestore-emulator:
+        condition: service_healthy
+      inventory-agent:
+        condition: service_started
+
+  orchestrator-agent:
+    build:
+      context: .
+      dockerfile: agent/Dockerfile
+    container_name: orchestrator-agent
+    ports:
+      - "8080:8080"
+    environment:
+      - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      - SRE_AGENT_URL=http://sre-agent:8082
+      - GCP_PROJECT=${GCP_PROJECT}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MOCK_GCP=true
+    depends_on:
+      firestore-emulator:
+        condition: service_healthy
+      sre-agent:
+        condition: service_started
+
+  app:
+    build:
+      context: .
+      dockerfile: app/Dockerfile
+    container_name: target-app
+    ports:
+      - "8081:8080"
+    environment:
+      - GCP_PROJECT=${GCP_PROJECT}
+      - MOCK_GCP=true

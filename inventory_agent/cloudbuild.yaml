@@ -1,0 +1,62 @@
+steps:
+# 1. Build the docker image
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'build'
+  - '-t'
+  - '$_IMAGE'
+  - '-f'
+  - 'inventory_agent/Dockerfile'
+  - '.'
+
+# 2. Push the docker image
+- name: 'gcr.io/cloud-builders/docker'
+  args:
+  - 'push'
+  - '$_IMAGE'
+
+# 3. Deploy the Web Service to Cloud Run
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+  - 'run'
+  - 'deploy'
+  - '$_SERVICE_NAME'
+  - '--image=$_IMAGE'
+  - '--region=$_GCP_REGION'
+  - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
+  - '--port=8080'
+  - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID,SCANNER_JOB_NAME=$_JOB_NAME,SCANNER_JOB_REGION=$_GCP_REGION'
+  - '--allow-unauthenticated'
+  - '--labels=demo=sre-agent-codelab'
+
+# 4. Deploy the Cloud Run Job (Scanner Job) using the same image
+- name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  entrypoint: 'gcloud'
+  args:
+  - 'run'
+  - 'jobs'
+  - 'deploy'
+  - '$_JOB_NAME'
+  - '--image=$_IMAGE'
+  - '--region=$_GCP_REGION'
+  - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
+  - '--command=python'
+  - '--args=-m,inventory_agent.discovery'
+  - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID'
+  - '--labels=demo=sre-agent-codelab'
+
+images:
+- '$_IMAGE'
+
+substitutions:
+  _SERVICE_NAME: 'inventory-agent'
+  _JOB_NAME: 'inventory-scanner-job'
+  _SA_NAME: 'inventory-agent-sa'
+  _REPO_NAME: 'sre-repo'
+  _GCP_REGION: 'us-central1'
+  _IMAGE: '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true

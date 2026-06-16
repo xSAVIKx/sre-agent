@@ -26,7 +26,7 @@ steps:
   - '--region=$_GCP_REGION'
   - '--service-account=$_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com'
   - '--port=8080'
-  - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID,BACKEND_SERVICE_URL=$_TARGET_APP_URL'
+  - '--set-env-vars=MOCK_GCP=false,GCP_PROJECT=$PROJECT_ID,BACKEND_SERVICE_URL=$_TARGET_APP_URL,SRE_AGENT_URL=$_SRE_AGENT_URL'
   - '--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest'
   - '--allow-unauthenticated'
   - '--labels=demo=sre-agent-codelab'
@@ -40,6 +40,7 @@ substitutions:
   _REPO_NAME: 'sre-repo'
   _GCP_REGION: 'us-central1'
   _TARGET_APP_URL: ''
+  _SRE_AGENT_URL: ''
   _IMAGE: '${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/${_SERVICE_NAME}'
 
 options:

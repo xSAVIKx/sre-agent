@@ -1,16 +1,17 @@
 # Stage 1: Build virtual environment
 FROM python:3.14-slim AS builder
-
 WORKDIR /workspace
 
 # Install uv package manager
 RUN pip install --no-cache-dir uv
 
-# Copy dependency configuration
-COPY agent/pyproject.toml ./pyproject.toml
+# Copy workspace configuration and dependency specifications
+COPY pyproject.toml uv.lock ./
+COPY sre_common/ ./sre_common/
+COPY agent/ ./agent/
 
-# Create virtual environment and install dependencies using uv
-RUN uv venv .venv && uv pip install --no-cache -r pyproject.toml
+# Synchronize dependencies for target package
+RUN uv sync --frozen --no-dev --package sre-agent
 
 # Stage 2: Runtime image without uv
 FROM python:3.14-slim AS runner
@@ -21,7 +22,7 @@ ENV PYTHONUNBUFFERED=1 \
     MOCK_GCP=false \
     PORT=8080 \
     PATH="/workspace/.venv/bin:$PATH" \
-    PYTHONPATH="/workspace/agent/src:$PYTHONPATH"
+    PYTHONPATH="/workspace/agent/src:/workspace/sre_common/src:$PYTHONPATH"
 
 WORKDIR /workspace
 
@@ -34,12 +35,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy virtual environment from builder stage
 COPY --from=builder /workspace/.venv /workspace/.venv
 
-# Copy SRE skill and agent application runner code
-COPY skills/ ./skills/
+# Copy application code and shared library
+COPY sre_common/ ./sre_common/
 COPY agent/ ./agent/
 
 # Expose port
 EXPOSE 8080
 
 # Command to run the agent HTTP service
-CMD uvicorn agent.main:app --host 0.0.0.0 --port ${PORT}
+CMD ["uvicorn", "agent.main:app", "--host", "0.0.0.0", "--port", "8080"]
+

@@ -63,6 +63,8 @@ APP_SA_NAME="sre-chaos-monkey-sa"
 APP_SA_EMAIL="${APP_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
 AGENT_SA_NAME="sre-agent-sa"
 AGENT_SA_EMAIL="${AGENT_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
+INVENTORY_SA_NAME="inventory-agent-sa"
+INVENTORY_SA_EMAIL="${INVENTORY_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
 BUILD_SA_NAME="sre-build-sa"
 BUILD_SA_EMAIL="${BUILD_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
 
@@ -117,6 +119,16 @@ if [ "$SKIP_INFRA" = "false" ]; then
         echo -e "${GREEN}✓ Created service account: $AGENT_SA_EMAIL${NC}"
     else
         echo -e "${GREEN}✓ Service account already exists: $AGENT_SA_EMAIL${NC}"
+    fi
+
+    # Inventory Agent Service Account
+    if ! gcloud iam service-accounts describe "$INVENTORY_SA_EMAIL" &>/dev/null; then
+        gcloud iam service-accounts create "$INVENTORY_SA_NAME" \
+            --description="Service account for Inventory Agent and jobs [demo=sre-agent-codelab]" \
+            --display-name="Inventory Agent Service Account"
+        echo -e "${GREEN}✓ Created service account: $INVENTORY_SA_EMAIL${NC}"
+    else
+        echo -e "${GREEN}✓ Service account already exists: $INVENTORY_SA_EMAIL${NC}"
     fi
 
     # SRE Build Service Account (GCP Best Practice for Cloud Build)
@@ -181,6 +193,19 @@ if [ "$SKIP_INFRA" = "false" ]; then
         --role="roles/secretmanager.secretAccessor" >/dev/null
     echo -e "${GREEN}✓ Granted logging, storage, run admin, artifactregistry.writer & secretAccessor roles to SRE Build SA${NC}"
 
+    # Inventory Agent Roles (Firestore access, running Cloud Run Jobs, logging)
+    echo "Assigning roles to Inventory Agent service account..."
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/datastore.user" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/run.developer" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/logging.logWriter" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer & roles/logging.logWriter to Inventory Agent SA${NC}"
+
     # Allow SRE Build SA to act as the SRE application service accounts
     echo "Allowing SRE Build SA to act as application and agent service accounts..."
     gcloud iam service-accounts add-iam-policy-binding "$APP_SA_EMAIL" \
@@ -189,7 +214,14 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud iam service-accounts add-iam-policy-binding "$AGENT_SA_EMAIL" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
         --role="roles/iam.serviceAccountUser" >/dev/null || true
-    echo -e "${GREEN}✓ Allowed SRE Build SA to act as target app and agent service accounts${NC}"
+    gcloud iam service-accounts add-iam-policy-binding "$INVENTORY_SA_EMAIL" \
+        --member="serviceAccount:${BUILD_SA_EMAIL}" \
+        --role="roles/iam.serviceAccountUser" >/dev/null || true
+    # Allow Inventory Agent SA to act as itself to execute jobs
+    gcloud iam service-accounts add-iam-policy-binding "$INVENTORY_SA_EMAIL" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/iam.serviceAccountUser" >/dev/null || true
+    echo -e "${GREEN}✓ Allowed Service Account User delegations${NC}"
 
     # Grant Service Account User to active gcloud account to run the build as the build SA
     ACTIVE_ACCOUNT=$(gcloud auth list --filter="status:ACTIVE" --format="value(account)" 2>/dev/null || true)
@@ -242,22 +274,52 @@ TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region "$GCP_RE
 TARGET_APP_URL=$(echo "$TARGET_APP_URL" | sed 's/.*http/http/')
 echo -e "${GREEN}✓ SRE Chaos Monkey URL: $TARGET_APP_URL${NC}"
 
-# 6. Build and Deploy SRE Agent
-echo -e "\n${BLUE}[5/5] Building and deploying Cloud-Native SRE Agent...${NC}"
+# 6. Build and Deploy Inventory Sub-Agent
+echo -e "\n${BLUE}[5/7] Building and deploying Inventory Sub-Agent...${NC}"
+gcloud builds submit --config=inventory_agent/cloudbuild.yaml \
+    --region="$GCP_REGION" \
+    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
+    --substitutions=_GCP_REGION="$GCP_REGION" .
+
+INVENTORY_AGENT_URL=$(gcloud run services describe inventory-agent --region "$GCP_REGION" --format="value(status.url)")
+INVENTORY_AGENT_URL=$(echo "$INVENTORY_AGENT_URL" | sed 's/.*http/http/')
+echo -e "${GREEN}✓ Deployed Inventory Sub-Agent to: $INVENTORY_AGENT_URL${NC}"
+
+# Update Inventory Agent to set its own URL for callback injection
+echo "Updating Inventory Agent environment variables with self URL..."
+gcloud run services update inventory-agent \
+    --region="$GCP_REGION" \
+    --update-env-vars=INVENTORY_AGENT_URL="$INVENTORY_AGENT_URL" >/dev/null
+
+# 7. Build and Deploy SRE Diagnostics Sub-Agent
+echo -e "\n${BLUE}[6/7] Building and deploying SRE Diagnostics Sub-Agent...${NC}"
+gcloud builds submit --config=sre_agent/cloudbuild.yaml \
+    --region="$GCP_REGION" \
+    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
+    --substitutions=_GCP_REGION="$GCP_REGION",_INVENTORY_AGENT_URL="$INVENTORY_AGENT_URL" .
+
+SRE_SUB_AGENT_URL=$(gcloud run services describe sre-sub-agent --region "$GCP_REGION" --format="value(status.url)")
+SRE_SUB_AGENT_URL=$(echo "$SRE_SUB_AGENT_URL" | sed 's/.*http/http/')
+echo -e "${GREEN}✓ Deployed SRE Diagnostics Sub-Agent to: $SRE_SUB_AGENT_URL${NC}"
+
+# 8. Build and Deploy SRE Orchestrator Agent
+echo -e "\n${BLUE}[7/7] Building and deploying SRE Orchestrator Agent...${NC}"
 gcloud builds submit --config=agent/cloudbuild.yaml \
     --region="$GCP_REGION" \
     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-    --substitutions=_GCP_REGION="$GCP_REGION",_TARGET_APP_URL="$TARGET_APP_URL" .
+    --substitutions=_GCP_REGION="$GCP_REGION",_TARGET_APP_URL="$TARGET_APP_URL",_SRE_AGENT_URL="$SRE_SUB_AGENT_URL" .
 
 AGENT_URL=$(gcloud run services describe sre-agent --region "$GCP_REGION" --format="value(status.url)")
 AGENT_URL=$(echo "$AGENT_URL" | sed 's/.*http/http/')
-echo -e "${GREEN}✓ Deployed SRE Agent to: $AGENT_URL${NC}"
+echo -e "${GREEN}✓ Deployed SRE Orchestrator Agent to: $AGENT_URL${NC}"
 
 echo -e "\n${GREEN}===============================================${NC}"
 echo -e "${GREEN}           Deployment Completed Successfully!  ${NC}"
 echo -e "${GREEN}===============================================${NC}"
-echo "Target App URL: $TARGET_APP_URL"
-echo "SRE Agent URL:  $AGENT_URL"
+echo "Target App URL:      $TARGET_APP_URL"
+echo "Inventory Agent URL: $INVENTORY_AGENT_URL"
+echo "SRE Sub-Agent URL:   $SRE_SUB_AGENT_URL"
+echo "SRE Orchestrator:    $AGENT_URL"
 echo ""
 echo "Try running this command to trigger an error and start SRE diagnostics:"
 echo -e "curl \"${TARGET_APP_URL}/api/gateway?trigger_error=true\""

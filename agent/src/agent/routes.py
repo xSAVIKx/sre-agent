@@ -1,7 +1,6 @@
-"""FastAPI Route Definitions for SRE Agent.
+"""FastAPI Route Definitions for Orchestrator Agent.
 
-This module defines the HTTP endpoints (health, diagnose, chat UI, chat API)
-for the standalone SRE agent service using a modular APIRouter setup.
+Exposes endpoints forhealth check, session management, trace proxy, and stateful A2A chat orchestration.
 """
 
 import os
@@ -12,6 +11,9 @@ import asyncio
 from fastapi import APIRouter, HTTPException, Response, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
+import httpx
+import datetime
+
 from agent.config import (
     load_agent_config,
     load_firestore_agent_config,
@@ -23,11 +25,21 @@ from agent.config import (
     ToolResult,
 )
 from agent.a2ui_translator import translate_markdown_to_a2ui
-from skills.sre_incident_solver.gcp_tools import otel_trace
 
-logger = logging.getLogger("sre_agent.routes")
+logger = logging.getLogger("orchestrator_agent.routes")
 
 router = APIRouter()
+
+
+# Define simple otel_trace fallback decorator locally
+def otel_trace(span_name: str):
+    def decorator(func):
+        import functools
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 class DiagnoseRequest(BaseModel):
@@ -47,6 +59,7 @@ class ChatRequest(BaseModel):
     prompt: str
     conversation_id: str | None = None
     project_id: str | None = None
+    refresh: bool = False
 
 
 class ChatResponse(BaseModel):
@@ -65,64 +78,52 @@ async def health_check() -> dict[str, str]:
 
 @router.get("/favicon.ico", include_in_schema=False)
 async def favicon() -> Response:
-    """Returns a 204 No Content for favicon requests to prevent 404 errors."""
+    """Returns a 204 No Content for favicon requests."""
     return Response(status_code=204)
 
 
 @router.post("/diagnose")
 @otel_trace("routes.diagnose")
 async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
-    """Trigger the SRE agent diagnostics workflow.
-
-    Initializes the SRE agent configuration, runs the agentic troubleshooting
-    reasoning loop with safety policy gating, and returns the SRE diagnosis.
-    """
+    """Trigger SRE diagnostics (delegates to SRE agent via A2A)."""
     logger.info(f"Received SRE diagnostics request: {request.prompt}")
-
-    # Set project ID in environment if provided to affect the tools
-    if request.project_id:
-        os.environ["GCP_PROJECT"] = request.project_id
-
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    url = f"{sre_agent_url}/v1/agents/sre/messages"
+    payload = {
+        "prompt": request.prompt,
+        "project_id": request.project_id
+    }
+    
     try:
-        config = load_agent_config()
-
-        async with Agent(config) as agent:
-            response = await agent.chat(request.prompt)
-            result = await response.text()
-
-        logger.info("Successfully generated SRE diagnostics report.")
-        return DiagnoseResponse(status="success", result=result)
-
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, json=payload, timeout=60.0)
+            if response.status_code != 200:
+                raise HTTPException(status_code=response.status_code, detail=f"SRE Sub-Agent Error: {response.text}")
+            
+            result = ""
+            for line in response.iter_lines():
+                if line.startswith("data: "):
+                    try:
+                        event = json.loads(line[6:])
+                        if event.get("type") == "done":
+                            result = event.get("response", "")
+                            break
+                    except Exception:
+                        pass
+                        
+            return DiagnoseResponse(status="success", result=result)
     except Exception as e:
-        logger.exception("Failed to execute SRE diagnostics.")
-        raise HTTPException(
-            status_code=500,
-            detail=f"SRE Agent Execution Failure: {str(e)}"
-        )
+        logger.exception("Failed SRE diagnostics proxy.")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/sessions")
 async def get_sessions():
     """Retrieve all available diagnostic sessions with metadata."""
-    if not HAS_ANTIGRAVITY:
-        from agent.firestore_strategy import MOCK_FIRESTORE_DB
-        sessions = []
-        for conv_id, data in MOCK_FIRESTORE_DB.items():
-            updated_at = data.get("updated_at")
-            updated_at_str = updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at)
-            sessions.append({
-                "conversation_id": conv_id,
-                "prompt": data.get("prompt") or "Untitled Session",
-                "updated_at": updated_at_str
-            })
-        sessions.sort(key=lambda x: x["updated_at"], reverse=True)
-        return sessions
-
     try:
         from google.cloud import firestore
         db = firestore.AsyncClient()
         collection = db.collection("agent_sessions")
-        # Fetch only metadata fields: conversation_id, updated_at, prompt
         docs = await collection.select(["conversation_id", "updated_at", "prompt"]).order_by("updated_at", direction=firestore.Query.DESCENDING).limit(50).get()
         sessions = []
         for doc in docs:
@@ -136,8 +137,16 @@ async def get_sessions():
             })
         return sessions
     except Exception as e:
-        logger.error(f"Failed to fetch Firestore sessions: {e}")
-        return []
+        logger.warning(f"Using mock database retrieval for sessions: {e}")
+        from agent.config import MOCK_HISTORY_DB
+        sessions = []
+        for conv_id, steps in MOCK_HISTORY_DB.items():
+            sessions.append({
+                "conversation_id": conv_id,
+                "prompt": steps[0]["content"] if steps else "Untitled Session",
+                "updated_at": datetime.datetime.now().isoformat()
+            })
+        return sessions
 
 
 class RenameSessionRequest(BaseModel):
@@ -147,16 +156,6 @@ class RenameSessionRequest(BaseModel):
 @router.put("/sessions/{conversation_id}/title")
 async def rename_session(conversation_id: str, request: RenameSessionRequest):
     """Rename/modify the title of an existing session."""
-    logger.info(f"Renaming session {conversation_id} to: {request.title}")
-
-    if not HAS_ANTIGRAVITY:
-        from agent.firestore_strategy import MOCK_FIRESTORE_DB
-        if conversation_id in MOCK_FIRESTORE_DB:
-            MOCK_FIRESTORE_DB[conversation_id]["prompt"] = request.title
-            return {"status": "success", "conversation_id": conversation_id, "title": request.title}
-        else:
-            raise HTTPException(status_code=404, detail="Session not found")
-
     try:
         from google.cloud import firestore
         db = firestore.AsyncClient()
@@ -164,21 +163,16 @@ async def rename_session(conversation_id: str, request: RenameSessionRequest):
         await doc_ref.set({"prompt": request.title}, merge=True)
         return {"status": "success", "conversation_id": conversation_id, "title": request.title}
     except Exception as e:
-        logger.error(f"Failed to rename Firestore session {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to rename session: {str(e)}")
+        logger.warning(f"Using mock database rename fallback: {e}")
+        from agent.config import MOCK_HISTORY_DB
+        if conversation_id in MOCK_HISTORY_DB:
+            return {"status": "success", "conversation_id": conversation_id, "title": request.title}
+        raise HTTPException(status_code=404, detail="Session not found")
 
 
 @router.delete("/sessions/{conversation_id}")
 async def delete_session(conversation_id: str):
     """Delete an existing session."""
-    logger.info(f"Deleting session: {conversation_id}")
-
-    if not HAS_ANTIGRAVITY:
-        from agent.firestore_strategy import MOCK_FIRESTORE_DB
-        if conversation_id in MOCK_FIRESTORE_DB:
-            del MOCK_FIRESTORE_DB[conversation_id]
-        return {"status": "success", "conversation_id": conversation_id}
-
     try:
         from google.cloud import firestore
         db = firestore.AsyncClient()
@@ -186,68 +180,51 @@ async def delete_session(conversation_id: str):
         await doc_ref.delete()
         return {"status": "success", "conversation_id": conversation_id}
     except Exception as e:
-        logger.error(f"Failed to delete Firestore session {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+        logger.warning(f"Using mock database delete fallback: {e}")
+        from agent.config import MOCK_HISTORY_DB
+        if conversation_id in MOCK_HISTORY_DB:
+            del MOCK_HISTORY_DB[conversation_id]
+        return {"status": "success", "conversation_id": conversation_id}
 
 
 @router.get("/sessions/{conversation_id}/history")
 async def get_session_history(conversation_id: str):
     """Retrieve the conversation step history for a specific session."""
-    if not HAS_ANTIGRAVITY:
-        from agent.firestore_strategy import MOCK_FIRESTORE_DB
-        session = MOCK_FIRESTORE_DB.get(conversation_id, {})
-        steps = session.get("history", [])
-        return {
-            "conversation_id": conversation_id,
-            "history": steps
-        }
-
     try:
         from google.cloud import firestore
         db = firestore.AsyncClient()
-        doc_ref = db.collection("agent_sessions").document(conversation_id)
-        doc = await doc_ref.get()
+        doc = await db.collection("agent_sessions").document(conversation_id).get()
         if doc.exists:
-            data = doc.to_dict()
-            steps = data.get("history", [])
-            return {
-                "conversation_id": conversation_id,
-                "history": steps
-            }
-        else:
-            return {
-                "conversation_id": conversation_id,
-                "history": []
-            }
+            return {"conversation_id": conversation_id, "history": doc.to_dict().get("history", [])}
+        return {"conversation_id": conversation_id, "history": []}
     except Exception as e:
-        logger.error(f"Failed to load session history for {conversation_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve session history: {str(e)}")
+        logger.warning(f"Using mock database history fallback: {e}")
+        from agent.config import MOCK_HISTORY_DB
+        return {"conversation_id": conversation_id, "history": MOCK_HISTORY_DB.get(conversation_id, [])}
 
 
 @router.get("/trace/{trace_id}")
 async def get_trace(trace_id: str, project_id: str | None = None):
-    """Get detailed spans for a specific trace ID."""
-    logger.info(f"Retrieving trace details via GET for trace_id={trace_id}")
+    """Get detailed spans for a specific trace ID by proxying to SRE agent."""
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    url = f"{sre_agent_url}/trace/{trace_id}"
+    params = {"project_id": project_id}
     try:
-        from skills.sre_incident_solver.gcp_tools import get_trace_details
-        details_str = await get_trace_details(trace_id, project_id)
-        return json.loads(details_str)
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, params=params, timeout=10.0)
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                raise HTTPException(status_code=resp.status_code, detail=resp.text)
     except Exception as e:
-        logger.error(f"Failed to get trace details for {trace_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
+        logger.error(f"Failed to proxy trace lookup for {trace_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/trace")
 async def get_trace_query(trace_id: str, project_id: str | None = None):
-    """Get detailed spans for a specific trace ID via query parameters."""
-    logger.info(f"Retrieving trace details via GET query for trace_id={trace_id}")
-    try:
-        from skills.sre_incident_solver.gcp_tools import get_trace_details
-        details_str = await get_trace_details(trace_id, project_id)
-        return json.loads(details_str)
-    except Exception as e:
-        logger.error(f"Failed to get trace details for {trace_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
+    """Get detailed spans for a specific trace ID via query parameters by proxying to SRE agent."""
+    return await get_trace(trace_id, project_id)
 
 
 @router.get("/chat", response_class=HTMLResponse)
@@ -260,26 +237,159 @@ async def get_chat_ui() -> HTMLResponse:
         return HTMLResponse(content=content)
     except Exception as e:
         logger.error(f"Failed to load chat UI file: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"SRE Agent Chat UI Load Failure: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {str(e)}")
 
 
 @router.post("/chat")
 @otel_trace("routes.chat")
 async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
-    """Trigger a stateful agent chat request.
+    """Trigger stateful A2A chat routing or general orchestrator chat."""
+    logger.info(f"Received chat request (conversation_id={request.conversation_id}): {request.prompt}")
 
-    Starts a new agent conversation or resumes an existing one from remote
-    state persisted in Google Cloud Firestore, streaming progress in real-time.
-    """
-    logger.info(f"Received SRE chat request (conversation_id={request.conversation_id}): {request.prompt}")
+    # 1. Infer if the request is an SRE diagnostics command
+    # SRE-related keywords trigger direct A2A SRE streaming proxy
+    is_sre_prompt = any(x in request.prompt.lower() for x in ("diagnose", "latency", "error", "trace", "sre", "monkey", "scan"))
+    is_refresh = request.refresh or any(x in request.prompt.lower() for x in ("rescan", "refresh", "re-discover", "re-scan"))
 
-    # Set project ID in environment if provided to affect the tools
-    if request.project_id:
-        os.environ["GCP_PROJECT"] = request.project_id
+    # 2. Check if this conversation was already an SRE session
+    is_sre_session = False
+    conv_id = request.conversation_id
+    if conv_id:
+        try:
+            from google.cloud import firestore
+            db = firestore.AsyncClient()
+            doc = await db.collection("agent_sessions").document(conv_id).get()
+            if doc.exists:
+                # If there are tool calls to diagnose_sre, it is an SRE session
+                history = doc.to_dict().get("history", [])
+                for step in history:
+                    for tc in step.get("tool_calls", []):
+                        if tc.get("name") == "diagnose_sre":
+                            is_sre_session = True
+                            break
+        except Exception:
+            pass
 
+    if is_sre_prompt or is_sre_session or is_refresh:
+        logger.info("Routing request to A2A SRE Sub-Agent...")
+        return await _stream_sre_agent_a2a(request, fastapi_request, is_refresh)
+
+    # 3. Fallback to normal Orchestrator LLM chat for general conversation
+    return await _stream_orchestrator_chat(request, fastapi_request)
+
+
+async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, is_refresh: bool) -> StreamingResponse:
+    """Invokes SRE sub-agent directly via A2A HTTP/SSE and forwards stream to the browser."""
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    url = f"{sre_agent_url}/v1/agents/sre/messages"
+    
+    # Resolve or create conversation ID
+    conv_id = request.conversation_id
+    if not conv_id:
+        import uuid
+        conv_id = f"sre-{uuid.uuid4().hex}"
+
+    payload = {
+        "prompt": request.prompt,
+        "conversation_id": conv_id,
+        "project_id": request.project_id,
+        "refresh": is_refresh
+    }
+
+    async def event_generator():
+        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
+        
+        accumulated_text = ""
+        try:
+            async with httpx.AsyncClient() as client:
+                async with client.stream("POST", url, json=payload, timeout=60.0) as response:
+                    if response.status_code != 200:
+                        yield f"data: {json.dumps({'type': 'error', 'detail': f'SRE sub-agent returned status {response.status_code}'})}\n\n"
+                        return
+
+                    async for line in response.aiter_lines():
+                        if await fastapi_request.is_disconnected():
+                            logger.info("Client disconnected. Aborting SRE A2A stream.")
+                            break
+                        
+                        if line.startswith("data: "):
+                            try:
+                                event_data = json.loads(line[6:])
+                                ev_type = event_data.get("type")
+                                if ev_type == "chunk":
+                                    accumulated_text += event_data.get("text", "")
+                                    yield f"data: {line[6:]}\n\n"
+                                elif ev_type == "thought":
+                                    yield f"data: {line[6:]}\n\n"
+                                elif ev_type == "error":
+                                    yield f"data: {line[6:]}\n\n"
+                                    return
+                            except Exception:
+                                pass
+
+            # Translate Markdown to A2UI component payload
+            response_a2ui = translate_markdown_to_a2ui(accumulated_text)
+
+            # Persist Orchestrator user session in Firestore
+            user_step = {
+                "step_index": 0,
+                "type": "TEXT",
+                "source": "USER",
+                "target": "MODEL",
+                "status": "SUCCESS",
+                "content": request.prompt
+            }
+            
+            model_step = {
+                "step_index": 1,
+                "type": "TEXT_RESPONSE",
+                "source": "MODEL",
+                "target": "TARGET_USER",
+                "status": "DONE",
+                "content": accumulated_text,
+                "thinking": "Delegated SRE diagnostics to sub-agent.",
+                "response_a2ui": response_a2ui,
+                "tool_calls": [{"name": "diagnose_sre", "args": {"prompt": request.prompt}}]
+            }
+
+            history = [user_step, model_step]
+            
+            # Save history
+            try:
+                from google.cloud import firestore
+                db = firestore.AsyncClient()
+                doc_ref = db.collection("agent_sessions").document(conv_id)
+                doc = await doc_ref.get()
+                existing_prompt = doc.to_dict().get("prompt") if doc.exists else None
+                
+                update_data = {
+                    "history": history,
+                    "updated_at": firestore.SERVER_TIMESTAMP
+                }
+                if not existing_prompt or existing_prompt == "Untitled Session":
+                    update_data["prompt"] = request.prompt
+                
+                await doc_ref.set(update_data, merge=True)
+            except Exception as e:
+                logger.warning(f"Using mock session persistence fallback: {e}")
+                from agent.config import MOCK_HISTORY_DB
+                MOCK_HISTORY_DB[conv_id] = history
+
+            yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
+
+        except Exception as e:
+            logger.exception("Error in SRE streaming proxy.")
+            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )
+
+
+async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
+    """Invokes local Orchestrator agent reasoning loop (standard conversation)."""
     async def event_generator():
         response = None
         try:
@@ -288,137 +398,75 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
 
             async with Agent(config) as agent:
                 conv_id = agent.conversation_id or request.conversation_id
-
-                # Load existing history steps and populate agent.conversation._steps
+                
+                # Load history steps if available
                 if conv_id:
-                    if not HAS_ANTIGRAVITY:
-                        from agent.firestore_strategy import MOCK_FIRESTORE_DB
-                        session = MOCK_FIRESTORE_DB.get(conv_id, {})
-                        history_data = session.get("history", [])
-                        from agent.config import MockStep
-                        agent.conversation._steps = [MockStep(**step_dict) for step_dict in history_data]
-                    else:
+                    if HAS_ANTIGRAVITY:
                         try:
                             from google.cloud import firestore
                             db = firestore.AsyncClient()
                             doc = await db.collection("agent_sessions").document(conv_id).get()
                             if doc.exists:
-                                data = doc.to_dict()
-                                history_data = data.get("history", [])
+                                history_data = doc.to_dict().get("history", [])
                                 from google.antigravity.types import Step
-                                agent.conversation._steps = []
-                                for step_dict in history_data:
-                                    try:
-                                        agent.conversation._steps.append(Step(**step_dict))
-                                    except Exception as ex:
-                                        logger.error(f"Failed to deserialize history step: {ex}, step_dict: {step_dict}")
-                        except Exception as e:
-                            logger.error(f"Failed to load history from Firestore for context preservation: {e}")
+                                agent.conversation._steps = [Step(**step) for step in history_data]
+                        except Exception:
+                            pass
+                    else:
+                        from agent.config import MOCK_HISTORY_DB
+                        from agent.config import MockStep
+                        history_data = MOCK_HISTORY_DB.get(conv_id, [])
+                        agent.conversation._steps = [MockStep(**step) for step in history_data]
 
                 response = await agent.chat(request.prompt)
                 
-                conv_id = request.conversation_id
-                # 1. Start event (if we already have a conversation_id from request)
-                if conv_id:
-                    yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
-
-                start_yielded = bool(conv_id)
+                yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
+                
                 accumulated_text = ""
-                tool_count = 0
-
-                # 2. Stream chunks
                 async for chunk in response.chunks:
-                    if not start_yielded:
-                        conv_id = agent.conversation_id
-                        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
-                        start_yielded = True
-                    # Check if client has disconnected (e.g. user clicked Stop or closed window)
                     if await fastapi_request.is_disconnected():
-                        logger.info("Client disconnected. Cancelling SRE Agent execution.")
+                        logger.info("Client disconnected. Aborting orchestrator chat stream.")
                         await response.cancel()
                         break
-
+                    
                     cls_name = chunk.__class__.__name__
-
                     if cls_name == "Thought":
                         yield f"data: {json.dumps({'type': 'thought', 'text': chunk.text})}\n\n"
                     elif cls_name == "Text":
                         accumulated_text += chunk.text
                         yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.text})}\n\n"
-                    elif cls_name == "ToolCall":
-                        tool_count += 1
-                        if tool_count > 20:
-                            logger.warning(f"Loop prevention triggered: SRE Agent has executed {tool_count} tools in a single turn. Suspending to ask user for guidance.")
-                            await response.cancel()
-                            response_a2ui = translate_markdown_to_a2ui(accumulated_text)
-                            yield f"data: {json.dumps({'type': 'limit_reached', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
-                            break
 
-                        # Live feedback of tool execution start
-                        tool_desc = f"🔧 Calling tool '{chunk.name}'"
-                        if getattr(chunk, "args", None):
-                            # Filter args for log output clean representation
-                            tool_desc += f" with arguments {json.dumps(chunk.args)}"
-                        tool_desc += "...\n"
-                        yield f"data: {json.dumps({'type': 'thought', 'text': tool_desc})}\n\n"
-                    elif cls_name == "ToolResult":
-                        # Live feedback of tool execution complete
-                        res_desc = f"✅ Tool '{chunk.name}' completed.\n"
-                        yield f"data: {json.dumps({'type': 'thought', 'text': res_desc})}\n\n"
-
-                # Check connection again before translating and finishing
-                if not await fastapi_request.is_disconnected() and tool_count <= 20:
-                    # 3. Translate markdown response into structured A2UI declarative JSON
+                # Stream complete
+                if not await fastapi_request.is_disconnected():
                     response_a2ui = translate_markdown_to_a2ui(accumulated_text)
-
-                    logger.info(f"Successfully processed chat stream. Active conversation ID: {conv_id}")
-
-                    # Capture updated history steps
+                    
                     steps = []
                     for step in agent.conversation.history:
-                        step_dict = step.model_dump(mode="json")
-                        # Add response_a2ui to the final model response step if applicable
-                        if step.source == "MODEL" and getattr(step, "is_complete_response", True):
+                        step_dict = step.model_dump(mode="json") if hasattr(step, "model_dump") else step.model_dump()
+                        if step.source == "MODEL":
                             step_dict["response_a2ui"] = response_a2ui
                         steps.append(step_dict)
 
-                    if not HAS_ANTIGRAVITY:
-                        from agent.firestore_strategy import MOCK_FIRESTORE_DB
-                        if conv_id not in MOCK_FIRESTORE_DB:
-                            MOCK_FIRESTORE_DB[conv_id] = {}
-                        MOCK_FIRESTORE_DB[conv_id]["history"] = steps
-                        if not MOCK_FIRESTORE_DB[conv_id].get("prompt") or MOCK_FIRESTORE_DB[conv_id]["prompt"] == "Untitled Session":
-                            MOCK_FIRESTORE_DB[conv_id]["prompt"] = request.prompt
-                    else:
+                    if HAS_ANTIGRAVITY:
                         try:
                             from google.cloud import firestore
                             db = firestore.AsyncClient()
                             doc_ref = db.collection("agent_sessions").document(conv_id)
-                            doc = await doc_ref.get()
-                            current_prompt = None
-                            if doc.exists:
-                                current_prompt = doc.to_dict().get("prompt")
-                            
-                            update_data = {
+                            await doc_ref.set({
                                 "history": steps,
-                                "updated_at": firestore.SERVER_TIMESTAMP
-                            }
-                            if not current_prompt or current_prompt == "Untitled Session":
-                                update_data["prompt"] = request.prompt
-                            
-                            await doc_ref.set(update_data, merge=True)
-                        except Exception as e:
-                            logger.error(f"Failed to save history/prompt to Firestore: {e}")
+                                "updated_at": firestore.SERVER_TIMESTAMP,
+                                "prompt": request.prompt
+                            }, merge=True)
+                        except Exception:
+                            pass
+                    else:
+                        from agent.config import MOCK_HISTORY_DB
+                        MOCK_HISTORY_DB[conv_id] = steps
 
                     yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
 
-        except asyncio.CancelledError:
-            logger.info("Connection cancelled by client. Terminating SRE Agent execution.")
-            if response is not None:
-                await response.cancel()
-            raise
         except Exception as e:
-            logger.exception("Failed to execute SRE agent chat stream.")
+            logger.exception("Failed inside Orchestrator chat stream.")
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
 
     return StreamingResponse(
