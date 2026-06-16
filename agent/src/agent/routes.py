@@ -224,6 +224,32 @@ async def get_session_history(conversation_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve session history: {str(e)}")
 
 
+@router.get("/trace/{trace_id}")
+async def get_trace(trace_id: str, project_id: str | None = None):
+    """Get detailed spans for a specific trace ID."""
+    logger.info(f"Retrieving trace details via GET for trace_id={trace_id}")
+    try:
+        from skills.sre_incident_solver.gcp_tools import get_trace_details
+        details_str = await get_trace_details(trace_id, project_id)
+        return json.loads(details_str)
+    except Exception as e:
+        logger.error(f"Failed to get trace details for {trace_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
+
+
+@router.get("/trace")
+async def get_trace_query(trace_id: str, project_id: str | None = None):
+    """Get detailed spans for a specific trace ID via query parameters."""
+    logger.info(f"Retrieving trace details via GET query for trace_id={trace_id}")
+    try:
+        from skills.sre_incident_solver.gcp_tools import get_trace_details
+        details_str = await get_trace_details(trace_id, project_id)
+        return json.loads(details_str)
+    except Exception as e:
+        logger.error(f"Failed to get trace details for {trace_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
+
+
 @router.get("/chat", response_class=HTMLResponse)
 async def get_chat_ui() -> HTMLResponse:
     """Serves the rich SRE Chat interface Web page."""
@@ -290,16 +316,22 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                             logger.error(f"Failed to load history from Firestore for context preservation: {e}")
 
                 response = await agent.chat(request.prompt)
-                conv_id = agent.conversation_id
+                
+                conv_id = request.conversation_id
+                # 1. Start event (if we already have a conversation_id from request)
+                if conv_id:
+                    yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
 
-                # 1. Start event
-                yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
-
+                start_yielded = bool(conv_id)
                 accumulated_text = ""
                 tool_count = 0
 
                 # 2. Stream chunks
                 async for chunk in response.chunks:
+                    if not start_yielded:
+                        conv_id = agent.conversation_id
+                        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
+                        start_yielded = True
                     # Check if client has disconnected (e.g. user clicked Stop or closed window)
                     if await fastapi_request.is_disconnected():
                         logger.info("Client disconnected. Cancelling SRE Agent execution.")
@@ -315,7 +347,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                         yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.text})}\n\n"
                     elif cls_name == "ToolCall":
                         tool_count += 1
-                        if tool_count > 6:
+                        if tool_count > 20:
                             logger.warning(f"Loop prevention triggered: SRE Agent has executed {tool_count} tools in a single turn. Suspending to ask user for guidance.")
                             await response.cancel()
                             response_a2ui = translate_markdown_to_a2ui(accumulated_text)
@@ -335,7 +367,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
                         yield f"data: {json.dumps({'type': 'thought', 'text': res_desc})}\n\n"
 
                 # Check connection again before translating and finishing
-                if not await fastapi_request.is_disconnected() and tool_count <= 6:
+                if not await fastapi_request.is_disconnected() and tool_count <= 20:
                     # 3. Translate markdown response into structured A2UI declarative JSON
                     response_a2ui = translate_markdown_to_a2ui(accumulated_text)
 

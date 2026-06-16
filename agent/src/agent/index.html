@@ -11,6 +11,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
+    <!-- Markdown Parser -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    
     <style>
         :root {
             --bg-primary: #0b0f19;
@@ -259,7 +262,68 @@
         .a2ui-text {
             color: var(--text-main);
             font-size: 15px;
-            white-space: pre-wrap;
+        }
+
+        /* Markdown rendering styles */
+        .a2ui-text p, .a2ui-alert-text p, .a2ui-section-content p {
+            margin-bottom: 12px;
+            line-height: 1.6;
+        }
+        .a2ui-text p:last-child, .a2ui-alert-text p:last-child, .a2ui-section-content p:last-child {
+            margin-bottom: 0;
+        }
+        .a2ui-text ul, .a2ui-text ol, .a2ui-section-content ul, .a2ui-section-content ol {
+            margin: 12px 0;
+            padding-left: 20px;
+        }
+        .a2ui-text li, .a2ui-section-content li {
+            margin-bottom: 6px;
+            line-height: 1.5;
+        }
+        .a2ui-text code, .a2ui-alert-text code, .a2ui-section-content code {
+            font-family: 'JetBrains Mono', monospace;
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: #f43f5e;
+        }
+        .a2ui-text pre, .a2ui-section-content pre {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 14px 0;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .a2ui-text pre code, .a2ui-section-content pre code {
+            background: none;
+            padding: 0;
+            border-radius: 0;
+            color: inherit;
+        }
+        .a2ui-text h1, .a2ui-text h2, .a2ui-text h3, .a2ui-section-content h1, .a2ui-section-content h2, .a2ui-section-content h3 {
+            margin: 18px 0 10px 0;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+        .a2ui-text h1, .a2ui-section-content h1 { font-size: 1.3em; }
+        .a2ui-text h2, .a2ui-section-content h2 { font-size: 1.2em; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 4px; }
+        .a2ui-text h3, .a2ui-section-content h3 { font-size: 1.1em; }
+        .a2ui-text table, .a2ui-section-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 14px 0;
+            font-size: 0.95em;
+        }
+        .a2ui-text th, .a2ui-text td, .a2ui-section-content th, .a2ui-section-content td {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 8px 12px;
+            text-align: left;
+        }
+        .a2ui-text th, .a2ui-section-content th {
+            background: rgba(255, 255, 255, 0.04);
+            font-weight: 600;
         }
 
         /* Rich Component: Card */
@@ -742,9 +806,16 @@
         let activeConversationId = null;
         let currentAbortController = null;
 
-        // Parse markdown bold tags inside textual components for rich display
+        // Parse markdown text using marked.js for rich HTML display
         function formatMarkdownInline(text) {
             if (!text) return "";
+            if (window.marked && window.marked.parse) {
+                try {
+                    return marked.parse(text);
+                } catch (e) {
+                    console.error("Failed to parse markdown with marked.js:", e);
+                }
+            }
             return text
                 .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
                 .replace(/`([^`]+)`/g, '<code style="font-family: \'JetBrains Mono\', monospace; background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 0.9em;">$1</code>');
@@ -1031,6 +1102,9 @@
                                         activeConversationId = event.conversation_id;
                                         if (prevId !== event.conversation_id) {
                                             loadSessions();
+                                            const url = new URL(window.location);
+                                            url.searchParams.set('sessionId', event.conversation_id);
+                                            window.history.pushState({}, '', url);
                                         }
                                     }
                                 } else if (event.type === "thought") {
@@ -1427,9 +1501,16 @@
             activeConversationId = null;
             document.querySelectorAll('.session-item').forEach(item => item.classList.remove('active'));
             renderWelcomeMessage();
+
+            // Clear sessionId param from the URL
+            const url = new URL(window.location);
+            if (url.searchParams.has('sessionId')) {
+                url.searchParams.delete('sessionId');
+                window.history.pushState({}, '', url);
+            }
         }
 
-        async function selectSession(conversationId) {
+        async function selectSession(conversationId, updateHistory = true) {
             activeConversationId = conversationId;
             
             document.querySelectorAll('.session-item').forEach(item => {
@@ -1439,6 +1520,14 @@
                     item.classList.remove('active');
                 }
             });
+
+            if (updateHistory) {
+                const url = new URL(window.location);
+                if (url.searchParams.get('sessionId') !== conversationId) {
+                    url.searchParams.set('sessionId', conversationId);
+                    window.history.pushState({}, '', url);
+                }
+            }
 
             chatHistory.innerHTML = '';
 
@@ -1546,8 +1635,26 @@
         }
 
         // Initialize session controls
-        loadSessions();
+        loadSessions().then(() => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('sessionId');
+            if (sessionId) {
+                selectSession(sessionId, false);
+            }
+        });
         newSessionBtn.addEventListener('click', newSession);
+
+        window.addEventListener('popstate', () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            const sessionId = urlParams.get('sessionId');
+            if (sessionId) {
+                if (activeConversationId !== sessionId) {
+                    selectSession(sessionId, false);
+                }
+            } else if (activeConversationId) {
+                newSession();
+            }
+        });
     </script>
 </body>
 </html>
