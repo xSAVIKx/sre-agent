@@ -4,6 +4,10 @@ This module exposes a FastAPI application that wraps the Antigravity agent,
 allowing it to be deployed to GCP Cloud Run and invoked via HTTP requests.
 """
 
+from agent.logging_config import setup_logging
+# Initialize logging configuration before importing other modules
+setup_logging()
+
 from fastapi import FastAPI
 from agent.routes import router
 
