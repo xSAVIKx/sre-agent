@@ -20,9 +20,12 @@ try:
     from google.adk.workflow import START
     from google.adk.agents.context import Context
     HAS_ADK = True
-except ImportError:
+except ImportError as e:
     HAS_ADK = False
-    logger.warning("google-adk is not installed. Using simulated agent fallbacks.")
+    logger.warning(
+        f"google-adk is not installed or failed to import. Using simulated agent fallbacks. Error: {e}",
+        exc_info=True
+    )
 
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""

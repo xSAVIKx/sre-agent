@@ -10,7 +10,14 @@ import json
 import logging
 import datetime
 import sys
+import contextvars
 from typing import Any
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+
+# ContextVars to store trace ID and span ID for the current request
+request_trace_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_trace_id", default=None)
+request_span_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_span_id", default=None)
 
 # Try importing opentelemetry trace
 try:
@@ -48,6 +55,14 @@ class StructuredGcpLoggingFormatter(logging.Formatter):
                         trace_sampled = bool(context.trace_flags.sampled)
             except Exception:
                 # Silently ignore OTEL retrieval exceptions to keep logging robust
+                pass
+
+        # Fallback to request contextvars if OTEL trace wasn't found (e.g. for uvicorn access logs)
+        if not trace_id:
+            try:
+                trace_id = request_trace_id.get()
+                span_id = request_span_id.get()
+            except Exception:
                 pass
 
         # 2. Map Python log levels to GCP severity levels
@@ -166,3 +181,47 @@ def setup_logging(level: int = logging.INFO) -> None:
         logger.handlers = []
         logger.propagate = True
         logger.setLevel(level)
+
+
+class TraceContextMiddleware(BaseHTTPMiddleware):
+    """Starlette middleware to extract trace/span IDs from request headers
+    and store them in context variables for logging correlation.
+    """
+    async def dispatch(self, request: Request, call_next):
+        trace_id = None
+        span_id = None
+
+        # 1. GCP X-Cloud-Trace-Context header
+        # Format: TRACE_ID/SPAN_ID;o=TRACE_TRUE
+        gcp_trace = request.headers.get("x-cloud-trace-context")
+        if gcp_trace:
+            try:
+                parts = gcp_trace.split(";")
+                trace_span = parts[0].split("/")
+                if len(trace_span) >= 1:
+                    trace_id = trace_span[0]
+                if len(trace_span) >= 2:
+                    span_id = trace_span[1]
+            except Exception:
+                pass
+
+        # 2. W3C traceparent header
+        # Format: 00-trace_id-span_id-flags
+        if not trace_id:
+            traceparent = request.headers.get("traceparent")
+            if traceparent:
+                try:
+                    parts = traceparent.split("-")
+                    if len(parts) >= 3:
+                        trace_id = parts[1]
+                        span_id = parts[2]
+                except Exception:
+                    pass
+
+        # Set the context variables (which persist in the current task context
+        # and are available during uvicorn's post-request access logging)
+        request_trace_id.set(trace_id)
+        request_span_id.set(span_id)
+
+        response = await call_next(request)
+        return response
