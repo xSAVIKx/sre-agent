@@ -34,7 +34,7 @@ services:
       dockerfile: sre_agent/Dockerfile
     container_name: sre-agent
     ports:
-      - "8082:8082"
+      - "8082:8080"
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
       - INVENTORY_AGENT_URL=http://inventory-agent:8080
@@ -55,7 +55,7 @@ services:
       - "8080:8080"
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
-      - SRE_AGENT_URL=http://sre-agent:8082
+      - SRE_AGENT_URL=http://sre-agent:8080
       - GCP_PROJECT=${GCP_PROJECT}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - MOCK_GCP=true

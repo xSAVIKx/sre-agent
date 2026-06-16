@@ -87,7 +87,7 @@ async def favicon() -> Response:
 async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
     """Trigger SRE diagnostics (delegates to SRE agent via A2A)."""
     logger.info(f"Received SRE diagnostics request: {request.prompt}")
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
     payload = {
         "prompt": request.prompt,
@@ -206,7 +206,7 @@ async def get_session_history(conversation_id: str):
 @router.get("/trace/{trace_id}")
 async def get_trace(trace_id: str, project_id: str | None = None):
     """Get detailed spans for a specific trace ID by proxying to SRE agent."""
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/trace/{trace_id}"
     params = {"project_id": project_id}
     try:
@@ -280,7 +280,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
 
 async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, is_refresh: bool) -> StreamingResponse:
     """Invokes SRE sub-agent directly via A2A HTTP/SSE and forwards stream to the browser."""
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
     
     # Resolve or create conversation ID

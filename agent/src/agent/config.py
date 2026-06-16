@@ -303,7 +303,7 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
     Returns:
         A markdown-formatted SRE incident diagnosis report.
     """
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8082")
+    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
     payload = {
         "prompt": prompt,
