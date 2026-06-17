@@ -144,11 +144,17 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             session_service=session_service
         )
 
+        # Create session before running (InMemorySessionService requires explicit creation)
+        session = await session_service.create_session(
+            app_name="sre_diagnostics",
+            user_id="sre_user",
+        )
+
         msg = types.Content(parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")])
         diagnosis = ""
         async for event in runner.run_async(
             user_id="sre_user",
-            session_id="session_1",
+            session_id=session.id,
             new_message=msg
         ):
             if event.content and event.content.parts:
