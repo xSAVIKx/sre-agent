@@ -19,6 +19,12 @@ logger = logging.getLogger("inventory_agent.routes")
 router = APIRouter()
 
 
+@router.get("/health")
+async def health_check() -> dict[str, str]:
+    """Basic health check endpoint."""
+    return {"status": "healthy"}
+
+
 class RefreshRequest(BaseModel):
     """Pydantic model representing a manual refresh request."""
     project_id: str
