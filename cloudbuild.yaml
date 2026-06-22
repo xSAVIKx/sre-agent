@@ -22,10 +22,10 @@ steps:
         gcloud builds submit --config=inventory_agent/cloudbuild.yaml \
           --region=${_GCP_REGION} \
           --substitutions=_GCP_REGION=${_GCP_REGION} .
-        INVENTORY_AGENT_URL=$(gcloud run services describe inventory-agent --region=${_GCP_REGION} --format="value(status.url)")
+        INVENTORY_AGENT_URL=$$(gcloud run services describe inventory-agent --region=${_GCP_REGION} --format="value(status.url)")
         gcloud run services update inventory-agent \
           --region=${_GCP_REGION} \
-          --update-env-vars=INVENTORY_AGENT_URL="$INVENTORY_AGENT_URL"
+          --update-env-vars=INVENTORY_AGENT_URL="$$INVENTORY_AGENT_URL"
 
   # 3. Build SRE Diagnostics Sub-Agent
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -35,10 +35,10 @@ steps:
     args:
       - '-c'
       - |
-        INVENTORY_AGENT_URL=$(gcloud run services describe inventory-agent --region=${_GCP_REGION} --format="value(status.url)")
+        INVENTORY_AGENT_URL=$$(gcloud run services describe inventory-agent --region=${_GCP_REGION} --format="value(status.url)")
         gcloud builds submit --config=sre_agent/cloudbuild.yaml \
           --region=${_GCP_REGION} \
-          --substitutions=_GCP_REGION=${_GCP_REGION},_INVENTORY_AGENT_URL="$INVENTORY_AGENT_URL" .
+          --substitutions=_GCP_REGION=${_GCP_REGION},_INVENTORY_AGENT_URL="$$INVENTORY_AGENT_URL" .
 
   # 4. Build SRE Orchestrator Agent
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -48,11 +48,11 @@ steps:
     args:
       - '-c'
       - |
-        TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region=${_GCP_REGION} --format="value(status.url)")
-        SRE_SUB_AGENT_URL=$(gcloud run services describe sre-sub-agent --region=${_GCP_REGION} --format="value(status.url)")
+        TARGET_APP_URL=$$(gcloud run services describe sre-chaos-monkey --region=${_GCP_REGION} --format="value(status.url)")
+        SRE_SUB_AGENT_URL=$$(gcloud run services describe sre-sub-agent --region=${_GCP_REGION} --format="value(status.url)")
         gcloud builds submit --config=agent/cloudbuild.yaml \
           --region=${_GCP_REGION} \
-          --substitutions=_GCP_REGION=${_GCP_REGION},_TARGET_APP_URL="$TARGET_APP_URL",_SRE_AGENT_URL="$SRE_SUB_AGENT_URL" .
+          --substitutions=_GCP_REGION=${_GCP_REGION},_TARGET_APP_URL="$$TARGET_APP_URL",_SRE_AGENT_URL="$$SRE_SUB_AGENT_URL" .
 
 substitutions:
   _GCP_REGION: 'us-central1'
