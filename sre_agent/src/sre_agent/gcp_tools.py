@@ -12,6 +12,7 @@ import datetime
 from typing import Any
 from sre_agent.registry import register_tool
 import contextlib
+from sre_common import retry_async
 
 # Setup basic logging
 logger = logging.getLogger("sre_tools")
@@ -240,6 +241,7 @@ def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_traces")
 async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
     """Queries recent traces from GCP Cloud Trace.
@@ -321,6 +323,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("get_trace_details")
 async def get_trace_details(trace_id: str, project_id: str | None = None) -> str:
     """Retrieves full span details for a specific trace ID from Cloud Trace.
@@ -411,6 +414,7 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_logs_by_trace")
 async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limit: int = 50) -> str:
     """Queries GCP Cloud Logging for logs correlated with a specific trace ID.
@@ -493,6 +497,7 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_logs")
 async def query_logs(query: str, project_id: str | None = None, limit: int = 50) -> str:
     """Queries GCP Cloud Logging with a custom filter query.
@@ -625,6 +630,7 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_metrics")
 async def query_metrics(
     filter_expression: str,
@@ -716,6 +722,7 @@ async def query_metrics(
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("list_metric_descriptors")
 async def list_metric_descriptors(filter_expression: str | None = None, project_id: str | None = None) -> str:
     """Lists metric descriptors in GCP Cloud Monitoring.

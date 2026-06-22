@@ -10,6 +10,7 @@ from google.cloud import firestore
 from google.cloud.firestore_v1.vector import Vector
 from google.cloud.firestore_v1.base_query import DistanceMeasure
 from sre_agent.config import IS_MOCK
+from sre_common import retry_async
 
 logger = logging.getLogger("sre_agent.itinerary")
 
@@ -43,6 +44,7 @@ DEFAULT_TEMPLATES = [
     }
 ]
 
+@retry_async(max_retries=3, initial_delay=1.0)
 async def get_embedding(text: str) -> list[float]:
     """Generates the text embedding using gemini-embedding-2.
     
@@ -67,6 +69,7 @@ async def get_embedding(text: str) -> list[float]:
         logger.error(f"Failed to generate embedding via gemini-embedding-2: {e}")
         return [0.0] * 768
 
+@retry_async(max_retries=3, initial_delay=1.0)
 async def seed_templates_if_empty(db: firestore.AsyncClient) -> None:
     """Queries Firestore to check if the itinerary_templates collection is empty.
     If so, seeds it with default templates and generated embeddings.
@@ -100,6 +103,7 @@ async def seed_templates_if_empty(db: firestore.AsyncClient) -> None:
     except Exception as e:
         logger.error(f"Error seeding itinerary_templates in Firestore: {e}")
 
+@retry_async(max_retries=3, initial_delay=1.0)
 async def find_matching_template(db: firestore.AsyncClient | None, resource_type: str, query_text: str) -> dict[str, Any] | None:
     """Finds the single best matching template using Firestore vector search.
     

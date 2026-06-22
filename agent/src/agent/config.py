@@ -11,6 +11,7 @@ import logging
 import asyncio
 from typing import Any
 import httpx
+from sre_common import retry_async
 
 # Fail-safe OpenTelemetry imports for tracer initialization
 try:
@@ -292,6 +293,28 @@ class SreToolErrorHook(OnToolErrorHook):
         return f"[System: Failed to call SRE Diagnostics Sub-Agent: {data}]"
 
 
+@retry_async(max_retries=3, initial_delay=2.0)
+async def _post_to_sre_agent(url: str, payload: dict[str, Any]) -> str:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, json=payload, timeout=60.0)
+        response.raise_for_status()
+        
+        # Consume SSE stream events to extract final report
+        accumulated_report = ""
+        for line in response.iter_lines():
+            if line.startswith("data: "):
+                try:
+                    event_data = json.loads(line[6:])
+                    if event_data.get("type") == "done":
+                        accumulated_report = event_data.get("response", "")
+                        break
+                    elif event_data.get("type") == "chunk":
+                        accumulated_report += event_data.get("text", "")
+                except Exception:
+                    pass
+        return accumulated_report
+
+
 @register_tool
 async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool = False) -> str:
     """Delegates complex SRE diagnostics, trace correlation, and log analysis to the SRE Sub-Agent.
@@ -314,28 +337,10 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
     
     logger.info(f"Orchestrating A2A POST to SRE Agent: {url}")
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=60.0)
-            if response.status_code != 200:
-                return f"Error: SRE Agent returned status {response.status_code}: {response.text}"
-            
-            # Consume SSE stream events to extract final report
-            accumulated_report = ""
-            for line in response.iter_lines():
-                if line.startswith("data: "):
-                    try:
-                        event_data = json.loads(line[6:])
-                        if event_data.get("type") == "done":
-                            accumulated_report = event_data.get("response", "")
-                            break
-                        elif event_data.get("type") == "chunk":
-                            accumulated_report += event_data.get("text", "")
-                    except Exception:
-                        pass
-            return accumulated_report
+        return await _post_to_sre_agent(url, payload)
     except Exception as e:
         logger.error(f"Failed to communicate with SRE sub-agent: {e}")
-        return f"Error: Failed to contact SRE Sub-Agent: {str(e)}"
+        return f"Error: Failed to contact SRE Sub-Agent after retries: {str(e)}"
 
 
 def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:

@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 import httpx
 import datetime
+from sre_common import retry_async
 
 from agent.config import (
     load_agent_config,
@@ -203,6 +204,14 @@ async def get_session_history(conversation_id: str):
         return {"conversation_id": conversation_id, "history": MOCK_HISTORY_DB.get(conversation_id, [])}
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+async def _fetch_trace_proxy(url: str, params: dict[str, Any]) -> dict[str, Any]:
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, params=params, timeout=10.0)
+        resp.raise_for_status()
+        return resp.json()
+
+
 @router.get("/trace/{trace_id}")
 async def get_trace(trace_id: str, project_id: str | None = None):
     """Get detailed spans for a specific trace ID by proxying to SRE agent."""
@@ -210,14 +219,11 @@ async def get_trace(trace_id: str, project_id: str | None = None):
     url = f"{sre_agent_url}/trace/{trace_id}"
     params = {"project_id": project_id}
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(url, params=params, timeout=10.0)
-            if resp.status_code == 200:
-                return resp.json()
-            else:
-                raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return await _fetch_trace_proxy(url, params)
     except Exception as e:
-        logger.error(f"Failed to proxy trace lookup for {trace_id}: {e}")
+        logger.error(f"Failed to proxy trace lookup for {trace_id} after retries: {e}")
+        if isinstance(e, httpx.HTTPStatusError):
+            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -8,6 +8,7 @@ This module orchestrates two specialized ADK agents:
 import logging
 from typing import Any
 from sre_agent.gcp_tools import get_trace_details, query_logs_by_trace, query_metrics, list_metric_descriptors, otel_trace
+from sre_common import retry_async
 
 # Setup logger
 logger = logging.getLogger("sre_workflow")
@@ -82,7 +83,17 @@ log_correlator = AdkAgent(
 )
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+async def _fetch_topology_with_retry(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
+    import httpx
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(inv_url, params=params, timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+
+
 # 2. Orchestrate the diagnostic workflow
+@retry_async(max_retries=3, initial_delay=2.0)
 @otel_trace("_run_adk_diagnostics")
 async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) -> str:
     """Runs the real multi-agent ADK reasoning workflow.
@@ -125,15 +136,16 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         topology = {}
         try:
             from sre_agent.config import INVENTORY_AGENT_URL, IS_MOCK
-            import httpx
             inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
             params = {"project_id": proj_id or "mock-project"}
-            async with httpx.AsyncClient() as client:
-                resp = await client.get(inv_url, params=params, timeout=15.0)
-                if resp.status_code == 200:
-                    topology = resp.json()
-                else:
-                    logger.warning(f"Inventory Agent returned status code: {resp.status_code}")
+            if IS_MOCK:
+                import httpx
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(inv_url, params=params, timeout=2.0)
+                    if resp.status_code == 200:
+                        topology = resp.json()
+            else:
+                topology = await _fetch_topology_with_retry(inv_url, params)
         except Exception as e:
             logger.error(f"Failed to query Inventory Agent: {e}")
 
