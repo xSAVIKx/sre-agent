@@ -14,7 +14,16 @@ from google.antigravity.connections.local.local_connection_config import LocalAg
 from google.antigravity.connections.local.local_connection import LocalConnectionStrategy
 
 logger = logging.getLogger("sre_agent.firestore_strategy")
-from skills.sre_incident_solver.gcp_tools import otel_trace
+
+# Define simple otel_trace fallback decorator locally to avoid dependency on skills folder
+def otel_trace(span_name: str):
+    def decorator(func):
+        import functools
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            return await func(*args, **kwargs)
+        return wrapper
+    return decorator
 
 # Global in-memory DB for local testing/mock mode
 MOCK_FIRESTORE_DB: dict[str, dict[str, Any]] = {}

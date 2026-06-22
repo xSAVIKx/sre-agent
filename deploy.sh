@@ -76,6 +76,7 @@ if [ "$SKIP_INFRA" = "false" ]; then
         cloudbuild.googleapis.com \
         cloudtrace.googleapis.com \
         logging.googleapis.com \
+        monitoring.googleapis.com \
         artifactregistry.googleapis.com \
         firestore.googleapis.com \
         secretmanager.googleapis.com
@@ -168,11 +169,14 @@ if [ "$SKIP_INFRA" = "false" ]; then
         --role="roles/logging.viewer" >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/monitoring.viewer" >/dev/null
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/datastore.user" >/dev/null
     gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/secretmanager.secretAccessor" >/dev/null
-    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer, roles/datastore.user & secretAccessor to SRE Agent${NC}"
+    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer, roles/monitoring.viewer, roles/datastore.user & secretAccessor to SRE Agent${NC}"
 
     # SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
     echo "Assigning roles to SRE Build service account..."
@@ -261,6 +265,14 @@ if [ "$SKIP_INFRA" = "false" ]; then
     else
         echo -e "${GREEN}✓ Firestore Native (default) database already exists${NC}"
     fi
+
+    # Create composite index for itinerary_templates vector search
+    echo "Creating Firestore Vector Index for itinerary_templates..."
+    gcloud firestore indexes composite create \
+        --collection-group=itinerary_templates \
+        --query-scope=collection \
+        --field-config=field-path=resource_type,order=ascending \
+        --field-config=field-path=embedding,vector-config='{"dimension":"768","flat":{}}' --async || true
 fi
 
 # 5. Build and Deploy Target Application (SRE Chaos Monkey) - SKIPPED FOR FAST REDEPLOY

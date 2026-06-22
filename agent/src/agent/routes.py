@@ -96,7 +96,7 @@ async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
     
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=60.0)
+            response = await client.post(url, json=payload, timeout=300.0)
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=f"SRE Sub-Agent Error: {response.text}")
             
@@ -302,7 +302,7 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
         accumulated_text = ""
         try:
             async with httpx.AsyncClient() as client:
-                async with client.stream("POST", url, json=payload, timeout=60.0) as response:
+                async with client.stream("POST", url, json=payload, timeout=300.0) as response:
                     if response.status_code != 200:
                         yield f"data: {json.dumps({'type': 'error', 'detail': f'SRE sub-agent returned status {response.status_code}'})}\n\n"
                         return

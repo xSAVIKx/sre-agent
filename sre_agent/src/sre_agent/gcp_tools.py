@@ -65,8 +65,13 @@ try:
 except ImportError:
     cloud_logging = None
 
+try:
+    from google.cloud import monitoring_v3
+except ImportError:
+    monitoring_v3 = None
+
 # Determine if we should run in mock/simulator mode
-IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1", "yes") or trace_v1 is None or cloud_logging is None
+IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1", "yes") or trace_v1 is None or cloud_logging is None or monitoring_v3 is None
 
 # Path to the mock telemetry data
 MOCK_DATA_DIR = os.getenv("MOCK_DATA_DIR", "mock_telemetry_data")
@@ -617,3 +622,175 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query GCP Logging API with query '{query}': {e}")
         return json.dumps({"error": f"GCP Logging API Error: {str(e)}"}, indent=2)
+
+
+@register_tool
+@otel_trace("query_metrics")
+async def query_metrics(
+    filter_expression: str,
+    duration_minutes: int = 15,
+    project_id: str | None = None
+) -> str:
+    """Queries GCP Cloud Monitoring for time series metrics.
+
+    Fetches timeseries data points for the given filter expression and duration.
+
+    Args:
+        filter_expression: The Monitoring filter expression (e.g. 'metric.type="run.googleapis.com/container/cpu/utilizations"').
+        duration_minutes: The history window duration in minutes to retrieve.
+        project_id: The GCP Project ID. If None, uses default configuration.
+
+    Returns:
+        A formatted JSON string representing the retrieved time series points.
+    """
+    if IS_MOCK:
+        logger.info(f"[GCP Observability] Querying mock metrics for filter '{filter_expression}' (duration={duration_minutes}m)")
+        metrics = _load_mock_file("metrics.json") or []
+        
+        # Simple mock filtering: match filter expression containing service name or metric type
+        filtered_metrics = []
+        filter_clean = filter_expression.lower().replace('"', '').replace("'", "")
+        for ts in metrics:
+            metric_type = ts.get("metric", {}).get("type", "").lower()
+            service_name = ts.get("metric", {}).get("labels", {}).get("service_name", "").lower()
+            database_id = ts.get("metric", {}).get("labels", {}).get("database_id", "").lower()
+            
+            # The metric type must match (be present in the filter)
+            if metric_type not in filter_clean:
+                continue
+                
+            # If the filter specifies a service_name, it must match this metric's service_name
+            if "service_name" in filter_clean:
+                if not service_name or service_name not in filter_clean:
+                    continue
+            
+            # If the filter specifies a database_id, it must match this metric's database_id
+            if "database_id" in filter_clean:
+                if not database_id or database_id not in filter_clean:
+                    continue
+                    
+            filtered_metrics.append(ts)
+                
+        logger.info(f"[GCP Observability] Found {len(filtered_metrics)} matching mock metrics")
+        return json.dumps(filtered_metrics, indent=2)
+
+    resolved_project = _get_project_id(project_id)
+    logger.info(f"[GCP Observability] Querying real GCP Monitoring API (Project={resolved_project}, filter={filter_expression})")
+    if monitoring_v3 is None:
+        logger.error("[GCP Observability] google-cloud-monitoring library is missing")
+        return json.dumps({"error": "google-cloud-monitoring library is not installed."}, indent=2)
+
+    try:
+        client = monitoring_v3.MetricServiceClient()
+        project_name = f"projects/{resolved_project}"
+        
+        now = datetime.datetime.now(datetime.timezone.utc)
+        start = now - datetime.timedelta(minutes=duration_minutes)
+        
+        interval = monitoring_v3.TimeInterval({
+            "end_time": {"seconds": int(now.timestamp())},
+            "start_time": {"seconds": int(start.timestamp())}
+        })
+        
+        results = client.list_time_series(
+            request={
+                "name": project_name,
+                "filter": filter_expression,
+                "interval": interval,
+                "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL
+            }
+        )
+        
+        time_series_list = []
+        for ts in results:
+            ts_dict = monitoring_v3.TimeSeries.to_dict(ts)
+            ts_dict["metric_kind"] = ts.metric_kind.name if hasattr(ts.metric_kind, 'name') else str(ts.metric_kind)
+            ts_dict["value_type"] = ts.value_type.name if hasattr(ts.value_type, 'name') else str(ts.value_type)
+            time_series_list.append(ts_dict)
+            
+        logger.info(f"[GCP Observability] Successfully queried {len(time_series_list)} timeseries from GCP Monitoring")
+        return json.dumps(time_series_list, indent=2)
+    except Exception as e:
+        logger.error(f"[GCP Observability] Failed to query GCP Monitoring API: {e}")
+        return json.dumps({"error": f"GCP Monitoring API Error: {str(e)}"}, indent=2)
+
+
+@register_tool
+@otel_trace("list_metric_descriptors")
+async def list_metric_descriptors(filter_expression: str | None = None, project_id: str | None = None) -> str:
+    """Lists metric descriptors in GCP Cloud Monitoring.
+
+    Fetches descriptors matching the filter to discover available metrics.
+
+    Args:
+        filter_expression: Optional filter to restrict returned descriptors (e.g. 'metric.type = starts_with("run.googleapis.com/")').
+        project_id: The GCP Project ID. If None, uses default configuration.
+
+    Returns:
+        A formatted JSON string listing matching metric descriptors.
+    """
+    if IS_MOCK:
+        logger.info(f"[GCP Observability] Listing mock metric descriptors (filter={filter_expression})")
+        descriptors = [
+            {
+                "name": "projects/simulation-project-123/metricDescriptors/run.googleapis.com/container/cpu/utilizations",
+                "type": "run.googleapis.com/container/cpu/utilizations",
+                "metric_kind": "GAUGE",
+                "value_type": "DOUBLE",
+                "description": "CPU utilization of the Container",
+                "display_name": "Container CPU utilization"
+            },
+            {
+                "name": "projects/simulation-project-123/metricDescriptors/run.googleapis.com/container/memory/utilizations",
+                "type": "run.googleapis.com/container/memory/utilizations",
+                "metric_kind": "GAUGE",
+                "value_type": "DOUBLE",
+                "description": "Memory utilization of the Container",
+                "display_name": "Container Memory utilization"
+            },
+            {
+                "name": "projects/simulation-project-123/metricDescriptors/cloudsql.googleapis.com/database/postgresql/connection_count",
+                "type": "cloudsql.googleapis.com/database/postgresql/connection_count",
+                "metric_kind": "GAUGE",
+                "value_type": "INT64",
+                "description": "Database connection count",
+                "display_name": "Database Connection Count"
+            }
+        ]
+        if filter_expression:
+            filter_lower = filter_expression.lower()
+            descriptors = [d for d in descriptors if d["type"].lower() in filter_lower or filter_lower in d["type"].lower()]
+        return json.dumps(descriptors, indent=2)
+
+    resolved_project = _get_project_id(project_id)
+    logger.info(f"[GCP Observability] Listing real GCP Metric Descriptors (Project={resolved_project}, filter={filter_expression})")
+    if monitoring_v3 is None:
+        logger.error("[GCP Observability] google-cloud-monitoring library is missing")
+        return json.dumps({"error": "google-cloud-monitoring library is not installed."}, indent=2)
+
+    try:
+        client = monitoring_v3.MetricServiceClient()
+        project_name = f"projects/{resolved_project}"
+        
+        results = client.list_metric_descriptors(
+            request={
+                "name": project_name,
+                "filter": filter_expression or ""
+            }
+        )
+        
+        descriptors_list = []
+        from google.protobuf.json_format import MessageToDict
+        for desc in results:
+            desc_dict = MessageToDict(desc, preserving_proto_field_name=True)
+            if "metric_kind" not in desc_dict:
+                desc_dict["metric_kind"] = desc.metric_kind.name if hasattr(desc.metric_kind, 'name') else str(desc.metric_kind)
+            if "value_type" not in desc_dict:
+                desc_dict["value_type"] = desc.value_type.name if hasattr(desc.value_type, 'name') else str(desc.value_type)
+            descriptors_list.append(desc_dict)
+            
+        logger.info(f"[GCP Observability] Successfully listed {len(descriptors_list)} metric descriptors")
+        return json.dumps(descriptors_list, indent=2)
+    except Exception as e:
+        logger.error(f"[GCP Observability] Failed to list GCP Metric Descriptors: {e}")
+        return json.dumps({"error": f"GCP Metric Descriptors Error: {str(e)}"}, indent=2)

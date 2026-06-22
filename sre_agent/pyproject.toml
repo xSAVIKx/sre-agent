@@ -8,6 +8,7 @@ dependencies = [
     "google-adk>=1.35.0",
     "google-cloud-trace>=1.19.0",
     "google-cloud-logging>=3.16.0",
+    "google-cloud-monitoring>=2.31.0",
     "google-cloud-firestore>=2.27.0",
     "fastapi>=0.137.0",
     "uvicorn>=0.49.0",

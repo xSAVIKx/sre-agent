@@ -541,6 +541,22 @@ wheels = [
 ]
 
 [[package]]
+name = "google-cloud-monitoring"
+version = "2.31.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "google-api-core", extra = ["grpc"] },
+    { name = "google-auth" },
+    { name = "grpcio" },
+    { name = "proto-plus" },
+    { name = "protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/84/9d/9522e169db3887e7f354bb9aa544a6e26c435ce19337e32432598db18c6f/google_cloud_monitoring-2.31.0.tar.gz", hash = "sha256:b4c9d3528c8643d4eb4b9d688cbb3c5914bc5f69b314ff7c5e1b47bdc073a9ae", size = 404747, upload-time = "2026-06-03T15:28:24.938Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/55/30/aa6635296da9c1c14d2e64f64e1cacd4f4debf8ab7e646c0559545f0f70d/google_cloud_monitoring-2.31.0-py3-none-any.whl", hash = "sha256:64f3d56ead48f0a0674f650cb2828c47b936582a02a27c55f2836681a86281c3", size = 391010, upload-time = "2026-06-03T15:27:39.536Z" },
+]
+
+[[package]]
 name = "google-cloud-trace"
 version = "1.19.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1490,6 +1506,7 @@ dependencies = [
     { name = "google-antigravity" },
     { name = "google-cloud-firestore" },
     { name = "google-cloud-logging" },
+    { name = "google-cloud-monitoring" },
     { name = "google-cloud-trace" },
     { name = "httpx" },
     { name = "opentelemetry-exporter-gcp-trace" },
@@ -1505,6 +1522,7 @@ requires-dist = [
     { name = "google-antigravity", specifier = ">=0.1.3" },
     { name = "google-cloud-firestore", specifier = ">=2.27.0" },
     { name = "google-cloud-logging", specifier = ">=3.16.0" },
+    { name = "google-cloud-monitoring", specifier = ">=2.31.0" },
     { name = "google-cloud-trace", specifier = ">=1.19.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "opentelemetry-exporter-gcp-trace", specifier = ">=1.12.0" },
