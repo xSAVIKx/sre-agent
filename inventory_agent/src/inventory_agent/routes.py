@@ -5,6 +5,7 @@ import os
 import logging
 import asyncio
 from typing import Any
+from sre_common import retry_async, otel_trace
 from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from inventory_agent.config import IS_MOCK, SCANNER_JOB_NAME, SCANNER_JOB_REGION, PROJECT_ID
@@ -20,6 +21,7 @@ router = APIRouter()
 
 
 @router.get("/health")
+@otel_trace("inventory_agent.health_check")
 async def health_check() -> dict[str, str]:
     """Basic health check endpoint."""
     return {"status": "healthy"}
@@ -69,6 +71,17 @@ async def run_discovery_mock(project_id: str) -> None:
     logger.info(f"[Mock Scan] Mock discovery complete and saved to cache for {project_id}.")
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+@otel_trace("inventory_agent.run_scanner_job_gcp")
+async def _run_scanner_job_gcp(job_path: str, overrides: dict[str, Any]) -> str:
+    """Helper to call Google Cloud Run Job client library with retries."""
+    from google.cloud import run_v2
+    client = run_v2.JobsClient()
+    operation = await asyncio.to_thread(client.run_job, name=job_path, overrides=overrides)
+    return operation.metadata.name if hasattr(operation, "metadata") else "unknown"
+
+
+@otel_trace("inventory_agent.trigger_scanner_job")
 async def trigger_scanner_job(target_project_id: str) -> None:
     """Triggers the Cloud Run Job (Task) to perform cross-project asset discovery."""
     if IS_MOCK:
@@ -101,16 +114,17 @@ async def trigger_scanner_job(target_project_id: str) -> None:
             ]
         }
         
-        operation = client.run_job(name=job_path, overrides=overrides)
-        logger.info(f"Cloud Run scanner job triggered. Operation ID: {operation.metadata.name if hasattr(operation, 'metadata') else 'unknown'}")
+        op_name = await _run_scanner_job_gcp(job_path, overrides)
+        logger.info(f"Cloud Run scanner job triggered successfully. Operation Name: {op_name}")
     except Exception as e:
-        logger.error(f"Failed to trigger Cloud Run scanner job: {e}")
+        logger.error(f"Failed to trigger Cloud Run scanner job after retries: {e}")
         # Graceful fallback: run local simulation if API call fails
         logger.warning("Falling back to local simulation due to GCP API failure.")
         asyncio.create_task(run_discovery_mock(target_project_id))
 
 
 @router.get("/v1/agents/inventory")
+@otel_trace("inventory_agent.get_inventory")
 async def get_inventory(project_id: str, refresh: bool = False, background_tasks: BackgroundTasks = BackgroundTasks()):
     """Retrieves the infrastructure inventory for a project, caching results statefully.
 
@@ -144,6 +158,7 @@ async def get_inventory(project_id: str, refresh: bool = False, background_tasks
 
 
 @router.post("/v1/agents/inventory/refresh")
+@otel_trace("inventory_agent.refresh_inventory")
 async def refresh_inventory(request: RefreshRequest, background_tasks: BackgroundTasks):
     """Explicitly triggers a background infrastructure rescan/refresh."""
     logger.info(f"Forced refresh requested for project={request.project_id}")
@@ -153,6 +168,7 @@ async def refresh_inventory(request: RefreshRequest, background_tasks: Backgroun
 
 
 @router.post("/v1/agents/inventory/callback")
+@otel_trace("inventory_agent.discovery_callback")
 async def discovery_callback(request: CallbackRequest):
     """Callback endpoint invoked by run-to-completion scanner jobs upon scan completion."""
     logger.info(f"Received scan completion callback for project={request.project_id}")

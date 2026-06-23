@@ -12,47 +12,11 @@ import datetime
 from typing import Any
 from sre_agent.registry import register_tool
 import contextlib
-from sre_common import retry_async
+from sre_common import retry_async, otel_trace, start_span
 
 # Setup basic logging
 logger = logging.getLogger("sre_tools")
 
-# Fail-safe OpenTelemetry imports
-try:
-    from opentelemetry import trace
-    from opentelemetry.trace import StatusCode
-    HAS_OTEL = True
-except ImportError:
-    HAS_OTEL = False
-
-
-@contextlib.contextmanager
-def start_span(name: str):
-    """Context manager to start an OpenTelemetry span safely."""
-    if HAS_OTEL:
-        tracer = trace.get_tracer("sre_agent")
-        with tracer.start_as_current_span(name) as span:
-            try:
-                yield span
-                span.set_status(StatusCode.OK)
-            except Exception as e:
-                span.record_exception(e)
-                span.set_status(StatusCode.ERROR, str(e))
-                raise
-    else:
-        yield None
-
-
-def otel_trace(span_name: str):
-    """Decorator to wrap a function call in a custom OpenTelemetry span."""
-    def decorator(func):
-        import functools
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            with start_span(span_name):
-                return await func(*args, **kwargs)
-        return wrapper
-    return decorator
 
 
 # Fail-safe imports of Google Cloud client libraries

@@ -8,6 +8,7 @@ session resumption across server instances.
 import os
 import shutil
 import logging
+from sre_common import retry_async, otel_trace
 from typing import Any
 from google.antigravity.connections import connection
 from google.antigravity.connections.local.local_connection_config import LocalAgentConfig
@@ -15,15 +16,7 @@ from google.antigravity.connections.local.local_connection import LocalConnectio
 
 logger = logging.getLogger("sre_agent.firestore_strategy")
 
-# Define simple otel_trace fallback decorator locally to avoid dependency on skills folder
-def otel_trace(span_name: str):
-    def decorator(func):
-        import functools
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
+
 
 # Global in-memory DB for local testing/mock mode
 MOCK_FIRESTORE_DB: dict[str, dict[str, Any]] = {}
@@ -68,6 +61,23 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         """Returns the established local Connection."""
         return self._local_strategy.connect()
 
+    @retry_async(max_retries=3, initial_delay=1.0)
+    @otel_trace("firestore_strategy._download_session_data")
+    async def _download_session_data(self) -> dict[str, Any] | None:
+        """Helper to fetch remote session document with retries."""
+        doc_ref = self._db.collection(self._collection_name).document(self.conversation_id)
+        doc = await doc_ref.get()
+        if doc.exists:
+            return doc.to_dict()
+        return None
+
+    @retry_async(max_retries=3, initial_delay=1.0)
+    @otel_trace("firestore_strategy._upload_session_data")
+    async def _upload_session_data(self, session_data: dict[str, Any], active_conversation_id: str) -> None:
+        """Helper to upload remote session document with retries."""
+        doc_ref = self._db.collection(self._collection_name).document(active_conversation_id)
+        await doc_ref.set(session_data, merge=True)
+
     @otel_trace("firestore_strategy.connect")
     async def __aenter__(self) -> "FirestoreConnectionStrategy":
         """Downloads session files from Firestore and starts the local strategy."""
@@ -90,10 +100,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                 session_doc = MOCK_FIRESTORE_DB.get(self.conversation_id)
             else:
                 try:
-                    doc_ref = self._db.collection(self._collection_name).document(self.conversation_id)
-                    doc = await doc_ref.get()
-                    if doc.exists:
-                        session_doc = doc.to_dict()
+                    session_doc = await self._download_session_data()
                 except Exception as e:
                     logger.error(f"Failed to retrieve document from Firestore: {e}")
 
@@ -178,8 +185,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                         "updated_at": firestore.SERVER_TIMESTAMP,
                         "prompt": resolved_prompt,
                     }
-                    doc_ref = self._db.collection(self._collection_name).document(active_conversation_id)
-                    await doc_ref.set(session_data, merge=True)
+                    await self._upload_session_data(session_data, active_conversation_id)
                     logger.info(f"Uploaded session state to Firestore for {active_conversation_id}")
                 except Exception as e:
                     logger.exception(f"Failed to upload session state to Firestore: {e}")

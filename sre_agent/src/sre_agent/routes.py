@@ -17,6 +17,8 @@ from sre_agent.gcp_tools import query_traces
 from sre_agent.sre_workflow import run_sre_diagnostics
 from sre_agent.firestore_strategy import get_sre_session, save_sre_session
 from sre_common.middleware import target_project_contextvar
+from sre_common import retry_async, otel_trace
+
 
 logger = logging.getLogger("sre_agent.routes")
 
@@ -31,13 +33,24 @@ class SreMessageRequest(BaseModel):
     refresh: bool = False
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+async def _fetch_topology(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
+    """Helper to query the Inventory Agent topology cache with retries."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(inv_url, params=params, timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+
+
 @router.get("/health")
+@otel_trace("sre_agent.health_check")
 async def health_check() -> dict[str, str]:
     """Basic health check endpoint."""
     return {"status": "healthy"}
 
 
 @router.get("/trace/{trace_id}")
+@otel_trace("sre_agent.get_trace")
 async def get_trace(trace_id: str, project_id: str | None = None):
     """Get detailed spans for a specific trace ID."""
     logger.info(f"Retrieving trace details via GET for trace_id={trace_id}")
@@ -51,6 +64,7 @@ async def get_trace(trace_id: str, project_id: str | None = None):
 
 
 @router.get("/trace")
+@otel_trace("sre_agent.get_trace_query")
 async def get_trace_query(trace_id: str, project_id: str | None = None):
     """Get detailed spans for a specific trace ID via query parameters."""
     logger.info(f"Retrieving trace details via GET query for trace_id={trace_id}")
@@ -63,7 +77,9 @@ async def get_trace_query(trace_id: str, project_id: str | None = None):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
 
 
+
 @router.post("/v1/agents/sre/messages")
+@otel_trace("sre_agent.sre_message")
 async def sre_message(request: SreMessageRequest, fastapi_request: Request):
     """A2A HTTP streaming endpoint for SRE diagnostics.
 
@@ -82,25 +98,20 @@ async def sre_message(request: SreMessageRequest, fastapi_request: Request):
             
             topology = {}
             try:
-                # Use default timeout of 10s to keep it responsive
                 inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
                 params = {"project_id": resolved_project, "refresh": request.refresh}
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(inv_url, params=params, timeout=15.0)
-                    if resp.status_code == 200:
-                        topology = resp.json()
-                        status = topology.get("status")
-                        if status == "DISCOVERING":
-                            yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Target project infrastructure discovery in progress. Diagnostic run may use cached or incomplete topology data.'})}\n\n"
-                        else:
-                            svc_count = len(topology.get("discovered_resources", {}).get("services", []))
-                            topo_msg = f"✅ Topology cached successfully. Resolved {svc_count} active compute services."
-                            yield f"data: {json.dumps({'type': 'thought', 'text': topo_msg})}\n\n"
-                    else:
-                        logger.warning(f"Inventory Agent returned status code: {resp.status_code}")
+                topology = await _fetch_topology(inv_url, params)
+                status = topology.get("status")
+                if status == "DISCOVERING":
+                    yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Target project infrastructure discovery in progress. Diagnostic run may use cached or incomplete topology data.'})}\n\n"
+                else:
+                    svc_count = len(topology.get("discovered_resources", {}).get("services", []))
+                    topo_msg = f"✅ Topology cached successfully. Resolved {svc_count} active compute services."
+                    yield f"data: {json.dumps({'type': 'thought', 'text': topo_msg})}\n\n"
             except Exception as e:
-                logger.error(f"Failed to query Inventory Agent: {e}")
+                logger.error(f"Failed to query Inventory Agent after retries: {e}")
                 yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Inventory Agent query failed. Proceeding with default service topology parameters.'})}\n\n"
+
 
             # 2. Retrieve recent traces
             yield f"data: {json.dumps({'type': 'thought', 'text': f'🔍 Fetching recent traces from project `{resolved_project}`...'})}\n\n"

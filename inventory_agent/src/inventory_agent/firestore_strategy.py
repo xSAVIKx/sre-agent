@@ -5,6 +5,7 @@ import os
 import logging
 import datetime
 from typing import Any
+from sre_common import retry_async, otel_trace
 
 logger = logging.getLogger("inventory_agent.firestore_strategy")
 
@@ -30,6 +31,8 @@ async def _get_db() -> Any:
         return None
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+@otel_trace("inventory_firestore.get_project_inventory")
 async def get_project_inventory(project_id: str) -> dict[str, Any] | None:
     """Loads a project's cached inventory from Firestore or local mock database."""
     db = await _get_db()
@@ -50,6 +53,8 @@ async def get_project_inventory(project_id: str) -> dict[str, Any] | None:
     return None
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+@otel_trace("inventory_firestore.update_project_inventory")
 async def update_project_inventory(
     project_id: str,
     discovered_resources: dict[str, Any],
@@ -81,6 +86,8 @@ async def update_project_inventory(
         logger.error(f"Failed to write project inventory to Firestore: {e}")
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+@otel_trace("inventory_firestore.set_project_status")
 async def set_project_status(project_id: str, status: str) -> None:
     """Helper to update a project's scanning status in Firestore/Mock DB."""
     db = await _get_db()

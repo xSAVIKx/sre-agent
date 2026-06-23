@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 import httpx
 import datetime
-from sre_common import retry_async
+from sre_common import retry_async, otel_trace
 
 from agent.config import (
     load_agent_config,
@@ -31,16 +31,6 @@ logger = logging.getLogger("orchestrator_agent.routes")
 
 router = APIRouter()
 
-
-# Define simple otel_trace fallback decorator locally
-def otel_trace(span_name: str):
-    def decorator(func):
-        import functools
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            return await func(*args, **kwargs)
-        return wrapper
-    return decorator
 
 
 class DiagnoseRequest(BaseModel):
@@ -306,32 +296,62 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
         
         accumulated_text = ""
+        client = None
+        response = None
         try:
-            async with httpx.AsyncClient() as client:
-                async with client.stream("POST", url, json=payload, timeout=300.0) as response:
-                    if response.status_code != 200:
-                        yield f"data: {json.dumps({'type': 'error', 'detail': f'SRE sub-agent returned status {response.status_code}'})}\n\n"
-                        return
-
-                    async for line in response.aiter_lines():
-                        if await fastapi_request.is_disconnected():
-                            logger.info("Client disconnected. Aborting SRE A2A stream.")
-                            break
-                        
-                        if line.startswith("data: "):
-                            try:
-                                event_data = json.loads(line[6:])
-                                ev_type = event_data.get("type")
-                                if ev_type == "chunk":
-                                    accumulated_text += event_data.get("text", "")
-                                    yield f"data: {line[6:]}\n\n"
-                                elif ev_type == "thought":
-                                    yield f"data: {line[6:]}\n\n"
-                                elif ev_type == "error":
-                                    yield f"data: {line[6:]}\n\n"
-                                    return
-                            except Exception:
-                                pass
+            from sre_common import is_transient_error
+            max_retries = 3
+            initial_delay = 1.0
+            backoff_factor = 2.0
+            
+            for attempt in range(max_retries + 1):
+                try:
+                    client = httpx.AsyncClient()
+                    await client.__aenter__()
+                    response = await client.stream("POST", url, json=payload, timeout=300.0).__aenter__()
+                    if response.status_code == 200:
+                        break
+                    
+                    response.raise_for_status()
+                except Exception as e:
+                    if response:
+                        await response.__aexit__(None, None, None)
+                        response = None
+                    if client:
+                        await client.__aexit__(None, None, None)
+                        client = None
+                    
+                    is_transient = is_transient_error(e) or (hasattr(e, "response") and e.response.status_code in (429, 500, 502, 503, 504))
+                    if attempt == max_retries or not is_transient:
+                        raise
+                    
+                    delay = initial_delay * (backoff_factor ** attempt)
+                    logger.warning(
+                        f"Transient SRE agent connection error on attempt {attempt+1}/{max_retries+1}. "
+                        f"Retrying in {delay:.2f}s... Error: {e}"
+                    )
+                    yield f"data: {json.dumps({'type': 'thought', 'text': f'⚠️ Connection failed. Retrying in {delay:.1f}s...'})}\n\n"
+                    await asyncio.sleep(delay)
+            
+            async for line in response.aiter_lines():
+                if await fastapi_request.is_disconnected():
+                    logger.info("Client disconnected. Aborting SRE A2A stream.")
+                    break
+                
+                if line.startswith("data: "):
+                    try:
+                        event_data = json.loads(line[6:])
+                        ev_type = event_data.get("type")
+                        if ev_type == "chunk":
+                            accumulated_text += event_data.get("text", "")
+                            yield f"data: {line[6:]}\n\n"
+                        elif ev_type == "thought":
+                            yield f"data: {line[6:]}\n\n"
+                        elif ev_type == "error":
+                            yield f"data: {line[6:]}\n\n"
+                            return
+                    except Exception:
+                        pass
 
             # Translate Markdown to A2UI component payload
             response_a2ui = translate_markdown_to_a2ui(accumulated_text)
@@ -386,6 +406,12 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
         except Exception as e:
             logger.exception("Error in SRE streaming proxy.")
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
+        finally:
+            if response:
+                await response.__aexit__(None, None, None)
+            if client:
+                await client.__aexit__(None, None, None)
+
 
     return StreamingResponse(
         event_generator(),

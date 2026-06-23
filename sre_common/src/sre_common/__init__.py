@@ -4,3 +4,5 @@ Contains logging, middlewares, and context variables shared across orchestrator,
 """
 
 from sre_common.retry import retry_async, retry_sync, is_transient_error
+from sre_common.otel import otel_trace, start_span
+

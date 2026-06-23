@@ -12,46 +12,12 @@ import datetime
 from typing import Any
 from .registry import register_tool
 import contextlib
+from sre_common import retry_async, otel_trace, start_span
 
 # Setup basic logging
 logger = logging.getLogger("sre_tools")
 
-# Fail-safe OpenTelemetry imports
-try:
-    from opentelemetry import trace
-    from opentelemetry.trace import StatusCode
-    HAS_OTEL = True
-except ImportError:
-    HAS_OTEL = False
 
-
-@contextlib.contextmanager
-def start_span(name: str):
-    """Context manager to start an OpenTelemetry span safely."""
-    if HAS_OTEL:
-        tracer = trace.get_tracer("sre_agent")
-        with tracer.start_as_current_span(name) as span:
-            try:
-                yield span
-                span.set_status(StatusCode.OK)
-            except Exception as e:
-                span.record_exception(e)
-                span.set_status(StatusCode.ERROR, str(e))
-                raise
-    else:
-        yield None
-
-
-def otel_trace(span_name: str):
-    """Decorator to wrap a function call in a custom OpenTelemetry span."""
-    def decorator(func):
-        import functools
-        @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            with start_span(span_name):
-                return await func(*args, **kwargs)
-        return wrapper
-    return decorator
 
 # Fail-safe imports of Google Cloud client libraries
 try:
@@ -225,6 +191,7 @@ def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_traces")
 async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
     """Queries recent traces from GCP Cloud Trace.
@@ -306,6 +273,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("get_trace_details")
 async def get_trace_details(trace_id: str, project_id: str | None = None) -> str:
     """Retrieves full span details for a specific trace ID from Cloud Trace.
@@ -396,6 +364,7 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_logs_by_trace")
 async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limit: int = 50) -> str:
     """Queries GCP Cloud Logging for logs correlated with a specific trace ID.
@@ -478,6 +447,7 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
 
 
 @register_tool
+@retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_logs")
 async def query_logs(query: str, project_id: str | None = None, limit: int = 50) -> str:
     """Queries GCP Cloud Logging with a custom filter query.
