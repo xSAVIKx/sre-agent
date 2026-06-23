@@ -1,6 +1,7 @@
 import asyncio
 import random
 import logging
+import functools
 from typing import Callable, Any, TypeVar
 
 logger = logging.getLogger("sre_retry")
@@ -50,6 +51,7 @@ def retry_async(
 ):
     """Decorator to retry asynchronous functions on transient errors with exponential backoff and jitter."""
     def decorator(func: Callable[..., Any]):
+        @functools.wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> Any:
             delay = initial_delay
             for attempt in range(max_retries + 1):
@@ -80,6 +82,7 @@ def retry_sync(
 ):
     """Decorator to retry synchronous functions on transient errors with exponential backoff and jitter."""
     def decorator(func: Callable[..., Any]):
+        @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             import time
             delay = initial_delay
