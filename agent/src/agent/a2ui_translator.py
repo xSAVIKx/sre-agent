@@ -42,7 +42,34 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
         except Exception:
             pass
 
-    # 2. Parse SRE Incident Diagnosis Report
+    # 2. Check if this is a post-mortem report
+    if "# 🚨 Incident Post-Mortem" in text or "Incident Post-Mortem" in text:
+        title_match = re.search(r"#\s*🚨\s*(Incident Post-Mortem[^\n]*)", text)
+        title = title_match.group(1).strip() if title_match else "Incident Post-Mortem Report"
+        return {
+            "type": "container",
+            "components": [
+                {
+                    "type": "alert",
+                    "level": "success",
+                    "title": title,
+                    "text": "The SRE diagnostics agent has auto-generated the incident post-mortem report. You can download the complete markdown document using the button below."
+                },
+                {
+                    "type": "section",
+                    "title": "Document Preview",
+                    "content": text
+                },
+                {
+                    "type": "download_button",
+                    "text": "Download Post-Mortem Markdown",
+                    "filename": "post_mortem.md",
+                    "content": text
+                }
+            ]
+        }
+
+    # 3. Parse SRE Incident Diagnosis Report
     trace_match = re.search(r"\*\*Anomalous Trace ID\*\*:\s*`([^`]+)`", text)
     service_match = re.search(r"\*\*Root Service\*\*:\s*`([^`]+)`", text)
 

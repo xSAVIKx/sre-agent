@@ -97,6 +97,37 @@ class TestA2uiTranslator(unittest.TestCase):
         self.assertEqual(components[0]["title"], "Diagnostics Clean")
         self.assertEqual(components[0]["text"], text)
 
+    def test_translate_post_mortem_report(self) -> None:
+        """Verifies that a post-mortem report translates to an A2UI schema containing a download_button."""
+        text = (
+            "# 🚨 Incident Post-Mortem\n\n"
+            "## 📝 Incident Overview\n"
+            "*   **Incident Date/Time**: `2026-06-11T16:00:00.000Z`\n"
+            "*   **Trace ID**: `2b3ad50bbc544e4a888e7cf886f10b8d`\n"
+            "Here is the report details..."
+        )
+        a2ui = translate_markdown_to_a2ui(text)
+        
+        self.assertEqual(a2ui["type"], "container")
+        components = a2ui["components"]
+        self.assertEqual(len(components), 3)
+        
+        # 1. Alert component
+        self.assertEqual(components[0]["type"], "alert")
+        self.assertEqual(components[0]["level"], "success")
+        self.assertEqual(components[0]["title"], "Incident Post-Mortem")
+        
+        # 2. Section component (preview)
+        self.assertEqual(components[1]["type"], "section")
+        self.assertEqual(components[1]["title"], "Document Preview")
+        self.assertEqual(components[1]["content"], text)
+        
+        # 3. Download button component
+        self.assertEqual(components[2]["type"], "download_button")
+        self.assertEqual(components[2]["text"], "Download Post-Mortem Markdown")
+        self.assertEqual(components[2]["filename"], "post_mortem.md")
+        self.assertEqual(components[2]["content"], text)
+
 
 if __name__ == "__main__":
     unittest.main()

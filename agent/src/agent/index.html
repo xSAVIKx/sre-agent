@@ -973,6 +973,48 @@
                         list.appendChild(listItems);
                         containerDiv.appendChild(list);
                         break;
+
+                    case 'download_button':
+                        const btn = document.createElement('button');
+                        btn.className = 'download-pm-btn';
+                        btn.innerHTML = `<span style="margin-right:6px;">📥</span> ${comp.text || 'Download Post-Mortem'}`;
+                        btn.style.marginTop = '12px';
+                        btn.style.padding = '10px 20px';
+                        btn.style.background = 'linear-gradient(135deg, var(--success) 0%, #059669 100%)';
+                        btn.style.color = '#fff';
+                        btn.style.border = 'none';
+                        btn.style.borderRadius = '10px';
+                        btn.style.cursor = 'pointer';
+                        btn.style.fontWeight = '600';
+                        btn.style.fontFamily = 'inherit';
+                        btn.style.display = 'inline-flex';
+                        btn.style.alignItems = 'center';
+                        btn.style.fontSize = '14px';
+                        btn.style.boxShadow = '0 4px 12px var(--success-glow)';
+                        btn.style.transition = 'all 0.2s ease';
+                        btn.onmouseover = () => {
+                            btn.style.transform = 'translateY(-1px)';
+                            btn.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.35)';
+                            btn.style.filter = 'brightness(1.05)';
+                        };
+                        btn.onmouseout = () => {
+                            btn.style.transform = 'translateY(0)';
+                            btn.style.boxShadow = '0 4px 12px var(--success-glow)';
+                            btn.style.filter = 'none';
+                        };
+                        btn.onclick = () => {
+                            const blob = new Blob([comp.content], { type: 'text/markdown' });
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = comp.filename || 'post_mortem.md';
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                        };
+                        containerDiv.appendChild(btn);
+                        break;
                 }
             });
 

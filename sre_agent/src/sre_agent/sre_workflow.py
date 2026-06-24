@@ -7,7 +7,15 @@ This module orchestrates two specialized ADK agents:
 
 import logging
 from typing import Any
-from sre_agent.gcp_tools import get_trace_details, query_logs_by_trace, query_metrics, list_metric_descriptors, otel_trace
+from sre_agent.gcp_tools import (
+    get_trace_details,
+    query_logs_by_trace,
+    query_metrics,
+    list_metric_descriptors,
+    otel_trace,
+    analyze_trace_cascade,
+    generate_post_mortem
+)
 from sre_common import retry_async
 
 # Setup logger
@@ -29,11 +37,10 @@ except ImportError as e:
 
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""
-        def __init__(self, name: str, instruction: str, model: str = "gemini-3-flash-preview", tools: list[Any] | None = None) -> None:
+        def __init__(self, name: str, instruction: str, model: str = "gemini-3-flash-preview") -> None:
             self.name = name
             self.instruction = instruction
             self.model = model
-            self.tools = tools or []
 
         async def chat(self, prompt: str) -> Any:
             """Mock chat method."""
@@ -76,9 +83,10 @@ log_correlator = AdkAgent(
         "of the issue (such as connection timeouts, resource exhaustion, or "
         "logic errors), and recommend a mitigation plan. "
         "You have access to tools to query observability metrics (e.g., container CPU or memory utilization) "
-        "if you need more context to diagnose the problem."
+        "as well as trace cascade bottleneck analysis and incident post-mortem generation "
+        "if you need more context or need to build a post-mortem report."
     ),
-    tools=[query_metrics, list_metric_descriptors],
+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
     model="gemini-3-flash-preview"
 )
 
@@ -278,6 +286,37 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
                 for part in event.content.parts:
                     if part.text:
                         diagnosis += part.text
+
+        # Extract trace_id from traces_json to run the cascade and post-mortem tools
+        trace_id = None
+        try:
+            import json
+            traces = json.loads(traces_json)
+            if isinstance(traces, list):
+                for t in traces:
+                    name = t.get("name", "").lower()
+                    if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
+                        continue
+                    if t.get("error") is True or t.get("durationMs", 0) > 5000:
+                        trace_id = t.get("traceId")
+                        break
+                if not trace_id and traces:
+                    for t in traces:
+                        name = t.get("name", "").lower()
+                        if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
+                            trace_id = t.get("traceId")
+                            break
+                    if not trace_id:
+                        trace_id = traces[0].get("traceId")
+        except Exception:
+            pass
+
+        if trace_id:
+            logger.info(f"ADK Workflow completed. Appending cascade analysis and post-mortem for trace: {trace_id}")
+            cascade_report = await analyze_trace_cascade(trace_id, project_id)
+            post_mortem_report = await generate_post_mortem(trace_id, project_id)
+            diagnosis = f"{diagnosis}\n\n{cascade_report}\n\n{post_mortem_report}"
+
         return diagnosis
     except Exception as e:
         logger.error(f"Error during ADK execution: {e}")
@@ -406,6 +445,10 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
                 catalog_md += f"  - Logs: `{logs}`\n"
         catalog_md += "\n"
 
+        # Call the new cascade analysis and post-mortem tools
+        cascade_report = await analyze_trace_cascade(trace_id, project_id)
+        post_mortem_report = await generate_post_mortem(trace_id, project_id)
+
         report = (
             f"# 🚨 SRE Incident Diagnosis Report\n\n"
             f"**Anomalous Trace ID**: `{trace_id}`\n"
@@ -420,10 +463,12 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
             f"- **CPU Utilization (sre-chaos-monkey)**: `{cpu_info}`\n"
             f"- **Database Connections (db-primary)**: `{db_conn_info}`\n\n"
             f"{catalog_md}"
+            f"{cascade_report}\n\n"
             f"## 🛠️ Recommended Mitigation\n"
             f"1. **Check Database Health**: Verify that the database instance `db-primary.gcp.internal` is running and accessible.\n"
             f"2. **Verify Firewall Rules**: Ensure VPC firewall settings allow ingress traffic from the backend service subnet on port 5432.\n"
-            f"3. **Adjust Connection Pools**: Review backend service connection pool configurations to prevent pool exhaustion."
+            f"3. **Adjust Connection Pools**: Review backend service connection pool configurations to prevent pool exhaustion.\n\n"
+            f"{post_mortem_report}"
         )
         return report
     except Exception as e:

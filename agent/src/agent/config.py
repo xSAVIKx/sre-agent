@@ -327,6 +327,22 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
     Returns:
         A markdown-formatted SRE incident diagnosis report.
     """
+    if os.getenv("MOCK_GCP", "false").lower() == "true":
+        logger.info("MOCK_GCP is true. Running SRE sub-agent diagnostics workflow in-process.")
+        try:
+            from sre_agent.gcp_tools import query_traces
+            from sre_agent.sre_workflow import run_sre_diagnostics
+            resolved_project = project_id or os.environ.get("GCP_PROJECT") or "simulation-project-123"
+            traces_json = await query_traces(project_id=resolved_project, limit=10)
+            return await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
+        except Exception as mock_err:
+            logger.error(f"Failed to run in-process mock diagnostics: {mock_err}")
+            return (
+                "# 🚨 Simulated Diagnostics Report (In-Process Fallback)\n\n"
+                "This is a simulated fallback report for local testing.\n"
+                "Anomalous trace found with latency spiked in child database spans."
+            )
+
     sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
     payload = {

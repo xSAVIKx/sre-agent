@@ -7,7 +7,13 @@ This module orchestrates two specialized ADK agents:
 
 import logging
 from typing import Any
-from .gcp_tools import get_trace_details, query_logs_by_trace, otel_trace
+from .gcp_tools import (
+    get_trace_details,
+    query_logs_by_trace,
+    otel_trace,
+    analyze_trace_cascade,
+    generate_post_mortem
+)
 
 # Setup logger
 logger = logging.getLogger("sre_workflow")
@@ -155,6 +161,37 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
                 for part in event.content.parts:
                     if part.text:
                         diagnosis += part.text
+
+        # Extract trace_id from traces_json to run the cascade and post-mortem tools
+        trace_id = None
+        try:
+            import json
+            traces = json.loads(traces_json)
+            if isinstance(traces, list):
+                for t in traces:
+                    name = t.get("name", "").lower()
+                    if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
+                        continue
+                    if t.get("error") is True or t.get("durationMs", 0) > 5000:
+                        trace_id = t.get("traceId")
+                        break
+                if not trace_id and traces:
+                    for t in traces:
+                        name = t.get("name", "").lower()
+                        if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
+                            trace_id = t.get("traceId")
+                            break
+                    if not trace_id:
+                        trace_id = traces[0].get("traceId")
+        except Exception:
+            pass
+
+        if trace_id:
+            logger.info(f"ADK Workflow completed. Appending cascade analysis and post-mortem for trace: {trace_id}")
+            cascade_report = await analyze_trace_cascade(trace_id, project_id)
+            post_mortem_report = await generate_post_mortem(trace_id, project_id)
+            diagnosis = f"{diagnosis}\n\n{cascade_report}\n\n{post_mortem_report}"
+
         return diagnosis
     except Exception as e:
         logger.error(f"Error during ADK execution: {e}")
@@ -230,6 +267,10 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
                 if log.get("severity") in ("ERROR", "CRITICAL"):
                     error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
 
+        # Call the new cascade analysis and post-mortem tools
+        cascade_report = await analyze_trace_cascade(trace_id, project_id)
+        post_mortem_report = await generate_post_mortem(trace_id, project_id)
+
         report = (
             f"# 🚨 SRE Incident Diagnosis Report\n\n"
             f"**Anomalous Trace ID**: `{trace_id}`\n"
@@ -240,10 +281,12 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
             f"`/api/database` was slow and marked with an error status.\n\n"
             f"Correlating this trace with Cloud Logging logs revealed the following error message:\n"
             f"```\n{error_msg}\n```\n\n"
+            f"{cascade_report}\n\n"
             f"## 🛠️ Recommended Mitigation\n"
             f"1. **Check Database Health**: Verify that the database instance `db-primary.gcp.internal` is running and accessible.\n"
             f"2. **Verify Firewall Rules**: Ensure VPC firewall settings allow ingress traffic from the backend service subnet on port 5432.\n"
-            f"3. **Adjust Connection Pools**: Review backend service connection pool configurations to prevent pool exhaustion."
+            f"3. **Adjust Connection Pools**: Review backend service connection pool configurations to prevent pool exhaustion.\n\n"
+            f"{post_mortem_report}"
         )
         return report
     except Exception as e:

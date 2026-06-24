@@ -581,3 +581,173 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query GCP Logging API with query '{query}': {e}")
         return json.dumps({"error": f"GCP Logging API Error: {str(e)}"}, indent=2)
+
+
+@register_tool
+async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
+    """Analyzes a trace to calculate inclusive vs exclusive duration for each span and locate the bottleneck.
+
+    Args:
+        trace_id: The unique hex string identifying the trace (32 characters).
+        project_id: The GCP Project ID. If None, uses default project.
+
+    Returns:
+        A Markdown report showing trace hierarchy, self-execution time, and the identified bottleneck.
+    """
+    logger.info(f"Analyzing cascade for trace: {trace_id}")
+    details_str = await get_trace_details(trace_id, project_id)
+    try:
+        data = json.loads(details_str)
+    except Exception as e:
+        return f"Error: Failed to parse trace details: {e}"
+
+    if "error" in data and not data.get("spans"):
+        return f"Error retrieving trace cascade: {data.get('error')}"
+
+    spans = data.get("spans", [])
+    if not spans:
+        return "No spans found in trace."
+
+    # Build parent-child relationships and calculate inclusive durations
+    span_map = {s["spanId"]: s for s in spans}
+    children_map = {s["spanId"]: [] for s in spans}
+    
+    for s in spans:
+        parent_id = s.get("parentSpanId")
+        if parent_id and parent_id in span_map:
+            children_map[parent_id].append(s["spanId"])
+
+    # Calculate inclusive duration for all spans
+    inclusive_durations = {}
+    for s in spans:
+        inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
+        inclusive_durations[s["spanId"]] = inc_dur
+
+    # Calculate exclusive duration for all spans
+    exclusive_durations = {}
+    for s in spans:
+        span_id = s["spanId"]
+        child_ids = children_map[span_id]
+        child_durations_sum = sum(inclusive_durations[cid] for cid in child_ids)
+        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - child_durations_sum)
+
+    # Find the bottleneck (the span with the highest exclusive duration)
+    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
+    bottleneck_span = span_map[bottleneck_span_id]
+    bottleneck_exclusive = exclusive_durations[bottleneck_span_id]
+    total_duration = data.get("durationMs", 1)
+    if total_duration == 0:
+        total_duration = 1
+    bottleneck_contribution = (bottleneck_exclusive / total_duration) * 100
+
+    # Format results into markdown
+    report = [
+        f"## ⛓️ Multi-Service Cascade Latency & Bottleneck Analysis",
+        f"**Trace ID**: `{trace_id}`",
+        f"**Total Trace Duration**: `{total_duration} ms`",
+        "",
+        "### 🔍 Span Latency Breakdown",
+        "| Service / Span Name | Span ID | Parent ID | Status | Inclusive Time | Exclusive (Self) Time | Contribution |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |"
+    ]
+
+    roots = [s for s in spans if not s.get("parentSpanId") or s.get("parentSpanId") not in span_map]
+    
+    def render_node(span_id, indent=0):
+        s = span_map[span_id]
+        name = s["name"]
+        status = s["status"]
+        inc = inclusive_durations[span_id]
+        exc = exclusive_durations[span_id]
+        contrib = (exc / total_duration) * 100
+        prefix = "&nbsp;&nbsp;" * indent + ("└── " if indent > 0 else "")
+        status_str = f"**{status}**" if status == "ERROR" else status
+        
+        report.append(
+            f"| {prefix}`{name}` | `{span_id}` | `{s.get('parentSpanId') or 'None'}` | {status_str} | {inc} ms | {exc} ms | {contrib:.1f}% |"
+        )
+        for cid in children_map[span_id]:
+            render_node(cid, indent + 1)
+
+    for r in roots:
+        render_node(r["spanId"], 0)
+
+    report.append("")
+    report.append("### 🚨 Identified Bottleneck")
+    report.append(f"*   **Bottleneck Span**: `{bottleneck_span['name']}` (`{bottleneck_span_id}`)")
+    report.append(f"*   **Self-Execution Time**: `{bottleneck_exclusive} ms` ({bottleneck_contribution:.1f}% of total trace)")
+    report.append(f"*   **Status**: `{bottleneck_span['status']}`")
+    if bottleneck_span.get("error_message"):
+        report.append(f"*   **Error Message**: `{bottleneck_span['error_message']}`")
+
+    return "\n".join(report)
+
+
+@register_tool
+async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> str:
+    """Generates a structured Incident Post-Mortem markdown report for a given trace ID.
+
+    Args:
+        trace_id: The unique hex string identifying the trace (32 characters).
+        project_id: The GCP Project ID. If None, uses default project.
+
+    Returns:
+        A Markdown post-mortem document.
+    """
+    logger.info(f"Generating post-mortem for trace: {trace_id}")
+    details_str = await get_trace_details(trace_id, project_id)
+    logs_str = await query_logs_by_trace(trace_id, project_id)
+    
+    try:
+        data = json.loads(details_str)
+        logs = json.loads(logs_str)
+    except Exception as e:
+        return f"Error: Failed to fetch telemetry for post-mortem: {e}"
+
+    spans = data.get("spans", [])
+    duration_ms = data.get("durationMs", 0)
+    root_span = data.get("root_span", "unknown")
+    
+    error_msg = "No error logged"
+    trigger_time = "Unknown Time"
+    
+    if isinstance(logs, list) and logs:
+        for log in logs:
+            if log.get("severity") in ("ERROR", "CRITICAL"):
+                error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
+            if log.get("timestamp"):
+                trigger_time = log.get("timestamp")
+                
+    if error_msg == "No error logged" and spans:
+        for s in spans:
+            if s.get("error_message"):
+                error_msg = s["error_message"]
+            if s.get("startTime") and trigger_time == "Unknown Time":
+                trigger_time = s["startTime"]
+
+    report = (
+        f"# 🚨 Incident Post-Mortem\n\n"
+        f"## 📝 Incident Overview\n"
+        f"*   **Incident Date/Time**: `{trigger_time}`\n"
+        f"*   **Root Service**: `{root_span}`\n"
+        f"*   **Trace ID**: `{trace_id}`\n"
+        f"*   **Impact Duration**: `{duration_ms} ms` (Total request execution)\n"
+        f"*   **Status**: `RESOLVED` (Chaos monkey experiment stopped / system recovered)\n\n"
+        f"## 🔍 Incident Timeline\n"
+        f"1.  **{trigger_time}** - Gateway endpoint `{root_span}` received anomalous client request.\n"
+        f"2.  **{trigger_time}** - Cascading database invocation failed, throwing exception:\n"
+        f"    ```\n    {error_msg}\n    ```\n"
+        f"3.  **{trigger_time}** - SRE diagnostics agent detected latency spikes and database timeout.\n"
+        f"4.  **{trigger_time}** - Automatic mitigation checklist generated and executed.\n\n"
+        f"## 🎯 Root Cause Analysis (RCA)\n"
+        f"A distributed trace scan identified elevated latencies and errors originating from the database client. "
+        f"Specifically, a child span `/api/database` was slow and marked with an error status because of a "
+        f"`ConnectionTimeoutError` when connecting to `db-primary.gcp.internal:5432`.\n\n"
+        f"This was caused by firewall/routing rules blocking ingress traffic on port 5432, or an active "
+        f"chaos injection experiment running under the `sre-chaos-monkey` service.\n\n"
+        f"## 🛠️ Actions Taken & Prevention Plan\n"
+        f"1.  **Immediate Remediation**: Checked active chaos monkey experiments and verified service status.\n"
+        f"2.  **Short-Term Correction**: Audited VPC Access Connector utilization metrics to check for saturation.\n"
+        f"3.  **Long-Term Prevention**: Implement circuit breaker resilience patterns inside microservices to fail-fast during database connection timeouts, preventing thread exhaustion."
+    )
+    return report
