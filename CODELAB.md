@@ -1,17 +1,16 @@
 # Codelab: Building an Autonomous GCP SRE Agent (ADK + Antigravity with `uv`)
 
-This step-by-step codelab guides you through constructing a site reliability engineering (SRE) agent
-that can troubleshoot distributed application failures in Google Cloud.
+This step-by-step codelab guides you through constructing an autonomous site reliability engineering (SRE) agent that diagnoses distributed application failures and generates download-ready incident post-mortems.
+
+---
 
 ## 🎯 What You Will Build
 
-* An instrumented **FastAPI Target Application** that generates distributed traces and correlated
-  logs.
-* An **Agent Skill** containing custom python tools that query Cloud Trace and Cloud Logging.
-* A **Google ADK Multi-Agent Workflow** that coordinates trace-scanning and log-analysis.
-* An **Antigravity SDK Runtime Harness** that wraps the ADK workflow, applies safety policies, and
-  deploys as a Cloud Run API.
-* A **Bootstrap and Deploy Pipeline** that enforces least-privilege IAM security.
+1. An instrumented **FastAPI Target Application** representing a multi-tier microservice architecture (`Gateway -> Backend -> Database`) that generates OpenTelemetry traces and correlated logs.
+2. An **Agent Skill** containing custom python tools that query Cloud Trace and Cloud Logging, perform cascade latency analysis, and generate post-mortem reports.
+3. A **Google ADK Multi-Agent Workflow** that coordinates trace scanning and log correlation.
+4. An **Antigravity SDK Runtime Harness** that enforces safety policies, translates diagnostic markdown reports to rich A2UI schema elements, and serves a premium Web UI.
+5. An **Interactive Local Simulation** and a **Least-Privilege GCP Deployment Pipeline**.
 
 ---
 
@@ -20,19 +19,17 @@ that can troubleshoot distributed application failures in Google Cloud.
 * **Python 3.14** installed on your system.
 * **`uv`** package manager installed: `pip install uv`.
 * **Google Cloud SDK (`gcloud` CLI)** installed and authenticated.
-* A GCP Billing account linked (for Cloud Run deployments).
+* A GCP Billing account linked (if deploying to Google Cloud).
 
 ---
 
 ## Step 1: Project Bootstrapping with `uv` Workspaces
 
-Instead of raw `pip` and standard `venv`, we use **`uv`** for extremely fast virtual environment creation and workspace package dependency resolution.
+We use **`uv`** for workspace dependency isolation and extremely fast virtual environment creation.
 
-### 1. Initialize Project Directory and Workspaces
+### 1. Initialize Workspaces
 
-This repository is split into two packages: `app` (FastAPI target app) and `agent` (Antigravity diagnostic service). We define a `uv` workspace in the root directory to link them, and keep their dependencies separate.
-
-Create a root `pyproject.toml` workspace configuration:
+Create a root [pyproject.toml](file:///home/xsavikx/AntigravityProjects/sre-agent/pyproject.toml) configuration linking the target app, agent wrapper, and SRE package:
 
 ```toml
 [project]
@@ -44,80 +41,42 @@ requires-python = ">=3.11"
 dependencies = []
 
 [tool.uv.workspace]
-members = ["app", "agent"]
-```
-
-Next, create the dependency configuration for the target app in `app/pyproject.toml`:
-
-```toml
-[project]
-name = "sre-chaos-monkey"
-version = "0.1.0"
-description = "SRE Chaos Monkey FastAPI Target Application"
-readme = "README.md"
-requires-python = ">=3.11"
-dependencies = [
-    "fastapi>=0.110.0",
-    "uvicorn>=0.28.0",
-    "httpx>=0.27.0",
-    "opentelemetry-sdk>=1.24.0",
-    "opentelemetry-exporter-gcp-trace>=1.12.0",
-]
-```
-
-And the dependency configuration for the agent in `agent/pyproject.toml`:
-
-```toml
-[project]
-name = "sre-agent"
-version = "0.1.0"
-description = "Antigravity Cloud SRE Agent Service"
-readme = "README.md"
-requires-python = ">=3.11"
-dependencies = [
-    "google-antigravity>=0.0.4",
-    "google-adk>=1.28.1",
-    "google-cloud-trace>=1.11.0",
-    "google-cloud-logging>=3.8.0",
-    "fastapi>=0.110.0",
-    "uvicorn>=0.28.0",
-    "httpx>=0.27.0",
-]
+members = ["app", "agent", "sre_agent"]
 ```
 
 ### 2. Create the Workspace Virtual Environment
 
-Initialize the virtual environment and synchronize all workspace packages:
+Execute the following commands in the workspace root:
 
 ```bash
 uv venv
 uv sync --all-packages
 ```
 
-This initializes a shared `.venv/` directory. `uv` will resolve and sync dependencies automatically across both packages.
+`uv` automatically creates a shared `.venv/` directory, resolves cross-package configurations, and links local packages together.
+
+> [!TIP]
+> **Why `uv`?** `uv` runs workspace synchronization up to 10-100x faster than traditional `pip` inside virtual environments, offering reliable lockfile generation across packages.
 
 ---
 
 ## Step 2: Defining the Antigravity Agent Skill
 
-An **Agent Skill** is a packaged, discoverable capability that can be dynamically loaded by the
-Antigravity ecosystem (including the Antigravity CLI and the Antigravity 2.0 visual desktop app).
+An **Agent Skill** is a package that can be dynamically discovered by the Antigravity CLI and the Antigravity 2.0 visual desktop app.
 
-Create the directory structure:
-
+Create the skill definition folder:
 ```bash
 mkdir -p skills/sre_incident_solver
 ```
 
 ### 1. Declare the Skill Metadata
 
-Create `skills/sre_incident_solver/SKILL.md` to define the skill metadata and triggers:
+Create [SKILL.md](file:///home/xsavikx/AntigravityProjects/sre-agent/skills/sre_incident_solver/SKILL.md):
 
 ```markdown
 # SRE Incident Solver
 
-An autonomous site reliability engineering skill that diagnoses distributed service failures in GCP
-stacks.
+An autonomous site reliability engineering skill that diagnoses distributed service failures in GCP stacks.
 
 ## Skill Definition
 
@@ -125,17 +84,15 @@ stacks.
 * **Version**: `0.1.0`
 * **Entrypoint**: `sre_workflow.py`
 * **Language**: `python`
-* **Description**: Useful for inspecting distributed trace latency, correlating logs, and
-  identifying database connection timeouts in GCP.
+* **Description**: Useful for inspecting distributed trace latency, correlating logs, and identifying database connection timeouts in GCP.
 ```
 
-### 2. Implement the Extensible Tool Registry
+### 2. Implement the Tool Registry
 
-Create `skills/sre_incident_solver/registry.py` to allow dynamic tool loading:
+Create [registry.py](file:///home/xsavikx/AntigravityProjects/sre-agent/skills/sre_incident_solver/registry.py) to enable decorators for dynamic tool loading:
 
 ```python
 from typing import Callable, Any
-
 
 class ToolRegistry:
     def __init__(self) -> None:
@@ -149,9 +106,7 @@ class ToolRegistry:
     def get_tools(self) -> list[Callable[..., Any]]:
         return self._tools
 
-
 registry = ToolRegistry()
-
 
 def register_tool(func: Callable[..., Any]) -> Callable[..., Any]:
     return registry.register(func)
@@ -159,51 +114,59 @@ def register_tool(func: Callable[..., Any]) -> Callable[..., Any]:
 
 ---
 
-## Step 3: Designing Custom GCP SRE Tools
+## Step 3: Designing Custom SRE Tools
 
-When building agents, **type hints and docstrings are the actual interface definitions** for the
-LLM. The Antigravity SDK compiles python function signatures directly into LLM tool schemas.
+Type hints and docstrings are parsed by the Antigravity SDK to compile tool schemas presented to the LLM. 
 
-Create `skills/sre_incident_solver/gcp_tools.py` containing three custom tools. They query Cloud
-Trace and Cloud Logging APIs, falling back to a local directory simulation if `MOCK_GCP=true`:
+Create [gcp_tools.py](file:///home/xsavikx/AntigravityProjects/sre-agent/skills/sre_incident_solver/gcp_tools.py) containing:
+1. `query_traces` & `get_trace_details`: Fetches trace lists and detailed span timelines.
+2. `query_logs_by_trace`: Collects correlated logging stdout entries.
+3. `analyze_trace_cascade` (Feature #2): Analyzes child spans and calculates inclusive vs. exclusive execution timings.
+4. `generate_post_mortem` (Feature #5): Automates incident post-mortems.
+
+Let's look at the implementation of **exclusive execution duration** in `analyze_trace_cascade`:
 
 ```python
-import os
-import json
-import logging
-from .registry import register_tool
-
-# Setup fail-safe imports of client libraries
-try:
-    from google.cloud import trace_v2
-    from google.cloud import logging as cloud_logging
-except ImportError:
-    trace_v2, cloud_logging = None, None
-
-IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1") or trace_v2 is None
-
-
 @register_tool
-async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
-    """Queries recent traces from GCP Cloud Trace.
+async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
+    """Analyzes a trace to calculate inclusive vs exclusive duration for each span and locate the bottleneck.
 
-    Fetches a list of recent distributed trace summaries, including their
-    trace IDs, start times, and root span names.
+    Args:
+        trace_id: The unique hex string identifying the trace (32 characters).
+        project_id: The GCP Project ID. If None, uses default project.
     """
-    # ... mock and real query implementation ...
+    # 1. Fetch trace data (mock or real Cloud Trace)
+    details_str = await get_trace_details(trace_id, project_id)
+    data = json.loads(details_str)
+    spans = data.get("spans", [])
+
+    # 2. Build parent-child relationships
+    span_map = {s["spanId"]: s for s in spans}
+    children_map = {s["spanId"]: [] for s in spans}
+    for s in spans:
+        parent_id = s.get("parentSpanId")
+        if parent_id and parent_id in span_map:
+            children_map[parent_id].append(s["spanId"])
+
+    # 3. Calculate exclusive duration (inclusive duration minus sum of child inclusive durations)
+    inclusive_durations = {s["spanId"]: _calculate_duration_ms(s["startTime"], s["endTime"]) for s in spans}
+    exclusive_durations = {}
+    for s in spans:
+        span_id = s["spanId"]
+        child_ids = children_map[span_id]
+        child_durations_sum = sum(inclusive_durations[cid] for cid in child_ids)
+        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - child_durations_sum)
+
+    # 4. Format results as a markdown bottleneck contribution table...
 ```
 
 ---
 
 ## Step 4: Building the ADK Multi-Agent Diagnostics
 
-We use the **Agent Development Kit (ADK)** to orchestrate a multi-agent diagnostic graph:
+We use the **Agent Development Kit (ADK)** to orchestrate a multi-agent diagnostic graph containing a `trace_analyzer` and a `log_correlator`.
 
-1. **Trace Analyzer Agent**: Scans traces, isolates high latency/errors, and extracts the anomalous
-   `traceId`.
-2. **Log Correlator Agent**: Queries trace-correlated logs and parses error stacktraces.
-
-Create `skills/sre_incident_solver/sre_workflow.py`:
+Create [sre_workflow.py](file:///home/xsavikx/AntigravityProjects/sre-agent/skills/sre_incident_solver/sre_workflow.py) defining the graph:
 
 ```python
 from google.adk import Agent as AdkAgent
@@ -216,104 +179,139 @@ trace_analyzer = AdkAgent(
 
 log_correlator = AdkAgent(
     name="log_correlator",
-    instruction="Analyze trace spans and correlated logs. Find root cause and output SRE report."
+    instruction="Analyze trace spans and correlated logs. Find root cause and output SRE report.",
+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem]
 )
 
-
-async def run_sre_diagnostics(traces_json: str) -> str:
-# Executed step-by-step logic
+# Set up edges
+sre_diagnostics_workflow = AdkWorkflow(
+    name="sre_diagnostics_workflow",
+    edges=[
+        (START, trace_analyzer, fetch_telemetry, log_correlator)
+    ]
+)
 ```
 
 ---
 
 ## Step 5: Wiring the Antigravity Agent Runtime
 
-The Antigravity SDK handles environment interactions, safety policies, and lifecycle hooks. We
-decouple the runtime execution wrapper into a dedicated `agent/` directory:
+The Antigravity SDK enforces security bounds. We declare these in [config.py](file:///home/xsavikx/AntigravityProjects/sre-agent/agent/src/agent/config.py):
 
-1. **Safety Config (`agent/config.py`)**: Defines `deny("*")` to secure the agent, and `allow(...)`
-   specific read-only tools. Any command execution is gated by `ask_user("run_command")`.
-2. **HTTP API Server (`agent/main.py`)**: A FastAPI app exposing `/diagnose` and `/health`
-   endpoints.
-3. **Configurations (`agent/agent_config.json`)**: Extensible configurations for third-party MCP
-   servers and tools.
+```python
+# Deny all access by default
+safety_policies = [
+    deny("*"),
+    allow("read_file", target="/home/xsavikx/AntigravityProjects/sre-agent/mock_telemetry_data/*"),
+    # Only allow safe read-only observability tools
+    allow("execute_url", target="*.googleapis.com"),
+]
+```
+
+### 1. The A2UI Translator
+To enable UI-friendly rendering and downloading, we implement [a2ui_translator.py](file:///home/xsavikx/AntigravityProjects/sre-agent/agent/src/agent/a2ui_translator.py) which intercepts SRE reports containing post-mortem markdown and wraps them in an interactive A2UI schema containing a `download_button` component:
+
+```python
+if "# 🚨 Incident Post-Mortem" in text:
+    return {
+        "type": "container",
+        "components": [
+            {
+                "type": "alert",
+                "level": "success",
+                "title": "Incident Post-Mortem",
+                "text": "The SRE diagnostics agent has auto-generated the incident post-mortem report."
+            },
+            {
+                "type": "section",
+                "title": "Document Preview",
+                "content": text
+            },
+            {
+                "type": "download_button",
+                "text": "Download Post-Mortem Markdown",
+                "filename": "post_mortem.md",
+                "content": text
+            }
+        ]
+    }
+```
+
+### 2. Rendering the Download Button
+The frontend [index.html](file:///home/xsavikx/AntigravityProjects/sre-agent/agent/src/agent/index.html) renders this component using HSL colors and interactive translateY transitions, prompting a client-side download:
+
+```javascript
+case 'download_button':
+    const btn = document.createElement('button');
+    btn.innerHTML = `📥 ${comp.text}`;
+    btn.style.background = 'linear-gradient(135deg, var(--success) 0%, #059669 100%)';
+    btn.style.boxShadow = '0 4px 12px var(--success-glow)';
+    btn.style.transition = 'all 0.2s ease';
+    btn.onmouseover = () => {
+        btn.style.transform = 'translateY(-1px)';
+        btn.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.35)';
+    };
+    btn.onclick = () => {
+        const blob = new Blob([comp.content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = comp.filename;
+        document.body.appendChild(a);
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+    containerDiv.appendChild(btn);
+    break;
+```
 
 ---
 
-## Step 6: Developing the FastAPI Example Application
+## Step 6: Testing Standalone Local Simulation
 
-Create `app/main.py`. This simulates a multi-tier microservice: `Gateway -> Backend -> Database`.
+We write a simulator [simulate_incident.py](file:///home/xsavikx/AntigravityProjects/sre-agent/simulate_incident.py) to run the loop locally.
 
-* It uses OpenTelemetry to output traces.
-* If a query parameter `trigger_error=true` is passed, the database endpoint simulates a connection
-  timeout and throws a `ConnectionTimeoutError`, logging the trace ID.
-* It outputs structured stdout JSON logs, which Cloud Run automatically maps to GCP trace IDs.
-
----
-
-## Step 7: Testing Standalone Local Simulation
-
-We write a launcher `simulate_incident.py` to test the loop locally:
-
+### Run the Simulation
 ```bash
 uv run simulate_incident.py
 ```
 
-This script executes the FastAPI app internally (generating mock telemetry in
-`mock_telemetry_data/`), boots the SRE Agent skill locally, executes the ADK diagnostic workflow,
-and prints the root-cause diagnosis.
+> [!NOTE]
+> **Expected Terminal Output**: The output must display a structured breakdown table detailing that `/api/database` was slow and had a Contribution of `99.3%` due to a `ConnectionTimeoutError`, followed by the full `# 🚨 Incident Post-Mortem` markdown report.
 
 ---
 
-## Step 8: Production Deployment to Cloud Run
+## Step 7: Production Deployment to Cloud Run
 
-To deploy this in GCP following security best practices, we run a two-part setup:
+To run in Google Cloud Run following security best practices, we deploy the services with separate service identities.
 
 ### 1. Interactive Bootstrapping
+Run `./bootstrap.sh` to configure environment details:
+* Authenticate via `gcloud auth login`.
+* Set your active GCP Project ID.
+* Configure the default region.
 
-Run `./bootstrap.sh` to configure variables:
-
-* Selects or creates your GCP Project.
-* Sets preferred regions.
-* Configures local `.env`.
-
-### 2. Least-Privilege IAM Deployment
-
-Run `./deploy.sh`. This script:
-
-1. Creates `sre-chaos-monkey-sa` (write-only telemetry) and `sre-agent-sa` (read-only telemetry).
-2. Assigns IAM roles:
-    * App: `roles/cloudtrace.agent`, `roles/logging.logWriter`.
-    * Agent: `roles/cloudtrace.user`, `roles/logging.viewer`.
-3. Builds the Docker containers via Cloud Build and deploys them to Cloud Run.
-
-### 3. Verify Deployed Agent
-
-Trigger an incident in the cloud:
-
-```bash
-curl "https://sre-chaos-monkey-<hash>.run.app/api/gateway?trigger_error=true"
-```
-
-Call the SRE agent API endpoint `/diagnose`:
-
-```bash
-curl -X POST "https://sre-agent-<hash>.run.app/diagnose" \
-     -H "Content-Type: application/json" \
-     -d '{"prompt": "Gateway service is throwing errors. Find the root cause."}'
-```
-
-The deployed agent will query real Cloud Trace and Cloud Logging APIs using its secure service
-account, run the multi-agent ADK graph in the container, and return a complete root cause analysis!
+### 2. Build & Deploy
+Run `./deploy.sh` to build containers using Cloud Build, deploy to Cloud Run, and assign least-privilege roles:
+* App service account: `roles/cloudtrace.agent` (write-only)
+* Agent service account: `roles/cloudtrace.user` (read-only)
 
 ---
 
-## Step 9: Cleaning Up GCP Resources
+## Step 8: Interactive Verification & Verification Checklist
 
-To avoid incurring charges for running Cloud Run services, clean up the deployed stack. We provide a cleanup script that deletes the Cloud Run services, target app/agent service accounts, and IAM policy bindings:
+Once deployed, trigger a live incident to check the setup:
 
+1. **Trigger Error**: `curl "https://target-app-<hash>.run.app/api/gateway?trigger_error=true"`
+2. **Access Agent UI**: Navigate to `https://orchestrator-agent-<hash>.run.app/chat`.
+3. **Ask Agent**: Type `Diagnose the recent latency spikes and generate a post-mortem.`
+4. **Download**: Once the agent completes, verify that a green **Download Post-Mortem Markdown** button renders in the chat and exports the markdown report successfully on click.
+
+---
+
+## Step 9: GCP Resource Cleanup
+
+To avoid charges, clean up all provisioned GCP services, service accounts, and IAM policy bindings by running:
 ```bash
 ./cleanup.sh
 ```
-
-Follow the interactive prompts to optionally delete your local `.env` and `mock_telemetry_data/` files as well.
