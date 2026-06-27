@@ -82,7 +82,7 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_trace_cascade_mock(self) -> None:
         """Verifies analyze_trace_cascade correctly parses trace spans and identifies the bottleneck in mock mode."""
-        trace_id = "2b3ad50bbc544e4a888e7cf886f10b8d"
+        trace_id = "06f96234b89348488f6a2a01b1fc4632"
         with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
              mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", "mock_telemetry_data"):
             report = await analyze_trace_cascade(trace_id)
@@ -92,7 +92,7 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_post_mortem_mock(self) -> None:
         """Verifies generate_post_mortem generates a structured markdown post-mortem report in mock mode."""
-        trace_id = "2b3ad50bbc544e4a888e7cf886f10b8d"
+        trace_id = "06f96234b89348488f6a2a01b1fc4632"
         with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
              mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", "mock_telemetry_data"):
             report = await generate_post_mortem(trace_id)
