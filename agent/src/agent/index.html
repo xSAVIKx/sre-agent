@@ -16,14 +16,15 @@
     
     <style>
         :root {
+            color-scheme: dark;
             --bg-primary: #0b0f19;
             --bg-glass: rgba(17, 25, 40, 0.75);
             --border-glass: rgba(255, 255, 255, 0.08);
             --accent-glow: rgba(99, 102, 241, 0.15);
             --text-main: #f3f4f6;
             --text-muted: #9ca3af;
-            --primary: #6366f1;
-            --primary-hover: #4f46e5;
+            --primary: #818cf8;
+            --primary-hover: #6366f1;
             --terminal-bg: #05070c;
             --card-bg: rgba(255, 255, 255, 0.03);
             --success: #10b981;
@@ -712,7 +713,11 @@
         }
 
         .session-item:hover .edit-title-btn,
-        .session-item:hover .delete-session-btn {
+        .session-item:hover .delete-session-btn,
+        .edit-title-btn:focus-visible,
+        .delete-session-btn:focus-visible,
+        .edit-title-btn:focus,
+        .delete-session-btn:focus {
             opacity: 1 !important;
         }
         .edit-title-btn:hover {
@@ -729,20 +734,215 @@
             height: 100%;
             overflow: hidden;
         }
+
+        /* Focus rings */
+        button:focus-visible, 
+        .session-item:focus-visible,
+        .session-select-btn:focus-visible,
+        input:focus-visible,
+        a:focus-visible {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+
+        /* Skip link */
+        .skip-link {
+            position: absolute;
+            top: -100px;
+            left: 20px;
+            background: var(--primary);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            z-index: 2000;
+            text-decoration: none;
+            font-weight: 500;
+            transition: top 0.2s ease;
+        }
+        .skip-link:focus-visible, .skip-link:focus {
+            top: 20px;
+            outline: none;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+        }
+
+        /* Hidden screen reader helpers */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            border: 0;
+        }
+
+        /* Mobile Menu Buttons & Overlay */
+        .sidebar-toggle {
+            display: none;
+            background: none;
+            border: none;
+            color: var(--text-main);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+        .sidebar-toggle:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .sidebar-close-btn {
+            display: none;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 8px;
+            transition: color 0.2s, background 0.2s;
+        }
+        .sidebar-close-btn:hover {
+            color: var(--text-main);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .sidebar-overlay {
+            display: none;
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(5, 7, 12, 0.6);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 998;
+            transition: opacity 0.3s ease;
+        }
+        .sidebar-overlay.visible {
+            display: block;
+        }
+
+        /* Session list button styling */
+        .session-select-btn {
+            background: none;
+            border: none;
+            color: var(--text-main);
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            text-align: left;
+            cursor: pointer;
+            flex: 1;
+            outline: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding: 0;
+        }
+
+        /* PM download button styles */
+        .download-pm-btn {
+            margin-top: 12px;
+            padding: 10px 20px;
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            font-size: 14px;
+            box-shadow: 0 4px 12px var(--success-glow);
+            transition: all 0.2s ease;
+            outline: none;
+        }
+        .download-pm-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
+            filter: brightness(1.05);
+        }
+        .download-pm-btn:active {
+            transform: translateY(1px);
+        }
+        .download-pm-btn:focus-visible {
+            outline: 2px solid var(--success);
+            outline-offset: 2px;
+        }
+
+        /* Responsive Breakpoint: Tablet (768px - 1024px) */
+        @media (max-width: 1024px) {
+            .app-container {
+                height: 100vh;
+                width: 100vw;
+                max-width: 100%;
+                border-radius: 0;
+                border: none;
+            }
+            .sidebar {
+                width: 240px;
+            }
+        }
+
+        /* Responsive Breakpoint: Mobile (< 768px) */
+        @media (max-width: 768px) {
+            .sidebar-toggle {
+                display: block;
+            }
+            .sidebar-close-btn {
+                display: block;
+            }
+            .sidebar {
+                position: absolute;
+                top: 0;
+                left: -280px;
+                width: 280px;
+                height: 100%;
+                z-index: 999;
+                background: #0b0f19;
+                transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+            .sidebar.open {
+                left: 0;
+            }
+            .chat-history {
+                padding: 16px 20px;
+                gap: 16px;
+            }
+            .chat-input-area {
+                padding: 16px 20px 20px;
+            }
+            .app-header {
+                padding: 14px 20px;
+            }
+            .message-bubble {
+                max-width: 95%;
+                padding: 12px 16px;
+            }
+        }
     </style>
 </head>
 <body>
+    <a href="#chatHistory" class="skip-link">Skip to chat content</a>
 
     <div class="app-container">
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
         <!-- Sidebar for Sessions -->
-        <aside class="sidebar">
+        <aside class="sidebar" role="complementary" aria-label="Diagnostic Sessions">
             <div class="sidebar-header">
-                <h2>Diagnostic Sessions</h2>
+                <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                    <h2>Diagnostic Sessions</h2>
+                    <button class="sidebar-close-btn" id="sidebarCloseBtn" aria-label="Close sessions menu">✕</button>
+                </div>
                 <button class="new-session-btn" id="newSessionBtn">+ New Chat</button>
             </div>
-            <div class="sessions-list" id="sessionsList">
+            <ul class="sessions-list" id="sessionsList" role="list">
                 <!-- Session items loaded dynamically -->
-            </div>
+            </ul>
         </aside>
 
         <!-- Main Chat Area -->
@@ -750,6 +950,7 @@
             <!-- Header -->
             <header class="app-header">
                 <div class="header-title-container">
+                    <button class="sidebar-toggle" id="sidebarToggle" aria-label="Open sessions menu">☰</button>
                     <div class="header-logo">🛸</div>
                     <div class="header-title">
                         <h1>Antigravity SRE Control</h1>
@@ -757,7 +958,7 @@
                     </div>
                 </div>
                 
-                <div class="agent-status">
+                <div class="agent-status" role="status">
                     <div class="status-dot"></div>
                     <span>Agent Active</span>
                 </div>
@@ -779,11 +980,13 @@
             <footer class="chat-input-area">
                 <form class="input-form" id="inputForm">
                     <div class="input-wrapper">
+                        <label for="textInput" class="sr-only">Message prompt</label>
                         <input type="text" 
                                id="textInput" 
                                class="text-input" 
                                placeholder="Describe the incident (e.g. Gateway database timeouts)..." 
                                autocomplete="off" 
+                               aria-label="Message prompt"
                                required>
                     </div>
                     <button type="submit" class="send-button" id="sendBtn">
@@ -977,31 +1180,7 @@
                     case 'download_button':
                         const btn = document.createElement('button');
                         btn.className = 'download-pm-btn';
-                        btn.innerHTML = `<span style="margin-right:6px;">📥</span> ${comp.text || 'Download Post-Mortem'}`;
-                        btn.style.marginTop = '12px';
-                        btn.style.padding = '10px 20px';
-                        btn.style.background = 'linear-gradient(135deg, var(--success) 0%, #059669 100%)';
-                        btn.style.color = '#fff';
-                        btn.style.border = 'none';
-                        btn.style.borderRadius = '10px';
-                        btn.style.cursor = 'pointer';
-                        btn.style.fontWeight = '600';
-                        btn.style.fontFamily = 'inherit';
-                        btn.style.display = 'inline-flex';
-                        btn.style.alignItems = 'center';
-                        btn.style.fontSize = '14px';
-                        btn.style.boxShadow = '0 4px 12px var(--success-glow)';
-                        btn.style.transition = 'all 0.2s ease';
-                        btn.onmouseover = () => {
-                            btn.style.transform = 'translateY(-1px)';
-                            btn.style.boxShadow = '0 6px 16px rgba(16, 185, 129, 0.35)';
-                            btn.style.filter = 'brightness(1.05)';
-                        };
-                        btn.onmouseout = () => {
-                            btn.style.transform = 'translateY(0)';
-                            btn.style.boxShadow = '0 4px 12px var(--success-glow)';
-                            btn.style.filter = 'none';
-                        };
+                        btn.innerHTML = `<span style="margin-right:6px;" aria-hidden="true">📥</span> ${comp.text || 'Download Post-Mortem'}`;
                         btn.onclick = () => {
                             const blob = new Blob([comp.content], { type: 'text/markdown' });
                             const url = URL.createObjectURL(blob);
@@ -1333,7 +1512,7 @@
 
         // Sidebar sessions rendering and loading
         function renderSessionItem(session) {
-            const item = document.createElement('div');
+            const item = document.createElement('li');
             item.className = 'session-item';
             if (session.conversation_id === activeConversationId) {
                 item.classList.add('active');
@@ -1348,11 +1527,17 @@
             header.style.width = '100%';
             header.style.gap = '8px';
 
-            const title = document.createElement('div');
-            title.className = 'session-title';
-            title.style.flex = '1';
-            title.innerText = session.prompt;
-            header.appendChild(title);
+            const selectBtn = document.createElement('button');
+            selectBtn.className = 'session-select-btn';
+            selectBtn.innerText = session.prompt || 'Untitled Session';
+            selectBtn.setAttribute('aria-label', `Select session: ${session.prompt || 'Untitled Session'}`);
+            selectBtn.addEventListener('click', () => {
+                if (currentAbortController) {
+                    currentAbortController.abort();
+                }
+                selectSession(session.conversation_id);
+            });
+            header.appendChild(selectBtn);
 
             const actionContainer = document.createElement('div');
             actionContainer.className = 'session-actions';
@@ -1363,6 +1548,8 @@
             const editBtn = document.createElement('button');
             editBtn.className = 'edit-title-btn';
             editBtn.innerHTML = '✏️';
+            editBtn.setAttribute('aria-label', 'Edit session title');
+            editBtn.title = 'Edit session title';
             editBtn.style.background = 'none';
             editBtn.style.border = 'none';
             editBtn.style.color = 'var(--text-muted)';
@@ -1376,6 +1563,8 @@
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'delete-session-btn';
             deleteBtn.innerHTML = '🗑️';
+            deleteBtn.setAttribute('aria-label', 'Delete session');
+            deleteBtn.title = 'Delete session';
             deleteBtn.style.background = 'none';
             deleteBtn.style.border = 'none';
             deleteBtn.style.color = 'var(--text-muted)';
@@ -1404,11 +1593,11 @@
             meta.innerText = dateStr;
             item.appendChild(meta);
 
-            item.addEventListener('click', () => {
-                if (currentAbortController) {
-                    currentAbortController.abort();
+            // Forward click on list item to select button
+            item.addEventListener('click', (e) => {
+                if (!editBtn.contains(e.target) && !deleteBtn.contains(e.target) && !actionContainer.contains(e.target)) {
+                    selectBtn.click();
                 }
-                selectSession(session.conversation_id);
             });
 
             editBtn.addEventListener('click', (e) => {
@@ -1417,7 +1606,7 @@
                 const input = document.createElement('input');
                 input.type = 'text';
                 input.className = 'session-title-input';
-                input.value = title.innerText;
+                input.value = selectBtn.innerText;
                 input.style.flex = '1';
                 input.style.background = 'rgba(255, 255, 255, 0.05)';
                 input.style.border = '1px solid var(--primary)';
@@ -1427,7 +1616,7 @@
                 input.style.padding = '2px 6px';
                 input.style.outline = 'none';
                 
-                header.replaceChild(input, title);
+                header.replaceChild(input, selectBtn);
                 actionContainer.style.display = 'none';
                 input.focus();
                 input.select();
@@ -1445,7 +1634,8 @@
                             });
                             if (res.ok) {
                                 session.prompt = newTitle;
-                                title.innerText = newTitle;
+                                selectBtn.innerText = newTitle;
+                                selectBtn.setAttribute('aria-label', `Select session: ${newTitle}`);
                             } else {
                                 console.error('Failed to save session title');
                             }
@@ -1454,7 +1644,7 @@
                         }
                     }
                     if (header.contains(input)) {
-                        header.replaceChild(title, input);
+                        header.replaceChild(selectBtn, input);
                     }
                     actionContainer.style.display = 'flex';
                 };
@@ -1464,7 +1654,7 @@
                         saveTitle();
                     } else if (evt.key === 'Escape') {
                         if (header.contains(input)) {
-                            header.replaceChild(title, input);
+                            header.replaceChild(selectBtn, input);
                         }
                         actionContainer.style.display = 'flex';
                     }
@@ -1544,6 +1734,10 @@
             document.querySelectorAll('.session-item').forEach(item => item.classList.remove('active'));
             renderWelcomeMessage();
 
+            if (typeof toggleMobileSidebar === 'function') {
+                toggleMobileSidebar(false);
+            }
+
             // Clear sessionId param from the URL
             const url = new URL(window.location);
             if (url.searchParams.has('sessionId')) {
@@ -1555,6 +1749,10 @@
         async function selectSession(conversationId, updateHistory = true) {
             activeConversationId = conversationId;
             
+            if (typeof toggleMobileSidebar === 'function') {
+                toggleMobileSidebar(false);
+            }
+
             document.querySelectorAll('.session-item').forEach(item => {
                 if (item.dataset.id === conversationId) {
                     item.classList.add('active');
@@ -1685,6 +1883,26 @@
             }
         });
         newSessionBtn.addEventListener('click', newSession);
+
+        // Mobile Sidebar Controls
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebarCloseBtn = document.getElementById('sidebarCloseBtn');
+        const sidebarOverlay = document.getElementById('sidebarOverlay');
+        const sidebar = document.querySelector('.sidebar');
+
+        function toggleMobileSidebar(open) {
+            if (open) {
+                sidebar.classList.add('open');
+                sidebarOverlay.classList.add('visible');
+            } else {
+                sidebar.classList.remove('open');
+                sidebarOverlay.classList.remove('visible');
+            }
+        }
+
+        sidebarToggle.addEventListener('click', () => toggleMobileSidebar(true));
+        sidebarCloseBtn.addEventListener('click', () => toggleMobileSidebar(false));
+        sidebarOverlay.addEventListener('click', () => toggleMobileSidebar(false));
 
         window.addEventListener('popstate', () => {
             const urlParams = new URLSearchParams(window.location.search);
