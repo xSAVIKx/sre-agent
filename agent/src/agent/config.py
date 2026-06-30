@@ -130,11 +130,22 @@ if not HAS_ANTIGRAVITY:
                     yield Thought(text="SRE Agent: Executing ADK workflow logic...")
                     await asyncio.sleep(0.8)
 
-                    diagnosis = (
+                    fallback_diagnosis = (
                         "# 🚨 Simulated Diagnostics Report\n\n"
                         "This is a simulated fallback report for local testing.\n"
                         "Anomalous trace found with latency spiked in child database spans."
                     )
+                    # Delegate to the real in-process SRE workflow so the offline
+                    # simulation surfaces the full cascade + post-mortem report,
+                    # just like the deployed orchestrator calling its diagnose_sre tool.
+                    if os.getenv("MOCK_GCP", "false").lower() == "true":
+                        try:
+                            diagnosis = await diagnose_sre(self.prompt)
+                        except Exception as diag_err:
+                            logger.error(f"Mock orchestrator failed to run diagnose_sre: {diag_err}")
+                            diagnosis = fallback_diagnosis
+                    else:
+                        diagnosis = fallback_diagnosis
                     self._text = diagnosis
                     
                     yield Thought(text="Orchestration complete. Streaming report...")

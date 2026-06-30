@@ -121,9 +121,26 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
         trigger_error: Whether this trace simulates an error state.
     """
     os.makedirs(MOCK_DATA_DIR, exist_ok=True)
+    # Inclusive (wall-clock) duration of each tier in milliseconds. On an injected
+    # error the database tier dominates (a ~10s connection timeout); each upstream
+    # tier adds a little self-time on top so the cascade has a clear bottleneck.
     db_duration = 10200 if trigger_error else 30
     backend_duration = db_duration + 50
     gateway_duration = backend_duration + 20
+
+    # Start offsets (ms from T0); children start slightly after their parent.
+    gw_start, be_start, db_start = 0, 10, 30
+
+    def _ts(ms: int) -> str:
+        """Formats an integer millisecond offset as a valid RFC3339 timestamp.
+
+        The value must occupy the seconds + milliseconds fields (e.g. 10270 ms ->
+        ``...:10.270Z``). Placing it in the fractional-seconds field instead
+        (``...:00.10270Z``) makes ``%f`` parse it as ~102 ms, collapsing the
+        cascade duration math.
+        """
+        secs, millis = divmod(ms, 1000)
+        return f"2026-06-11T16:00:{secs:02d}.{millis:03d}Z"
 
     trace_data = {
         "traceId": trace_id,
@@ -135,24 +152,24 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
                 "name": "/api/gateway",
                 "spanId": "span-gateway-111",
                 "parentSpanId": None,
-                "startTime": "2026-06-11T16:00:00.000Z",
-                "endTime": f"2026-06-11T16:00:00.{gateway_duration}Z",
+                "startTime": _ts(gw_start),
+                "endTime": _ts(gw_start + gateway_duration),
                 "status": "ERROR" if trigger_error else "OK"
             },
             {
                 "name": "/api/backend",
                 "spanId": "span-backend-222",
                 "parentSpanId": "span-gateway-111",
-                "startTime": "2026-06-11T16:00:00.010Z",
-                "endTime": f"2026-06-11T16:00:00.{backend_duration}Z",
+                "startTime": _ts(be_start),
+                "endTime": _ts(be_start + backend_duration),
                 "status": "ERROR" if trigger_error else "OK"
             },
             {
                 "name": "/api/database",
                 "spanId": "span-database-333",
                 "parentSpanId": "span-backend-222",
-                "startTime": "2026-06-11T16:00:00.030Z",
-                "endTime": f"2026-06-11T16:00:00.{db_duration}Z",
+                "startTime": _ts(db_start),
+                "endTime": _ts(db_start + db_duration),
                 "status": "ERROR" if trigger_error else "OK",
                 "error_message": "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms" if trigger_error else None
             }
