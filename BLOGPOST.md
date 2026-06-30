@@ -1,130 +1,239 @@
-# Taming the 3 AM Alert: Building an Autonomous SRE Agent using Google ADK, Antigravity SDK, and `uv`
+# Taming the 3 AM Alert: Building an Autonomous SRE Agent with Google ADK, the Antigravity SDK, and `uv`
 
-Triaging production incidents at 3 AM is one of the most stressful parts of being a software developer or site reliability engineer (SRE). In modern distributed systems, this is amplified by cognitive overload: logs are scattered across dozens of microservices, trace paths are nested and hard to follow, and identifying the true root cause requires manually correlating timestamps across disparate observability dashboards.
+Triaging a production incident at 3 AM is one of the most stressful parts of being a software or site reliability engineer (SRE). Modern distributed systems amplify the pain with sheer cognitive overload: logs are scattered across dozens of microservices, trace paths are deeply nested, and finding the true root cause means manually correlating timestamps across half a dozen observability dashboards.
 
-*What if an autonomous AI assistant could correlate trace timelines, identify bottlenecks, generate detailed root-cause summaries, and write the incident post-mortem for you before you even log on?*
+*What if an autonomous agent could scan your traces, pinpoint the bottleneck span, correlate the error logs, and write the incident post-mortem for you — before you even finish logging in?*
 
-In this post, we introduce a complete blueprint for building and deploying an **Autonomous SRE Agent in Google Cloud**. This system combines two powerful Google frameworks: the **Agent Development Kit (ADK)** for multi-agent diagnostic graphs, and the **Google Antigravity SDK** for runtime sandboxing, safety policies, and local simulation.
+This post is a complete, runnable blueprint for an **Autonomous SRE Agent on Google Cloud**. It combines two Google frameworks that solve two very different problems:
+
+- the **Agent Development Kit (ADK)** for multi-agent diagnostic *reasoning*, and
+- the **Google Antigravity SDK** for the agent *runtime* — tool wiring, deny-by-default safety policies, and local simulation.
+
+The entire stack runs locally with **zero GCP credentials** thanks to a mock-telemetry mode, so you can try it in under a minute. Everything below is verified against the code in this repository.
 
 ---
 
-## 🏗️ The Core Architecture: Orchestration + Safety
+## 🏗️ The Core Architecture: Reasoning + Safety
 
-To build a reliable SRE assistant, we must solve two distinct problems: **reasoning orchestration** (mapping diagnostic workflows) and **environmental safety** (restricting agent actions to read-only APIs by default). Our blueprint splits these responsibilities:
+A trustworthy SRE assistant has to get two things right at once: **reasoning orchestration** (which diagnostic step happens when) and **environmental safety** (the agent must never be able to mutate production while it pokes around). The blueprint splits these concerns across four small FastAPI services that talk to each other over HTTP (an Agent-to-Agent, or *A2A*, pattern) with results streamed back as Server-Sent Events (SSE).
 
 ```mermaid
-graph TD
-    User([User Alert]) -->|Trigger Diagnose| AG_Agent[Antigravity Agent Runtime]
-    AG_Agent -->|Safety Gated Tools| GCP_APIs[(Google Cloud Trace & Logging)]
-    AG_Agent -->|Invoke ADK Workflow| SRE_Workflow[ADK Diagnostic Graph]
+flowchart TB
+    User(["👤 On-call engineer"]) -->|"GET /chat · POST prompt (SSE)"| Orch
 
-    subgraph ADK Multi-Agent Workflow
-        SRE_Workflow --> Trace_Agent[Trace Analyzer Agent]
-        Trace_Agent -->|Extracts Trace ID| Log_Agent[Log Correlator Agent]
-        Log_Agent -->|Formulates Diagnosis| SRE_Workflow
+    subgraph Safe["🛡️ Orchestrator · Cloud Run service: sre-agent"]
+        Orch["Antigravity Agent runtime<br/>policy = deny('*'), allow('diagnose_sre')<br/><i>its only capability is to delegate</i>"]
     end
 
-    SRE_Workflow -->|Returns SRE Report| AG_Agent
-    AG_Agent -->|Output Report| User
+    Orch -->|"diagnose_sre — A2A HTTP + SSE"| SRE
+
+    subgraph Diag["🔬 SRE diagnostics · Cloud Run service: sre-sub-agent"]
+        SRE["SSE endpoint<br/>/v1/agents/sre/messages"] --> WF
+        WF["ADK workflow<br/>TraceAnalyzer ➜ LogCorrelator"]
+    end
+
+    SRE -->|"GET topology (A2A)"| Inv["📚 Inventory agent<br/>service: inventory-agent"]
+    Inv --> FS[("Firestore<br/>topology cache + sessions")]
+
+    WF -->|"read-only queries · or MOCK_GCP"| Obs[("☁️ Cloud Trace · Logging · Monitoring")]
+    App["🐒 Target app 'chaos monkey'<br/>service: sre-chaos-monkey"] -->|"write-only: spans + logs"| Obs
+
+    SRE -->|"streamed Markdown report"| Orch
+    Orch -->|"A2UI render + 📥 download button"| User
 ```
 
-1. **Google ADK (Diagnostic Workflow)**:
-   The ADK is a code-first library designed for multi-agent systems. We construct a pipeline containing:
-   * **Trace Analyzer Agent**: Scans recent trace logs, filters transactions by latency (>5000ms) or error status, and isolates the failing `traceId`.
-   * **Log Correlator Agent**: Queries logs tagged with the target `traceId`, correlates stack traces, and compiles the root cause.
-2. **Google Antigravity SDK (Sandboxed Runtime)**:
-   The Antigravity SDK handles OS and cloud access, wires Python functions into LLM tools, and enforces safety gates. Using `LocalAgentConfig` in [config.py](file:///home/xsavikx/AntigravityProjects/sre-agent/agent/src/agent/config.py), we enforce a **least-privilege "deny-by-default" policy**. The agent is restricted to read-only telemetry queries and must prompt for explicit user confirmation (`ask_user("run_command")`) before executing any write/mutate actions.
+Two frameworks divide the labor:
+
+1. **Google ADK — the diagnostic workflow.** ADK is a code-first library for multi-agent graphs. The SRE sub-agent runs a two-node graph defined in [`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py):
+   - **TraceAnalyzer** scans recent trace summaries, filters for transactions that errored or breached the latency budget (>5000 ms), and isolates the single failing `traceId`.
+   - **LogCorrelator** pulls the spans and the logs tagged with that `traceId`, then reasons over them with a toolbelt (`query_metrics`, `analyze_trace_cascade`, `generate_post_mortem`, …) to produce the root-cause report.
+
+2. **Google Antigravity SDK — the sandboxed runtime.** The Antigravity SDK wires plain Python functions into LLM tools and enforces safety gates. The user-facing Orchestrator in [`config.py`](agent/src/agent/config.py) uses a strict **least-privilege, deny-by-default policy**:
+
+   ```python
+   safety_policies = [
+       deny("*"),            # nothing is allowed by default
+       allow("diagnose_sre") # …except delegating to the SRE sub-agent
+   ]
+   ```
+
+   That is the whole policy. The Orchestrator literally *cannot* read files, run commands, or hit arbitrary URLs — its only move is to hand the problem to the read-only SRE sub-agent. Safety becomes a property of the architecture, not a promise in a prompt.
+
+> **Runs anywhere, credentials optional.** Every cloud dependency (`google-adk`, `google-antigravity`, `google-cloud-*`, `opentelemetry`) is imported behind a `try/except ImportError` with a mock fallback, and a `MOCK_GCP` flag swaps live API calls for local JSON fixtures. The same code path powers the local simulation and the Cloud Run deployment.
 
 ---
 
-## 🔬 Deep Dive: Multi-Service Cascade Latency & Bottleneck Analysis
+## 🔄 Anatomy of a Diagnosis
 
-When an alert triggers, tracing dashboards show a slow parent request, but that is often a red herring. The latency usually cascades from a downstream microservice. 
+When an alert fires, here is what actually happens end to end. Notice the **two-tier reasoning**: with a real model key the full ADK graph runs; offline it falls back to a deterministic simulated workflow that produces an identically-structured report.
 
-To automate cascade analysis, we implemented a custom tool: [analyze_trace_cascade](file:///home/xsavikx/AntigravityProjects/sre-agent/sre_agent/src/sre_agent/gcp_tools.py#L940). 
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as Engineer
+    participant O as Orchestrator (sre-agent)
+    participant S as SRE sub-agent (sre-sub-agent)
+    participant I as Inventory agent
+    participant T as Trace/Log/Metric tools
+    participant M as Gemini (ADK)
 
-It builds a span parent-child hierarchy map and calculates:
-* **Inclusive Duration**: The total wall-clock time of the span (including child calls).
-* **Exclusive (Self) Duration**: The active execution time of the span (excluding child calls):
-  $$\text{ExclusiveTime} = \text{InclusiveTime} - \sum \text{ChildInclusiveTimes}$$
+    U->>O: "Diagnose the latency spikes and write a post-mortem"
+    O->>S: diagnose_sre()  ·  A2A POST /v1/agents/sre/messages
+    S-->>O: SSE: "🔧 fetching topology…"
+    S->>I: GET project topology
+    I-->>S: services + databases (Firestore cache)
+    S->>T: query_traces(limit=10)
+    T-->>S: recent trace summaries
 
-Using this formulation, the tool isolates the exact service bottleneck contributing the highest percentage to the overall latency. It outputs a structured markdown table:
+    alt HAS_ADK and GEMINI_API_KEY present
+        S->>M: TraceAnalyzer → pick failing traceId
+        M-->>S: traceId
+        S->>M: LogCorrelator → reason over spans + logs
+        M-->>S: root-cause narrative
+    else offline / no key
+        S->>S: _run_simulated_diagnostics() (deterministic)
+    end
 
+    S->>T: analyze_trace_cascade() + generate_post_mortem()
+    T-->>S: bottleneck table + post-mortem markdown
+    S-->>O: SSE chunks → final report
+    O-->>U: A2UI dashboard + 📥 Download post-mortem
 ```
+
+The streaming endpoint that drives this lives in [`routes.py`](sre_agent/src/sre_agent/routes.py); the orchestration entrypoint and the tier selection are in [`run_sre_diagnostics`](sre_agent/src/sre_agent/sre_workflow.py).
+
+---
+
+## 🔬 Deep Dive: Cascade Latency & Bottleneck Analysis
+
+A slow parent request is usually a red herring — the latency *cascades* up from somewhere deep in the call tree. The hard part of reading a trace by hand is separating a span's **inclusive** time (the whole subtree) from its **exclusive** time (the work it did *itself*). The synthetic incident in this repo is a textbook example: a gateway request that looks 10-second-slow, but where 99% of the time is actually trapped in a database call three levels down.
+
+```mermaid
+gantt
+    title Trace b49d… — Gateway request timeline (ms)
+    dateFormat x
+    axisFormat %Lms
+    section /api/gateway
+    inclusive 10270ms (self 20ms)      :crit, 0, 10270
+    section /api/backend
+    inclusive 10250ms (self 50ms)      :crit, 10, 10260
+    section /api/database  ⛔ timeout
+    inclusive 10200ms (self 10200ms)   :crit, 30, 10230
+```
+
+The [`analyze_trace_cascade`](sre_agent/src/sre_agent/gcp_tools.py) tool builds the span parent/child map and computes, for every span:
+
+- **Inclusive duration** — wall-clock time of the span including its children.
+- **Exclusive (self) duration** — the active time spent *in that span alone*:
+
+  $$\text{ExclusiveTime}(s) = \text{InclusiveTime}(s) - \sum_{c \in \text{children}(s)} \text{InclusiveTime}(c)$$
+
+The span with the largest exclusive time is the true bottleneck. Here is the **actual, verified output** from `uv run simulate_incident.py` (no edits, no GCP):
+
+```text
 ### 🔍 Span Latency Breakdown
-| Service / Span Name | Span ID | Parent ID | Status | Inclusive Time | Exclusive (Self) Time | Contribution |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `/api/gateway` | `span-gateway-111` | `None` | ERROR | 10270 ms | 20 ms | 0.2% |
-| └── `/api/backend` | `span-backend-222` | `span-gateway-111` | ERROR | 10250 ms | 50 ms | 0.5% |
-|     └── `/api/database` | `span-database-333` | `span-backend-222` | ERROR | 10200 ms | 10200 ms | 99.3% |
+| Service / Span Name | Span ID            | Parent ID         | Status | Inclusive Time | Exclusive (Self) Time | Contribution |
+| :---                | :---               | :---              | :---   | :---           | :---                  | :---         |
+| /api/gateway        | span-gateway-111   | None              | ERROR  | 10270 ms       | 20 ms                 | 0.2%         |
+|   └── /api/backend  | span-backend-222   | span-gateway-111  | ERROR  | 10250 ms       | 50 ms                 | 0.5%         |
+|       └── /api/database | span-database-333 | span-backend-222 | ERROR | 10200 ms       | 10200 ms              | 99.3%        |
 
 ### 🚨 Identified Bottleneck
-*   **Bottleneck Span**: `/api/database` (`span-database-333`)
-*   **Self-Execution Time**: `10200 ms` (99.3% of total trace)
-*   **Status**: `ERROR`
+*   Bottleneck Span:     /api/database (span-database-333)
+*   Self-Execution Time: 10200 ms (99.3% of total trace)
+*   Status:              ERROR
+*   Error Message:       ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms
 ```
+
+The gateway and backend each look "slow" at 10 s inclusive, but their *self* time is a rounding error. The agent ignores the noise and points straight at `/api/database` — 99.3% of the budget, burned in a single connection timeout.
 
 ---
 
-## 📄 Automated Incident Post-Mortem & Downloader
+## 📄 Automated Post-Mortem & One-Click Export
 
-After diagnosing the root cause, the SRE Agent compiles an **Incident Post-Mortem**. Rather than generating a simple summary, it drafts a complete Markdown document covering:
-* **Incident Overview**: Date/time, root service, Trace ID, and total impact duration.
-* **Timeline**: Interactive breakdown from initial client entry, downstream DB connection attempts, timeout limits, up to agent diagnosis.
-* **RCA (Root Cause Analysis)**: Deep analysis identifying the failure mechanism (e.g., firewall rule block, container resource exhaustion, or chaos monkey experiments).
-* **Prevention Plan**: Immediate remediation (e.g., termination of chaos monkeys) and long-term preventions (e.g., circuit breakers, shorter timeouts).
+Diagnosis is only half the job; the deliverable on-call engineers actually need is a **post-mortem**. After the cascade analysis, [`generate_post_mortem`](sre_agent/src/sre_agent/gcp_tools.py) drafts a complete Markdown document with an Incident Overview (time, root service, Trace ID, impact duration), a Timeline, a Root Cause Analysis, and a Prevention Plan — all populated from the real trace and log data.
 
-### Interactive Chat Export
-To make this document immediately useful, the Web UI uses [a2ui_translator.py](file:///home/xsavikx/AntigravityProjects/sre-agent/agent/src/agent/a2ui_translator.py) to translate the raw markdown report into structured UI elements. When it detects a post-mortem section, it appends a premium **Download Button** to the chat bubble.
+That Markdown then flows through a small but delightful UI pipeline:
 
-This button is styled with custom HSL transitions, shadows, and translateY micro-animations. On click, it triggers a client-side Blob downloader:
+```mermaid
+flowchart LR
+    R["SRE report markdown<br/># 🚨 Incident Post-Mortem"] --> T["translate_markdown_to_a2ui()"]
+    T --> C["A2UI components:<br/>alert · preview · download_button"]
+    C --> B["Web chat renders<br/>.download-pm-btn"]
+    B --> D["📥 Client-side Blob download<br/>post_mortem.md"]
+```
+
+The server-side translator [`a2ui_translator.py`](agent/src/agent/a2ui_translator.py) detects the post-mortem heading and appends a `download_button` component. The browser ([`index.html`](agent/src/agent/index.html)) renders it as a styled button that builds the file entirely client-side:
+
 ```javascript
-const blob = new Blob([comp.content], { type: 'text/markdown' });
-const url = URL.createObjectURL(blob);
-const a = document.createElement('a');
-a.href = url;
-a.download = comp.filename || 'post_mortem.md';
-document.body.appendChild(a);
-a.click();
+case 'download_button':
+    const btn = document.createElement('button');
+    btn.className = 'download-pm-btn';
+    btn.innerHTML = `<span aria-hidden="true">📥</span> ${comp.text || 'Download Post-Mortem'}`;
+    btn.onclick = () => {
+        const blob = new Blob([comp.content], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = comp.filename || 'post_mortem.md';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+    containerDiv.appendChild(btn);
+    break;
 ```
-Developers can export the post-mortem report to markdown with a single click and commit it directly to their internal post-incident review wiki.
+
+One click exports `post_mortem.md`, ready to drop into your incident-review wiki.
 
 ---
 
-## 🔒 Least-Privilege IAM Deployment
+## 🔒 Least-Privilege IAM on Cloud Run
 
-In a production GCP environment, giving an AI agent unrestricted access is a severe security risk. To enforce least privilege, our deployment pipeline ([deploy.sh](file:///home/xsavikx/AntigravityProjects/sre-agent/deploy.sh)) deploys the microservices to **Google Cloud Run** using separate, restricted service accounts:
+Handing an autonomous agent unrestricted cloud access is a non-starter. The deploy pipeline ([`deploy.sh`](deploy.sh)) gives each Cloud Run service its **own service account** with the narrowest possible role set:
 
-1. **Target Application Identity** (`sre-chaos-monkey-sa`): Runs the instrumented FastAPI app. It is limited to **write-only** telemetry roles:
-   * `roles/cloudtrace.agent` (Send spans to Cloud Trace)
-   * `roles/logging.logWriter` (Stream logs to Cloud Logging)
-2. **SRE Agent Identity** (`sre-agent-sa`): Runs the diagnostics agent. It is limited to **read-only** telemetry roles:
-   * `roles/cloudtrace.user` (Query and retrieve Trace details)
-   * `roles/logging.viewer` (Filter logs by trace IDs)
+```mermaid
+flowchart LR
+    subgraph W["✍️ Write-only — emits telemetry"]
+        A["sre-chaos-monkey-sa<br/>(target app)"]
+        A --- AR["roles/cloudtrace.agent<br/>roles/logging.logWriter"]
+    end
+    subgraph R["👁️ Read-only — consumes telemetry"]
+        S["sre-agent-sa<br/>(SRE diagnostics)"]
+        S --- SR["roles/cloudtrace.user<br/>roles/logging.viewer<br/>roles/monitoring.viewer<br/>roles/datastore.user"]
+    end
+    A -. spans + logs .-> O[("Cloud Trace / Logging / Monitoring")]
+    O -. queries .-> S
+```
+
+The split is the whole point: the app that *generates* the chaos can only ever **write** telemetry, and the agent that *investigates* it can only ever **read**. Neither can act on the other's plane. (The deploy also provisions an `inventory-agent-sa` for topology discovery and a dedicated `sre-build-sa` for Cloud Build, each similarly scoped.)
 
 ---
 
-## 🚀 Interactive Setup: Try it Yourself
+## 🚀 Try It Yourself in 60 Seconds
 
-You can execute the entire trace-scanning, log-correlating, bottleneck-analyzing, and post-mortem generation workflow locally using **`uv`**. No GCP account or credentials required!
+You can run the entire scan → correlate → analyze → post-mortem loop locally. **No GCP account or credentials required.**
 
-### Step 1: Install uv and sync packages
 ```bash
+# 1. Install uv and sync the workspace (app, agent, sre_agent, inventory_agent, sre_common)
 pip install uv
 uv sync --all-packages
-```
 
-### Step 2: Run the Incident Simulation
-```bash
+# 2. Run the incident simulation
 uv run simulate_incident.py
 ```
-This script triggers a database timeout incident, writes mock traces and logs to the local `mock_telemetry_data/` directory, boots the SRE Agent in mock mode, executes the multi-agent ADK workflow, and prints the markdown diagnostic report directly to your terminal.
+
+The simulation triggers a database-timeout incident in the target app, writes mock traces and logs to `mock_telemetry_data/`, boots the Orchestrator in mock mode, runs the diagnostic workflow in-process, and prints the report to your terminal. You will see the structured telemetry logs (gateway → backend → database, ending in a `CRITICAL ConnectionTimeoutError`) followed by the full diagnosis: the **99.3% `/api/database` bottleneck table** and the complete **`# 🚨 Incident Post-Mortem`** shown above.
+
+Want the full multi-service experience with the web chat UI? `docker-compose up --build` brings up the Orchestrator, SRE agent, Inventory agent, a Firestore emulator, and the target app together — then open the chat at `/chat`.
 
 ---
 
 ## 🔗 Project Resources
 
-* **FastAPI Target Application**: Instrumented under the [app/](file:///home/xsavikx/AntigravityProjects/sre-agent/app) folder.
-* **SRE Diagnostics Skill**: Core logic defined in [skills/sre_incident_solver/](file:///home/xsavikx/AntigravityProjects/sre-agent/skills/sre_incident_solver).
-* **Tutorial Walkthrough**: Step-by-step blueprint setup in [CODELAB.md](file:///home/xsavikx/AntigravityProjects/sre-agent/CODELAB.md).
-* **AI Collaborator Rules**: Coding guidelines in [AGENTS.md](file:///home/xsavikx/AntigravityProjects/sre-agent/AGENTS.md).
+- **Hands-on tutorial** — build it from scratch in [`CODELAB.md`](CODELAB.md).
+- **Target application** — the OpenTelemetry-instrumented chaos monkey in [`app/main.py`](app/main.py).
+- **SRE diagnostics engine** — tools and ADK workflow in [`sre_agent/`](sre_agent/src/sre_agent).
+- **Antigravity skill package** — the portable skill copy in [`skills/sre_incident_solver/`](skills/sre_incident_solver).
+- **Contributor guide** — conventions for AI and human collaborators in [`AGENTS.md`](AGENTS.md).
