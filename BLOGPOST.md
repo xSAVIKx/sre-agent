@@ -250,11 +250,15 @@ You can run the entire scan → correlate → analyze → post-mortem loop local
 credentials required.**
 
 ```bash
-# 1. Install uv and sync the workspace (app, agent, sre_agent, inventory_agent, sre_common)
+# 1. Clone the repo
+git clone https://github.com/xSAVIKx/sre-agent.git
+cd sre-agent
+
+# 2. Install uv and sync the workspace (app, agent, sre_agent, inventory_agent, sre_common)
 pip install uv
 uv sync --all-packages
 
-# 2. Run the incident simulation
+# 3. Run the incident simulation
 uv run simulate_incident.py
 ```
 
@@ -277,12 +281,3 @@ The complete, runnable source — plus a step-by-step **CODELAB** that builds th
 lives on GitHub:
 
 **👉 [github.com/xSAVIKx/sre-agent](https://github.com/xSAVIKx/sre-agent)**
-
-Clone it and run the full offline simulation in under a minute:
-
-```bash
-git clone https://github.com/xSAVIKx/sre-agent.git
-cd sre-agent
-uv sync --all-packages
-uv run simulate_incident.py
-```
