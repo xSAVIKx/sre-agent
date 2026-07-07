@@ -1,0 +1,10 @@
+gantt
+    title Trace b49d… — Gateway request waterfall (nested spans)
+    dateFormat x
+    axisFormat %S s
+    section /api/gateway
+        inclusive 10270ms (self 20ms)     : active, 0, 10270
+    section /api/backend
+        inclusive 10250ms (self 50ms)     : active, 10, 10260
+    section /api/database (TIMEOUT)
+        inclusive 10200ms (self 10200ms)  : crit, 30, 10230

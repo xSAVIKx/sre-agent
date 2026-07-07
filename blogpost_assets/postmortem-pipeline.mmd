@@ -1,0 +1,5 @@
+flowchart LR
+    R["SRE report markdown<br/># 🚨 Incident Post-Mortem"] --> T["translate_markdown_to_a2ui()"]
+    T --> C["A2UI components:<br/>alert · preview · download_button"]
+    C --> B["Web chat renders<br/>.download-pm-btn"]
+    B --> D["📥 Client-side Blob download<br/>post_mortem.md"]

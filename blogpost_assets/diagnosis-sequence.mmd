@@ -1,0 +1,25 @@
+sequenceDiagram
+    autonumber
+    actor U as Engineer
+    participant O as Orchestrator (sre-agent)
+    participant S as SRE sub-agent (sre-sub-agent)
+    participant I as Inventory agent
+    participant T as Trace/Log/Metric tools
+    participant M as Gemini (ADK)
+    U ->> O: "Diagnose the latency spikes and write a post-mortem"
+    O ->> S: diagnose_sre() · A2A POST /v1/agents/sre/messages
+    S -->> O: SSE: "🔧 fetching topology…"
+    S ->> I: GET project topology
+    I -->> S: services + databases (Firestore cache)
+    S ->> T: query_traces(limit=10)
+    T -->> S: recent trace summaries
+
+    S ->> M: TraceAnalyzer → pick failing traceId
+    M -->> S: traceId
+    S ->> M: LogCorrelator → reason over spans + logs
+    M -->> S: root-cause narrative
+
+    S ->> T: analyze_trace_cascade() + generate_post_mortem()
+    T -->> S: bottleneck table + post-mortem markdown
+    S -->> O: SSE chunks → final report
+    O -->> U: A2UI dashboard + 📥 Download post-mortem

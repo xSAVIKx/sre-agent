@@ -1,0 +1,20 @@
+flowchart TB
+    User(["👤 On-call engineer"]) -->|" GET /chat · POST prompt (SSE) "| Orch
+
+    subgraph Safe["🛡️ Orchestrator · Cloud Run service: sre-agent"]
+        Orch["Antigravity Agent runtime<br/>policy = deny('*'), allow('diagnose_sre')<br/>(its only capability is to delegate)"]
+    end
+
+    Orch -->|" diagnose_sre — A2A HTTP + SSE "| SRE
+
+    subgraph Diag["🔬 SRE diagnostics · Cloud Run service: sre-sub-agent"]
+        SRE["SSE endpoint<br/>/v1/agents/sre/messages"] --> WF
+        WF["ADK workflow<br/>TraceAnalyzer ➜ LogCorrelator"]
+    end
+
+    SRE -->|" GET topology (A2A) "| Inv["📚 Inventory agent<br/>service: inventory-agent"]
+    Inv --> FS[("Firestore<br/>topology cache + sessions")]
+    WF -->|" read-only queries "| Obs[("☁️ Cloud Trace · Logging · Monitoring")]
+    App["🐒 Target app 'chaos monkey'<br/>service: sre-chaos-monkey"] -->|" write-only: spans + logs "| Obs
+    SRE -->|" streamed Markdown report "| Orch
+    Orch -->|" A2UI render + 📥 download button "| User

@@ -1,0 +1,11 @@
+flowchart LR
+    subgraph W["✍️ Write-only — emits telemetry"]
+        A["sre-chaos-monkey-sa<br/>(target app)"]
+        A --- AR["roles/cloudtrace.agent<br/>roles/logging.logWriter"]
+    end
+    subgraph R["👁️ Read-only — consumes telemetry"]
+        S["sre-agent-sa<br/>(SRE diagnostics)"]
+        S --- SR["roles/cloudtrace.user<br/>roles/logging.viewer<br/>roles/monitoring.viewer<br/>roles/datastore.user"]
+    end
+    A -. spans + logs .-> O[("Cloud Trace / Logging / Monitoring")]
+    O -. queries .-> S
