@@ -12,6 +12,13 @@ the actual, verified output of the finished project.
 > codelab (and its prose/diagrams) is plain documentation — follow it with whatever editor or
 > assistant you like, per [`AGENTS.md`](AGENTS.md).
 
+> **📦 Get the finished code:** the complete, runnable project lives at
+> **[`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)**. Clone it to compare
+> against your work as you go, or to skip ahead:
+> ```bash
+> git clone https://github.com/xSAVIKx/sre-agent.git
+> ```
+
 ---
 
 ## 🎯 What You Will Build

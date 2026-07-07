@@ -4,6 +4,8 @@ Welcome to the production-grade template for building, testing, and deploying an
 
 The agent monitors microservices, queries distributed traces, correlates logs, diagnoses cascade bottlenecks, auto-generates comprehensive incident post-mortems, and lets you download them straight from the chat UI. The whole stack runs **locally with zero GCP credentials** thanks to a mock-telemetry mode.
 
+> **📦 Source code:** [`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)
+
 ---
 
 ## ⚡ Featured Capabilities
@@ -117,13 +119,19 @@ flowchart LR
 
 Run the entire diagnostic workflow locally in seconds with **`uv`**. No GCP account, project, or credentials required.
 
-### 1. Synchronize Dependencies
+### 1. Clone the Repository
+```bash
+git clone https://github.com/xSAVIKx/sre-agent.git
+cd sre-agent
+```
+
+### 2. Synchronize Dependencies
 ```bash
 pip install uv
 uv sync --all-packages
 ```
 
-### 2. Run the Incident Simulation
+### 3. Run the Incident Simulation
 ```bash
 uv run simulate_incident.py
 ```

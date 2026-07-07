@@ -274,4 +274,15 @@ then open the chat at `/chat`.
 ## 🔗 Project Resources
 
 The complete, runnable source — plus a step-by-step **CODELAB** that builds this from scratch —
-lives in the project repository.
+lives on GitHub:
+
+**👉 [github.com/xSAVIKx/sre-agent](https://github.com/xSAVIKx/sre-agent)**
+
+Clone it and run the full offline simulation in under a minute:
+
+```bash
+git clone https://github.com/xSAVIKx/sre-agent.git
+cd sre-agent
+uv sync --all-packages
+uv run simulate_incident.py
+```
