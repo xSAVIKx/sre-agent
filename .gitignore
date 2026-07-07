@@ -21,3 +21,6 @@ Thumbs.db
 
 # Dynamic configuration output
 mock_telemetry_data/
+
+# Agent runtime scratch/trajectory artifacts
+scratch_save_dir/
