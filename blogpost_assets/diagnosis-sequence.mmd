@@ -1,4 +1,4 @@
-%%{init: {'sequence': {'actorFontSize': 20, 'messageFontSize': 18, 'noteFontSize': 16}}}%%
+%%{init: {'sequence': {'useMaxWidth': false, 'actorFontSize': 26, 'messageFontSize': 24, 'noteFontSize': 22}}}%%
 sequenceDiagram
     autonumber
     actor U as Engineer
@@ -7,20 +7,20 @@ sequenceDiagram
     participant I as Inventory agent
     participant T as Trace/Log/Metric tools
     participant M as Gemini (ADK)
-    U ->> O: "Diagnose the latency spikes and write a post-mortem"
-    O ->> S: diagnose_sre() · A2A POST /v1/agents/sre/messages
-    S -->> O: SSE: "🔧 fetching topology…"
+    U ->> O: Diagnose latency + write post-mortem
+    O ->> S: diagnose_sre() (A2A POST)
+    S -->> O: SSE: 🔧 fetching topology…
     S ->> I: GET project topology
-    I -->> S: services + databases (Firestore cache)
+    I -->> S: services + DBs (Firestore cache)
     S ->> T: query_traces(limit=10)
     T -->> S: recent trace summaries
 
     S ->> M: TraceAnalyzer → pick failing traceId
     M -->> S: traceId
-    S ->> M: LogCorrelator → reason over spans + logs
+    S ->> M: LogCorrelator → reason over logs
     M -->> S: root-cause narrative
 
-    S ->> T: analyze_trace_cascade() + generate_post_mortem()
-    T -->> S: bottleneck table + post-mortem markdown
+    S ->> T: analyze_cascade() + gen_post_mortem()
+    T -->> S: bottleneck table + post-mortem
     S -->> O: SSE chunks → final report
-    O -->> U: A2UI dashboard + 📥 Download post-mortem
+    O -->> U: A2UI dashboard + 📥 post-mortem
