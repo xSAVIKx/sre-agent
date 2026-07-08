@@ -39,25 +39,22 @@ an [Agent-to-Agent (A2A) protocol](https://a2a-protocol.org/latest/), with resul
 
 ```mermaid
 flowchart TB
-    User(["👤 On-call engineer"]) -->|" GET /chat · POST prompt (SSE) "| Orch
+    User(["👤 On-call engineer"])
+    Orch["🛡️ Orchestrator · Cloud Run: sre-agent<br/>Antigravity runtime<br/>policy = deny('*'), allow('diagnose_sre')<br/>(sandboxed — its only move is to delegate)"]
+    SRE["🔬 SRE sub-agent · Cloud Run: sre-sub-agent<br/>SSE endpoint /v1/agents/sre/messages<br/>ADK workflow: TraceAnalyzer ➜ LogCorrelator"]
+    Inv["📚 Inventory agent · inventory-agent"]
+    FS[("Firestore<br/>topology cache + sessions")]
+    Obs[("☁️ Cloud Trace · Logging · Monitoring")]
+    App["🐒 Target app 'chaos monkey' · sre-chaos-monkey"]
 
-    subgraph Safe["🛡️ Orchestrator · Cloud Run service: sre-agent"]
-        Orch["Antigravity Agent runtime<br/>policy = deny('*'), allow('diagnose_sre')<br/><i>its only capability is to delegate</i>"]
-    end
-
+    User -->|" GET /chat · POST prompt (SSE) "| Orch
     Orch -->|" diagnose_sre — A2A HTTP + SSE "| SRE
-
-    subgraph Diag["🔬 SRE diagnostics · Cloud Run service: sre-sub-agent"]
-        SRE["SSE endpoint<br/>/v1/agents/sre/messages"] --> WF
-        WF["ADK workflow<br/>TraceAnalyzer ➜ LogCorrelator"]
-    end
-
-    SRE -->|" GET topology (A2A) "| Inv["📚 Inventory agent<br/>service: inventory-agent"]
-    Inv --> FS[("Firestore<br/>topology cache + sessions")]
-    WF -->|" read-only queries · or MOCK_GCP "| Obs[("☁️ Cloud Trace · Logging · Monitoring")]
-    App["🐒 Target app 'chaos monkey'<br/>service: sre-chaos-monkey"] -->|" write-only: spans + logs "| Obs
     SRE -->|" streamed Markdown report "| Orch
     Orch -->|" A2UI render + 📥 download button "| User
+    SRE -->|" GET topology (A2A) "| Inv
+    Inv --> FS
+    SRE -->|" read-only queries "| Obs
+    App -->|" write-only: spans + logs "| Obs
 ```
 
 I'm using the Antigravity SDK for the Orchestrator, the front-facing agent. It gives you solid
