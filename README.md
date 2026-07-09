@@ -8,6 +8,10 @@ The agent monitors microservices, queries distributed traces, correlates logs, d
 
 > **📦 Source code:** [`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)
 
+**Google Cloud credits are provided for this project.**
+
+#AgenticArchitect #GoogleAntigravity
+
 ---
 
 ## ⚡ Featured Capabilities
