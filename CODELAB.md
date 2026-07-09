@@ -530,3 +530,7 @@ To avoid ongoing charges, tear down every Cloud Run service, IAM binding, and se
 🎉 **That's the full loop** — instrument, simulate, diagnose, and deploy an autonomous SRE agent that
 turns a 3 AM trace into a ready-to-file post-mortem. For the architectural deep dive and design
 rationale, read the companion [`BLOGPOST.md`](BLOGPOST.md).
+
+## 🎓 Where to Next?
+
+You have a working agent — now make it yours. [`EXERCISES.md`](EXERCISES.md) is a graded set of follow-up challenges (warm-up tool tweaks → a fully autonomous capstone) that build directly on the stack you just assembled.

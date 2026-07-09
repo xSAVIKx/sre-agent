@@ -118,6 +118,7 @@ flowchart LR
 * **Step-by-step Tutorial**: Build the agent from scratch in [`CODELAB.md`](CODELAB.md).
 * **Editorial Technical Post**: The engineering architecture & design rationale in [`BLOGPOST.md`](BLOGPOST.md).
 * **Contributor Guide**: Conventions for AI and human collaborators in [`AGENTS.md`](AGENTS.md).
+* **Follow-Up Exercises**: Turn the codelab into your own project with hands-on extension challenges in [`EXERCISES.md`](EXERCISES.md).
 
 ---
 
