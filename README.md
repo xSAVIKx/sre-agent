@@ -1,5 +1,7 @@
 # 🛸 Autonomous Cloud SRE Agent (ADK + Antigravity with `uv`)
 
+![Autonomous Cloud SRE Agent — scans traces, isolates the bottleneck, correlates logs, and auto-writes the post-mortem](blogpost_assets/readme-banner.png)
+
 Welcome to the production-grade template for building, testing, and deploying an autonomous **Site Reliability Engineering (SRE) Agent** in Google Cloud. This system integrates the **Google Agent Development Kit (ADK)** for multi-agent diagnostic graphs and the **Google Antigravity SDK** for the agent runtime, deny-by-default safety policies, and safe execution.
 
 The agent monitors microservices, queries distributed traces, correlates logs, diagnoses cascade bottlenecks, auto-generates comprehensive incident post-mortems, and lets you download them straight from the chat UI. The whole stack runs **locally with zero GCP credentials** thanks to a mock-telemetry mode.

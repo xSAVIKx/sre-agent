@@ -17,8 +17,8 @@ This post is a complete, runnable blueprint for exactly that: an autonomous SRE 
 Cloud you can host next to your main stack. I'm combining two Google frameworks that solve two very
 different problems:
 
-- the **Agent Development Kit (ADK)** for the multi-agent diagnostic _reasoning_, and
-- the **Google Antigravity SDK** for the agent _runtime_ — tool wiring, deny-by-default safety
+- the [**Agent Development Kit (ADK)**](https://adk.dev/) for the multi-agent diagnostic _reasoning_, and
+- the [**Google Antigravity SDK**](https://antigravity.google/product/antigravity-sdk) for the agent _runtime_ — tool wiring, deny-by-default safety
   policies, and local simulation.
 
 The whole stack runs locally with **zero GCP credentials** thanks to a mock-telemetry mode, so you

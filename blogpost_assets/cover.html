@@ -1,0 +1,117 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1600px; height: 672px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background:
+      radial-gradient(1100px 700px at 88% -10%, rgba(108,123,255,.35), transparent 60%),
+      radial-gradient(900px 700px at 6% 120%, rgba(53,208,186,.20), transparent 55%),
+      linear-gradient(135deg, #0a0f1e 0%, #111a30 55%, #0b1120 100%);
+    color: #f7f9fc;
+    display: flex;
+    align-items: center;
+    gap: 56px;
+    padding: 64px 72px;
+  }
+  /* faint grid */
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(900px 600px at 70% 40%, #000 30%, transparent 80%);
+  }
+  .left { flex: 1.05; position: relative; z-index: 2; }
+  .eyebrow {
+    font-size: 20px; font-weight: 700; letter-spacing: .32em;
+    color: #8ea0ff; text-transform: uppercase; margin-bottom: 22px;
+  }
+  h1 {
+    font-size: 82px; line-height: 1.02; font-weight: 800;
+    letter-spacing: -.02em; margin-bottom: 26px;
+  }
+  h1 .accent {
+    background: linear-gradient(92deg, #7c8bff, #43d6bd);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub {
+    font-size: 27px; line-height: 1.4; color: #b9c2d6; max-width: 640px;
+    margin-bottom: 34px;
+  }
+  .badges { display: flex; flex-wrap: wrap; gap: 12px; }
+  .badge {
+    font-size: 19px; font-weight: 600; color: #dfe5f3;
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+    padding: 9px 16px; border-radius: 999px; backdrop-filter: blur(4px);
+  }
+  .badge b { color: #7c8bff; }
+
+  /* right: cascade card */
+  .right { flex: .95; position: relative; z-index: 2; display: flex; justify-content: center; }
+  .card {
+    width: 100%; max-width: 560px;
+    background: linear-gradient(180deg, rgba(23,31,52,.95), rgba(15,21,38,.95));
+    border: 1px solid rgba(124,139,255,.28);
+    border-radius: 20px; padding: 30px 30px 26px;
+    box-shadow: 0 30px 80px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .card-top { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; }
+  .card-title { margin-left: 8px; font-size: 18px; color: #aeb8cf; font-weight: 600; letter-spacing: .01em; }
+  .row { margin-bottom: 18px; }
+  .row .meta { display: flex; justify-content: space-between; font-size: 19px; margin-bottom: 7px; }
+  .row .svc { color: #cdd5e6; font-family: "Consolas","SF Mono",monospace; }
+  .row .pct { color: #7f8aa3; font-variant-numeric: tabular-nums; }
+  .bar { height: 26px; border-radius: 7px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .fill { height: 100%; border-radius: 7px; }
+  .b-blue { background: linear-gradient(90deg, #5566e6, #7c8bff); }
+  .b-red  { background: linear-gradient(90deg, #e0453f, #ff6b6b); box-shadow: 0 0 22px rgba(255,90,90,.55); }
+  .row.crit .svc { color: #ff8c8c; font-weight: 700; }
+  .row.crit .pct { color: #ff8c8c; font-weight: 700; }
+  .foot { display: flex; align-items: center; gap: 10px; margin-top: 22px; font-size: 18px; color: #ff9a9a; }
+  .foot code { font-family: "Consolas","SF Mono",monospace; color: #ffb4b4; }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="eyebrow">Google Cloud · SRE · AI Agents</div>
+    <h1>Building an<br><span class="accent">Autonomous SRE Agent</span></h1>
+    <div class="sub">It scans your traces, isolates the bottleneck span, correlates the logs, and writes the incident post-mortem — before you finish logging in.</div>
+    <div class="badges">
+      <span class="badge">Google <b>ADK</b></span>
+      <span class="badge"><b>Antigravity</b> SDK</span>
+      <span class="badge">Cloud Run</span>
+      <span class="badge">uv</span>
+      <span class="badge">zero credentials</span>
+    </div>
+  </div>
+  <div class="right">
+    <div class="card">
+      <div class="card-top">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="card-title">trace b49d… — cascade analysis</span>
+      </div>
+      <div class="row">
+        <div class="meta"><span class="svc">/api/gateway</span><span class="pct">self 0.2%</span></div>
+        <div class="bar"><div class="fill b-blue" style="width:8%"></div></div>
+      </div>
+      <div class="row">
+        <div class="meta"><span class="svc">/api/backend</span><span class="pct">self 0.5%</span></div>
+        <div class="bar"><div class="fill b-blue" style="width:14%"></div></div>
+      </div>
+      <div class="row crit">
+        <div class="meta"><span class="svc">/api/database</span><span class="pct">self 99.3%</span></div>
+        <div class="bar"><div class="fill b-red" style="width:100%"></div></div>
+      </div>
+      <div class="foot">🚨&nbsp; <code>ConnectionTimeoutError</code> — the real bottleneck</div>
+    </div>
+  </div>
+</body>
+</html>

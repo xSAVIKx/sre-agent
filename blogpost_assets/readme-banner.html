@@ -1,0 +1,89 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1280px; height: 400px; overflow: hidden; }
+  body {
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    background:
+      radial-gradient(760px 460px at 90% -20%, rgba(108,123,255,.34), transparent 60%),
+      radial-gradient(620px 460px at 2% 130%, rgba(53,208,186,.18), transparent 55%),
+      linear-gradient(135deg, #0a0f1e 0%, #111a30 55%, #0b1120 100%);
+    color: #f7f9fc;
+    display: flex; align-items: center; gap: 44px; padding: 48px 56px;
+  }
+  body::before {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(700px 460px at 68% 40%, #000 30%, transparent 82%);
+  }
+  .left { flex: 1.15; position: relative; z-index: 2; }
+  .eyebrow { font-size: 16px; font-weight: 700; letter-spacing: .28em; color: #8ea0ff; text-transform: uppercase; margin-bottom: 16px; }
+  h1 { font-size: 58px; line-height: 1.02; font-weight: 800; letter-spacing: -.02em; margin-bottom: 18px; }
+  h1 .accent { background: linear-gradient(92deg, #7c8bff, #43d6bd); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .sub { font-size: 21px; line-height: 1.4; color: #b9c2d6; max-width: 520px; margin-bottom: 22px; }
+  .badges { display: flex; flex-wrap: wrap; gap: 10px; }
+  .badge { font-size: 15px; font-weight: 600; color: #dfe5f3; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14); padding: 6px 13px; border-radius: 999px; }
+  .badge b { color: #7c8bff; }
+  .right { flex: .85; position: relative; z-index: 2; display: flex; justify-content: center; }
+  .card {
+    width: 100%; max-width: 440px;
+    background: linear-gradient(180deg, rgba(23,31,52,.95), rgba(15,21,38,.95));
+    border: 1px solid rgba(124,139,255,.28); border-radius: 16px; padding: 22px 22px 20px;
+    box-shadow: 0 24px 60px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; }
+  .card-title { margin-left: 6px; font-size: 14px; color: #aeb8cf; font-weight: 600; }
+  .row { margin-bottom: 13px; }
+  .row .meta { display: flex; justify-content: space-between; font-size: 15px; margin-bottom: 5px; }
+  .row .svc { color: #cdd5e6; font-family: "Consolas","SF Mono",monospace; }
+  .row .pct { color: #7f8aa3; }
+  .bar { height: 19px; border-radius: 5px; background: rgba(255,255,255,.06); overflow: hidden; }
+  .fill { height: 100%; border-radius: 5px; }
+  .b-blue { background: linear-gradient(90deg, #5566e6, #7c8bff); }
+  .b-red  { background: linear-gradient(90deg, #e0453f, #ff6b6b); box-shadow: 0 0 18px rgba(255,90,90,.55); }
+  .row.crit .svc, .row.crit .pct { color: #ff8c8c; font-weight: 700; }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="eyebrow">Google Cloud · SRE · AI Agents</div>
+    <h1>Autonomous <span class="accent">Cloud SRE Agent</span></h1>
+    <div class="sub">Scans traces, isolates the bottleneck, correlates logs, and auto-writes the post-mortem. Runs locally with zero GCP credentials.</div>
+    <div class="badges">
+      <span class="badge">Google <b>ADK</b></span>
+      <span class="badge"><b>Antigravity</b> SDK</span>
+      <span class="badge">Cloud Run</span>
+      <span class="badge">uv workspace</span>
+    </div>
+  </div>
+  <div class="right">
+    <div class="card">
+      <div class="card-top">
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span class="card-title">trace b49d… — cascade analysis</span>
+      </div>
+      <div class="row">
+        <div class="meta"><span class="svc">/api/gateway</span><span class="pct">self 0.2%</span></div>
+        <div class="bar"><div class="fill b-blue" style="width:8%"></div></div>
+      </div>
+      <div class="row">
+        <div class="meta"><span class="svc">/api/backend</span><span class="pct">self 0.5%</span></div>
+        <div class="bar"><div class="fill b-blue" style="width:14%"></div></div>
+      </div>
+      <div class="row crit">
+        <div class="meta"><span class="svc">/api/database</span><span class="pct">self 99.3%</span></div>
+        <div class="bar"><div class="fill b-red" style="width:100%"></div></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
