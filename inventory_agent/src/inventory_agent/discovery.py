@@ -6,6 +6,8 @@ import sys
 import json
 import logging
 import argparse
+from typing import Any
+
 import httpx
 
 # Setup basic logging

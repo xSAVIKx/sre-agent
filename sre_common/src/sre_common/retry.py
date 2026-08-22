@@ -38,10 +38,7 @@ def is_transient_error(exc: Exception) -> bool:
 
     # 3. Check for specific status codes or error types in generic exceptions
     message_lower = exc_str.lower()
-    if any(x in message_lower for x in ("429", "502", "503", "504", "resource exhausted", "rate limit", "quota exceeded", "deadline exceeded", "service unavailable")):
-        return True
-        
-    return False
+    return any(x in message_lower for x in ("429", "502", "503", "504", "resource exhausted", "rate limit", "quota exceeded", "deadline exceeded", "service unavailable"))
 
 def retry_async(
     max_retries: int = 3,

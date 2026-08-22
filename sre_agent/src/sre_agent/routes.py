@@ -60,7 +60,7 @@ async def get_trace(trace_id: str, project_id: str | None = None):
         return json.loads(details_str)
     except Exception as e:
         logger.error(f"Failed to get trace details for {trace_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}") from e
 
 
 @router.get("/trace")
@@ -74,7 +74,7 @@ async def get_trace_query(trace_id: str, project_id: str | None = None):
         return json.loads(details_str)
     except Exception as e:
         logger.error(f"Failed to get trace details for {trace_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}") from e
 
 
 

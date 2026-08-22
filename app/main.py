@@ -232,7 +232,7 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
         except HTTPException as e:
             _log_structured(f"Gateway received error from backend: {e.detail}", "ERROR", trace_id, "span-gateway-111")
             _generate_mock_trace(trace_id, trigger_error=True)
-            raise HTTPException(status_code=500, detail={"error": "Internal Server Error", "trace_id": trace_id})
+            raise HTTPException(status_code=500, detail={"error": "Internal Server Error", "trace_id": trace_id}) from e
 
     # Real OTEL tracing (if active)
     if tracer:
@@ -254,7 +254,7 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
                 except Exception as e:
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id})
+                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id}) from e
 
     return {"status": "success", "trace_id": trace_id, "info": "OTEL disabled"}
 
@@ -300,7 +300,7 @@ async def backend(request: Request, trace_id: str = Query(...), trigger_error: b
                 except Exception as e:
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
+                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
 
     # Real mode without tracer active
     backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
@@ -313,7 +313,7 @@ async def backend(request: Request, trace_id: str = Query(...), trigger_error: b
                 raise HTTPException(status_code=500, detail="Database failed")
             return {"service": "backend", "db": response.json()}
         except Exception as e:
-            raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
+            raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
 
 
 @app.get("/api/database")

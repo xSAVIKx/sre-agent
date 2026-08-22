@@ -238,7 +238,7 @@ if not HAS_ANTIGRAVITY:
                     return self.response.chunks
                 async def text(self):
                     # Consume the chunks to build the full text
-                    async for chunk in self.response.chunks:
+                    async for _ in self.response.chunks:
                         pass
                     return self.response._text
                 async def cancel(self):

@@ -105,7 +105,7 @@ async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
             return DiagnoseResponse(status="success", result=result)
     except Exception as e:
         logger.exception("Failed SRE diagnostics proxy.")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/sessions")
@@ -158,7 +158,7 @@ async def rename_session(conversation_id: str, request: RenameSessionRequest):
         from agent.config import MOCK_HISTORY_DB
         if conversation_id in MOCK_HISTORY_DB:
             return {"status": "success", "conversation_id": conversation_id, "title": request.title}
-        raise HTTPException(status_code=404, detail="Session not found")
+        raise HTTPException(status_code=404, detail="Session not found") from e
 
 
 @router.delete("/sessions/{conversation_id}")
@@ -213,8 +213,8 @@ async def get_trace(trace_id: str, project_id: str | None = None):
     except Exception as e:
         logger.error(f"Failed to proxy trace lookup for {trace_id} after retries: {e}")
         if isinstance(e, httpx.HTTPStatusError):
-            raise HTTPException(status_code=e.response.status_code, detail=e.response.text)
-        raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=e.response.status_code, detail=e.response.text) from e
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/trace")
@@ -233,7 +233,7 @@ async def get_chat_ui() -> HTMLResponse:
         return HTMLResponse(content=content)
     except Exception as e:
         logger.error(f"Failed to load chat UI file: {e}")
-        raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {str(e)}") from e
 
 
 @router.post("/chat")

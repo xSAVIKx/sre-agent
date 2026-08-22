@@ -17,6 +17,19 @@ from inventory_agent.firestore_strategy import (
 
 logger = logging.getLogger("inventory_agent.routes")
 
+# asyncio only holds a weak reference to a running task, so a fire-and-forget
+# `create_task` can be garbage-collected mid-flight. Keep a strong reference
+# until the task finishes.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _spawn_background(coro: Any) -> None:
+    """Schedules a coroutine and keeps a reference to it until it completes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+
 router = APIRouter()
 
 
@@ -86,7 +99,7 @@ async def trigger_scanner_job(target_project_id: str) -> None:
     """Triggers the Cloud Run Job (Task) to perform cross-project asset discovery."""
     if IS_MOCK:
         # Spawn local simulation task in the background
-        asyncio.create_task(run_discovery_mock(target_project_id))
+        _spawn_background(run_discovery_mock(target_project_id))
         return
 
     logger.info(f"Triggering Cloud Run scanner job '{SCANNER_JOB_NAME}' in {SCANNER_JOB_REGION} for project '{target_project_id}'")
@@ -120,7 +133,7 @@ async def trigger_scanner_job(target_project_id: str) -> None:
         logger.error(f"Failed to trigger Cloud Run scanner job after retries: {e}")
         # Graceful fallback: run local simulation if API call fails
         logger.warning("Falling back to local simulation due to GCP API failure.")
-        asyncio.create_task(run_discovery_mock(target_project_id))
+        _spawn_background(run_discovery_mock(target_project_id))
 
 
 @router.get("/v1/agents/inventory")
