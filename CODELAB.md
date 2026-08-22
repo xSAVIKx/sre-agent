@@ -260,7 +260,7 @@ trace_analyzer = AdkAgent(
         "You are an SRE trace analyst. Locate the slowest or failing request "
         "and return ONLY the raw 32-character hex traceId — no extra text."
     ),
-    model="gemini-3-flash-preview",
+    model="gemini-3.8-flash",
 )
 
 log_correlator = AdkAgent(
@@ -271,7 +271,7 @@ log_correlator = AdkAgent(
         "mitigation plan. Use your tools for metrics, cascade analysis, and post-mortems."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-    model="gemini-3-flash-preview",
+    model="gemini-3.8-flash",
 )
 
 sre_diagnostics_workflow = AdkWorkflow(

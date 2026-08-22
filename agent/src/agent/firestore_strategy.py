@@ -216,17 +216,31 @@ class FirestoreAgentConfig(LocalAgentConfig):
         """Creates a FirestoreConnectionStrategy instance for SRE diagnostics."""
         save_dir = self._get_or_create_save_dir()
 
+        # Mirrors LocalAgentConfig.create_strategy in google-antigravity, so every
+        # field the SDK forwards is forwarded here too. `gemini_config` was replaced
+        # by the `models` list in 0.1.14, and `compaction_config` is new since then;
+        # any field not passed through here is silently dropped.
         local_strategy = LocalConnectionStrategy(
             tool_runner=tool_runner,
             hook_runner=hook_runner,
-            gemini_config=self.gemini_config,
+            models=self.models,
             system_instructions=self._get_system_instructions(),
             capabilities_config=self.capabilities,
+            compaction_config=self._get_effective_compaction_config(),
             conversation_id=self.conversation_id,
+            session_continuation_mode=self.session_continuation_mode,
             save_dir=save_dir,
             workspaces=self.workspaces,
             app_data_dir=self.app_data_dir,
             skills_paths=self.skills_paths,
+            mcp_servers=self.mcp_servers,
+            env=self.env,
+            subagents=self.subagents,
+            debug_config=self.debug_config,
+            retry_config=self.retry_config,
+            budget_config=self.budget_config,
+            policies=list(self.policies) if self.policies is not None else None,
+            tools=self.tools,
         )
 
         mock_gcp = os.getenv("MOCK_GCP", "false").lower() in ("true", "1")

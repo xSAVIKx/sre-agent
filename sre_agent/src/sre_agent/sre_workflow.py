@@ -37,7 +37,7 @@ except ImportError as e:
 
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""
-        def __init__(self, name: str, instruction: str, model: str = "gemini-3-flash-preview") -> None:
+        def __init__(self, name: str, instruction: str, model: str = "gemini-3.8-flash") -> None:
             self.name = name
             self.instruction = instruction
             self.model = model
@@ -72,7 +72,7 @@ trace_analyzer = AdkAgent(
         "Extract its traceId and return ONLY the raw 32-character hex traceId. "
         "Do not include any extra text, code block backticks, or explanation."
     ),
-    model="gemini-3-flash-preview"
+    model="gemini-3.8-flash"
 )
 
 log_correlator = AdkAgent(
@@ -87,7 +87,7 @@ log_correlator = AdkAgent(
         "if you need more context or need to build a post-mortem report."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-    model="gemini-3-flash-preview"
+    model="gemini-3.8-flash"
 )
 
 
