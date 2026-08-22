@@ -1,5 +1,10 @@
 # 🛸 Autonomous Cloud SRE Agent (ADK + Antigravity with `uv`)
 
+[![CI](https://github.com/xSAVIKx/sre-agent/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/xSAVIKx/sre-agent/actions/workflows/ci.yml)
+[![Python 3.11 | 3.14](https://img.shields.io/badge/python-3.11%20%7C%203.14-blue)](https://github.com/xSAVIKx/sre-agent/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 ![Autonomous Cloud SRE Agent — scans traces, isolates the bottleneck, correlates logs, and auto-writes the post-mortem](blogpost_assets/readme-banner.png)
 
 Welcome to the production-grade template for building, testing, and deploying an autonomous **Site Reliability Engineering (SRE) Agent** in Google Cloud. This system integrates the **Google Agent Development Kit (ADK)** for multi-agent diagnostic graphs and the **Google Antigravity SDK** for the agent runtime, deny-by-default safety policies, and safe execution.
@@ -154,6 +159,30 @@ Want the full multi-service experience (Orchestrator + SRE + Inventory + Firesto
 ```bash
 docker-compose up --build   # then open the chat at /chat
 ```
+
+---
+
+## 🧪 Development
+
+```bash
+uv sync --all-packages
+
+# Tests. Each package uses the src/ + test/ layout, so each needs its own
+# src directory on PYTHONPATH; the root suite imports every workspace module.
+PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
+PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
+uv run python -m unittest discover -s test
+
+# Lint and formatting (ruff, configured in the root pyproject.toml).
+uv run ruff check .
+uv run ruff format --check .
+```
+
+[CI](.github/workflows/ci.yml) runs all of the above plus the local simulation on every push and
+pull request. The tests run against **Python 3.11 and 3.14** — the floor `requires-python` declares
+and the version the Dockerfiles ship — while `ruff` runs once, since `target-version = "py311"`
+makes its verdict independent of the interpreter. Dependabot keeps the dependency floors and
+`uv.lock` from drifting; see [`.github/dependabot.yml`](.github/dependabot.yml).
 
 ---
 

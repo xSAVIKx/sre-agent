@@ -517,12 +517,29 @@ see the example `curl` printed at the end of `deploy.sh`).
 
 ## Step 12: Run the Tests
 
-The `src/` layout means each package's tests run with its `src` on `PYTHONPATH`:
+The `src/` layout means each package's tests run with its `src` on `PYTHONPATH`. A third suite at
+the repository root imports every module in the workspace, which is the only coverage `app/`,
+`inventory_agent/` and `sre_common/` get:
 
 ```bash
 PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
 PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
+uv run python -m unittest discover -s test
 ```
+
+Lint and formatting are `ruff`, configured in the root `pyproject.toml`:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
+
+All of the above runs in GitHub Actions on every push and pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The tests run against **Python 3.11 and
+3.14** — the floor `requires-python` declares and the version the Dockerfiles ship; testing only one
+of them is how the floor quietly stopped working the first time. `ruff` runs once, on its own:
+`target-version = "py311"` decides which rules apply, so the interpreter it happens to run under
+makes no difference to the answer.
 
 ---
 
