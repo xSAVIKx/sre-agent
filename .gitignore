@@ -19,6 +19,10 @@ env/
 .DS_Store
 Thumbs.db
 
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+
 # Dynamic configuration output
 mock_telemetry_data/
 
