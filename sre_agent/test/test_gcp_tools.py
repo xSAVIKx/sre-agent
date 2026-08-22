@@ -2,9 +2,25 @@
 
 import os
 import json
+import tempfile
 import unittest
 from unittest import mock
 from sre_agent.gcp_tools import query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem
+
+# Checked-in telemetry fixtures. These are what `app/main.py:_generate_mock_trace`
+# and `app/main.py:_log_structured` write into `mock_telemetry_data/` when the
+# chaos-monkey app is driven with `trigger_error=True` - identically, bar the random
+# trace ID and the wall-clock log timestamps, which are rewritten here to describe the
+# ten-second incident the spans encode. `test/test_telemetry_fixtures.py` drives the
+# app and diffs the result against these files, so that is a checked claim rather than
+# a comment. They are committed on purpose: `mock_telemetry_data/` is gitignored, so a
+# test that reads from it only passes on the machine that last ran
+# `simulate_incident.py`.
+FIXTURE_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+
+# The trace ID of the committed incident fixture (gateway -> backend -> database,
+# with a 10.2 s database connection timeout as the bottleneck).
+FIXTURE_TRACE_ID = "06f96234b89348488f6a2a01b1fc4632"
 
 
 class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
@@ -12,9 +28,11 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_query_metrics_mock(self) -> None:
         """Verifies that query_metrics returns filtered mock metrics when in mock mode."""
-        # Create temp mock telemetry directory and file if it doesn't exist
-        mock_dir = "mock_telemetry_data"
-        os.makedirs(mock_dir, exist_ok=True)
+        # Write the fixture into a throwaway directory rather than the repo's
+        # gitignored `mock_telemetry_data/`, so the test never touches the working tree.
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        mock_dir = tmp.name
         metrics_file = os.path.join(mock_dir, "metrics.json")
         
         mock_metrics = [
@@ -38,32 +56,27 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
         with open(metrics_file, "w", encoding="utf-8") as f:
             json.dump(mock_metrics, f)
 
-        try:
-            # Ensure we are testing mock mode
-            with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-                 mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", mock_dir):
-                
-                # Query for CPU utilization of sre-chaos-monkey
-                result_str = await query_metrics(
-                    filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="sre-chaos-monkey"'
-                )
-                result = json.loads(result_str)
-                
-                # Assert we found matching metric
-                self.assertIsInstance(result, list)
-                self.assertTrue(len(result) > 0)
-                self.assertEqual(result[0]["metric"]["type"], "run.googleapis.com/container/cpu/utilizations")
-                self.assertEqual(result[0]["metric"]["labels"]["service_name"], "sre-chaos-monkey")
+        # Ensure we are testing mock mode
+        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
+             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", mock_dir):
+            # Query for CPU utilization of sre-chaos-monkey
+            result_str = await query_metrics(
+                filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="sre-chaos-monkey"'
+            )
+            result = json.loads(result_str)
+            
+            # Assert we found matching metric
+            self.assertIsInstance(result, list)
+            self.assertTrue(len(result) > 0)
+            self.assertEqual(result[0]["metric"]["type"], "run.googleapis.com/container/cpu/utilizations")
+            self.assertEqual(result[0]["metric"]["labels"]["service_name"], "sre-chaos-monkey")
 
-                # Query for non-existent service metric
-                result_str_missing = await query_metrics(
-                    filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="non-existent"'
-                )
-                result_missing = json.loads(result_str_missing)
-                self.assertEqual(len(result_missing), 0)
-        finally:
-            if os.path.exists(metrics_file):
-                os.remove(metrics_file)
+            # Query for non-existent service metric
+            result_str_missing = await query_metrics(
+                filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="non-existent"'
+            )
+            result_missing = json.loads(result_str_missing)
+            self.assertEqual(len(result_missing), 0)
 
     async def test_list_metric_descriptors_mock(self) -> None:
         """Verifies list_metric_descriptors mock behavior."""
@@ -82,21 +95,46 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_trace_cascade_mock(self) -> None:
         """Verifies analyze_trace_cascade correctly parses trace spans and identifies the bottleneck in mock mode."""
-        trace_id = "06f96234b89348488f6a2a01b1fc4632"
         with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", "mock_telemetry_data"):
-            report = await analyze_trace_cascade(trace_id)
+             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR):
+            report = await analyze_trace_cascade(FIXTURE_TRACE_ID)
             self.assertIn("Multi-Service Cascade Latency & Bottleneck Analysis", report)
             self.assertIn("Identified Bottleneck", report)
             self.assertIn("/api/database", report)
+            # The database span owns 10200 ms of self-time out of a 10270 ms trace -
+            # 99.3% - so it must be the reported bottleneck rather than an upstream tier,
+            # each of which contributes only its own tens of milliseconds.
+            self.assertIn("**Bottleneck Span**: `/api/database`", report)
+            self.assertIn("**Total Trace Duration**: `10270 ms`", report)
+            self.assertIn("**Self-Execution Time**: `10200 ms` (99.3% of total trace)", report)
 
     async def test_generate_post_mortem_mock(self) -> None:
         """Verifies generate_post_mortem generates a structured markdown post-mortem report in mock mode."""
-        trace_id = "06f96234b89348488f6a2a01b1fc4632"
         with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", "mock_telemetry_data"):
-            report = await generate_post_mortem(trace_id)
+             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR):
+            report = await generate_post_mortem(FIXTURE_TRACE_ID)
             self.assertIn("Incident Post-Mortem", report)
             self.assertIn("Incident Timeline", report)
             self.assertIn("Root Cause Analysis (RCA)", report)
             self.assertIn("ConnectionTimeoutError", report)
+            # The timeline quotes the gateway's error log verbatim. `app/main.py` logs
+            # the *incoming* exception's detail there - the database's own message, not
+            # the `Internal Server Error` it re-raises with. Pin the rendered line so
+            # the fixture cannot drift back and take the post-mortem with it.
+            self.assertIn(
+                "Gateway received error from backend: ConnectionTimeoutError: "
+                "Failed to connect to db-primary.gcp.internal:5432 after 10000ms",
+                report,
+            )
+            # Assert the report is actually derived from the fixture telemetry and
+            # not just the tool's static RCA boilerplate.
+            self.assertIn(f"**Trace ID**: `{FIXTURE_TRACE_ID}`", report)
+            self.assertIn("**Impact Duration**: `10270 ms`", report)
+            self.assertIn("**Root Service**: `gateway`", report)
+
+    async def test_analyze_trace_cascade_unknown_trace(self) -> None:
+        """Verifies analyze_trace_cascade reports a clean error when the trace is absent."""
+        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
+             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR):
+            report = await analyze_trace_cascade("0" * 32)
+            self.assertIn("Error retrieving trace cascade", report)

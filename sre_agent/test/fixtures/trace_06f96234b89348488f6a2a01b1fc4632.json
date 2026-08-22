@@ -1,0 +1,33 @@
+{
+  "traceId": "06f96234b89348488f6a2a01b1fc4632",
+  "root_span": "gateway",
+  "durationMs": 10270,
+  "error": true,
+  "spans": [
+    {
+      "name": "/api/gateway",
+      "spanId": "span-gateway-111",
+      "parentSpanId": null,
+      "startTime": "2026-06-11T16:00:00.000Z",
+      "endTime": "2026-06-11T16:00:10.270Z",
+      "status": "ERROR"
+    },
+    {
+      "name": "/api/backend",
+      "spanId": "span-backend-222",
+      "parentSpanId": "span-gateway-111",
+      "startTime": "2026-06-11T16:00:00.010Z",
+      "endTime": "2026-06-11T16:00:10.260Z",
+      "status": "ERROR"
+    },
+    {
+      "name": "/api/database",
+      "spanId": "span-database-333",
+      "parentSpanId": "span-backend-222",
+      "startTime": "2026-06-11T16:00:00.030Z",
+      "endTime": "2026-06-11T16:00:10.230Z",
+      "status": "ERROR",
+      "error_message": "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
+    }
+  ]
+}
