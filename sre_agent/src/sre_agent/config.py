@@ -1,5 +1,4 @@
-"""Configuration settings for the SRE Diagnostics Agent.
-"""
+"""Configuration settings for the SRE Diagnostics Agent."""
 
 import os
 

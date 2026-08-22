@@ -7,13 +7,8 @@ This module orchestrates two specialized ADK agents:
 
 import logging
 from typing import Any
-from .gcp_tools import (
-    get_trace_details,
-    query_logs_by_trace,
-    otel_trace,
-    analyze_trace_cascade,
-    generate_post_mortem
-)
+
+from .gcp_tools import analyze_trace_cascade, generate_post_mortem, get_trace_details, otel_trace, query_logs_by_trace
 
 # Setup logger
 logger = logging.getLogger("sre_workflow")
@@ -21,19 +16,20 @@ logger = logging.getLogger("sre_workflow")
 # Resilient imports for google-adk
 try:
     from google.adk import Agent as AdkAgent
-    from google.adk import Workflow as AdkWorkflow
-    from google.adk.workflow import node, START
     from google.adk import Context
+    from google.adk import Workflow as AdkWorkflow
+    from google.adk.workflow import START, node
+
     HAS_ADK = True
 except ImportError as e:
     HAS_ADK = False
     logger.warning(
-        f"google-adk is not installed or failed to import. Using simulated agent fallbacks. Error: {e}",
-        exc_info=True
+        f"google-adk is not installed or failed to import. Using simulated agent fallbacks. Error: {e}", exc_info=True
     )
 
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""
+
         def __init__(self, name: str, instruction: str, model: str = "gemini-3.8-flash") -> None:
             self.name = name
             self.instruction = instruction
@@ -45,6 +41,7 @@ except ImportError as e:
 
     class AdkWorkflow:  # type: ignore
         """Mock ADK Workflow for resilience."""
+
         def __init__(self, name: str, edges: list[Any]) -> None:
             self.name = name
             self.edges = edges
@@ -52,12 +49,15 @@ except ImportError as e:
     def node(*args: Any, **kwargs: Any) -> Any:
         def decorator(func: Any) -> Any:
             return func
+
         if args and callable(args[0]):
             return args[0]
         return decorator
 
     START = "START"
-    class Context: pass  # type: ignore
+
+    class Context:  # type: ignore
+        """Mock ADK Context for resilience."""
 
 
 # 1. Define SRE specialized ADK agents
@@ -69,7 +69,7 @@ trace_analyzer = AdkAgent(
         "Extract its traceId and return ONLY the raw 32-character hex traceId. "
         "Do not include any extra text, code block backticks, or explanation."
     ),
-    model="gemini-3.8-flash"
+    model="gemini-3.8-flash",
 )
 
 log_correlator = AdkAgent(
@@ -80,7 +80,7 @@ log_correlator = AdkAgent(
         "of the issue (such as connection timeouts, resource exhaustion, or "
         "logic errors), and recommend a mitigation plan."
     ),
-    model="gemini-3.8-flash"
+    model="gemini-3.8-flash",
 )
 
 
@@ -99,10 +99,11 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
     Returns:
         The markdown diagnosis report from the Log Correlator agent.
     """
+    import os
+
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
-    import os
 
     @node(name="fetch_telemetry")
     async def fetch_telemetry(ctx: Context, node_input: Any) -> str:
@@ -116,7 +117,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             trace_id = "".join(p.text for p in node_input.parts if p.text)
         elif isinstance(node_input, dict) and "output" in node_input:
             trace_id = str(node_input["output"])
-        
+
         trace_id = trace_id.strip()
         logger.info(f"Workflow: Fetching telemetry for trace ID '{trace_id}'")
 
@@ -137,26 +138,17 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
     try:
         # Define the ADK 2.0 graph workflow
         sre_diagnostics_workflow = AdkWorkflow(
-            name="sre_diagnostics_workflow",
-            edges=[
-                (START, trace_analyzer, fetch_telemetry, log_correlator)
-            ]
+            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
         )
 
         session_service = InMemorySessionService()
-        runner = Runner(
-            node=sre_diagnostics_workflow,
-            app_name="sre_diagnostics",
-            session_service=session_service
-        )
+        runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
 
-        msg = types.Content(parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")])
+        msg = types.Content(
+            parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")]
+        )
         diagnosis = ""
-        async for event in runner.run_async(
-            user_id="sre_user",
-            session_id="session_1",
-            new_message=msg
-        ):
+        async for event in runner.run_async(user_id="sre_user", session_id="session_1", new_message=msg):
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
@@ -166,6 +158,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         trace_id = None
         try:
             import json
+
             traces = json.loads(traces_json)
             if isinstance(traces, list):
                 for t in traces:
@@ -212,6 +205,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         A simulated markdown diagnostics report.
     """
     import json
+
     try:
         data = json.loads(traces_json)
         # Find the first trace with error = True or slow latency (> 5000ms)
@@ -227,16 +221,17 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
             if not failing_trace:
                 # Check if there are mock logs with ERROR/CRITICAL severity in the database
                 from .gcp_tools import _load_mock_file
+
                 mock_logs = _load_mock_file("logs.json") or []
                 has_error_logs = False
                 for log in mock_logs:
                     if log.get("severity") in ("ERROR", "CRITICAL"):
                         has_error_logs = True
                         break
-                
+
                 if not has_error_logs:
                     return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
-                
+
                 # If there are error logs, fallback to first non-diagnose trace to analyze it
                 if data:
                     for t in data:
@@ -313,6 +308,7 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     has_problems = False
     try:
         import json
+
         traces = json.loads(traces_json)
         if isinstance(traces, list):
             for t in traces:
@@ -331,6 +327,7 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
         logger.info("No anomalous traces found. Checking logs for recent errors...")
         try:
             from .gcp_tools import query_logs
+
             log_res = await query_logs(query="severity=ERROR OR severity=CRITICAL", project_id=project_id, limit=5)
             logs = json.loads(log_res)
             if isinstance(logs, list) and len(logs) > 0:
@@ -344,9 +341,12 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     # 3. If everything is healthy, return clean report
     if not has_problems:
         logger.info("Diagnostics workflow found no anomalous traces or error logs. All systems healthy.")
-        return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        return (
+            "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        )
 
     import os
+
     if HAS_ADK and "GEMINI_API_KEY" in os.environ:
         return await _run_adk_diagnostics(traces_json, project_id)
     else:

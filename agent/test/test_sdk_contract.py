@@ -26,8 +26,8 @@ class TestAntigravityContract(unittest.TestCase):
     def test_imports_used_by_config_resolve(self) -> None:
         """Every symbol in the `try` block of `agent.config` must exist upstream."""
         from google.antigravity import Agent, LocalAgentConfig  # noqa: F401
-        from google.antigravity.hooks.policy import allow, ask_user, deny  # noqa: F401
         from google.antigravity.hooks.hooks import HookContext, OnToolErrorHook  # noqa: F401
+        from google.antigravity.hooks.policy import allow, ask_user, deny  # noqa: F401
         from google.antigravity.types import Text, Thought, ToolCall, ToolResult  # noqa: F401
 
     def test_imports_used_by_firestore_strategy_resolve(self) -> None:
@@ -58,9 +58,8 @@ class TestAntigravityContract(unittest.TestCase):
         or renames a `LocalConnectionStrategy` parameter, the override silently stops
         forwarding it (or raises `TypeError`). Assert the two agree.
         """
-        from google.antigravity.connections.local.local_connection import LocalConnectionStrategy
-
         from agent.firestore_strategy import FirestoreAgentConfig
+        from google.antigravity.connections.local.local_connection import LocalConnectionStrategy
 
         upstream = set(inspect.signature(LocalConnectionStrategy.__init__).parameters) - {"self"}
         source = inspect.getsource(FirestoreAgentConfig.create_strategy)
@@ -68,8 +67,7 @@ class TestAntigravityContract(unittest.TestCase):
         self.assertEqual(
             upstream,
             forwarded,
-            "FirestoreAgentConfig.create_strategy does not forward: "
-            f"{sorted(upstream - forwarded)}",
+            f"FirestoreAgentConfig.create_strategy does not forward: {sorted(upstream - forwarded)}",
         )
 
     @contextlib.contextmanager

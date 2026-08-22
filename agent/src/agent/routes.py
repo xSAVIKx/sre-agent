@@ -3,50 +3,48 @@
 Exposes endpoints forhealth check, session management, trace proxy, and stateful A2A chat orchestration.
 """
 
-import os
-import logging
-from typing import Any
-import json
 import asyncio
-from fastapi import APIRouter, HTTPException, Response, Request
+import datetime
+import json
+import logging
+import os
+from typing import Any
+
+import httpx
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
-import httpx
-import datetime
-from sre_common import retry_async, otel_trace
 
-from agent.config import (
-    load_agent_config,
-    load_firestore_agent_config,
-    Agent,
-    HAS_ANTIGRAVITY,
-    Text,
-    Thought,
-    ToolCall,
-    ToolResult,
-)
 from agent.a2ui_translator import translate_markdown_to_a2ui
+from agent.config import (
+    HAS_ANTIGRAVITY,
+    Agent,
+    load_firestore_agent_config,
+)
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("orchestrator_agent.routes")
 
 router = APIRouter()
 
 
-
 class DiagnoseRequest(BaseModel):
     """Pydantic model representing a diagnostic request."""
+
     prompt: str
     project_id: str | None = None
 
 
 class DiagnoseResponse(BaseModel):
     """Pydantic model representing the agent diagnostics response."""
+
     status: str
     result: str
 
 
 class ChatRequest(BaseModel):
     """Pydantic model representing a stateful chat request."""
+
     prompt: str
     conversation_id: str | None = None
     project_id: str | None = None
@@ -55,6 +53,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     """Pydantic model representing a stateful chat response with A2UI."""
+
     status: str
     response: str
     response_a2ui: dict[str, Any] | None = None
@@ -80,17 +79,14 @@ async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
     logger.info(f"Received SRE diagnostics request: {request.prompt}")
     sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
-    payload = {
-        "prompt": request.prompt,
-        "project_id": request.project_id
-    }
-    
+    payload = {"prompt": request.prompt, "project_id": request.project_id}
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(url, json=payload, timeout=300.0)
             if response.status_code != 200:
                 raise HTTPException(status_code=response.status_code, detail=f"SRE Sub-Agent Error: {response.text}")
-            
+
             result = ""
             for line in response.iter_lines():
                 if line.startswith("data: "):
@@ -101,7 +97,7 @@ async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
                             break
                     except Exception:
                         pass
-                        
+
             return DiagnoseResponse(status="success", result=result)
     except Exception as e:
         logger.exception("Failed SRE diagnostics proxy.")
@@ -113,30 +109,41 @@ async def get_sessions():
     """Retrieve all available diagnostic sessions with metadata."""
     try:
         from google.cloud import firestore
+
         db = firestore.AsyncClient()
         collection = db.collection("agent_sessions")
-        docs = await collection.select(["conversation_id", "updated_at", "prompt"]).order_by("updated_at", direction=firestore.Query.DESCENDING).limit(50).get()
+        docs = (
+            await collection.select(["conversation_id", "updated_at", "prompt"])
+            .order_by("updated_at", direction=firestore.Query.DESCENDING)
+            .limit(50)
+            .get()
+        )
         sessions = []
         for doc in docs:
             data = doc.to_dict()
             updated_at = data.get("updated_at")
             updated_at_str = updated_at.isoformat() if hasattr(updated_at, "isoformat") else str(updated_at)
-            sessions.append({
-                "conversation_id": doc.id,
-                "prompt": data.get("prompt") or "Untitled Session",
-                "updated_at": updated_at_str
-            })
+            sessions.append(
+                {
+                    "conversation_id": doc.id,
+                    "prompt": data.get("prompt") or "Untitled Session",
+                    "updated_at": updated_at_str,
+                }
+            )
         return sessions
     except Exception as e:
         logger.warning(f"Using mock database retrieval for sessions: {e}")
         from agent.config import MOCK_HISTORY_DB
+
         sessions = []
         for conv_id, steps in MOCK_HISTORY_DB.items():
-            sessions.append({
-                "conversation_id": conv_id,
-                "prompt": steps[0]["content"] if steps else "Untitled Session",
-                "updated_at": datetime.datetime.now().isoformat()
-            })
+            sessions.append(
+                {
+                    "conversation_id": conv_id,
+                    "prompt": steps[0]["content"] if steps else "Untitled Session",
+                    "updated_at": datetime.datetime.now().isoformat(),
+                }
+            )
         return sessions
 
 
@@ -149,6 +156,7 @@ async def rename_session(conversation_id: str, request: RenameSessionRequest):
     """Rename/modify the title of an existing session."""
     try:
         from google.cloud import firestore
+
         db = firestore.AsyncClient()
         doc_ref = db.collection("agent_sessions").document(conversation_id)
         await doc_ref.set({"prompt": request.title}, merge=True)
@@ -156,6 +164,7 @@ async def rename_session(conversation_id: str, request: RenameSessionRequest):
     except Exception as e:
         logger.warning(f"Using mock database rename fallback: {e}")
         from agent.config import MOCK_HISTORY_DB
+
         if conversation_id in MOCK_HISTORY_DB:
             return {"status": "success", "conversation_id": conversation_id, "title": request.title}
         raise HTTPException(status_code=404, detail="Session not found") from e
@@ -166,6 +175,7 @@ async def delete_session(conversation_id: str):
     """Delete an existing session."""
     try:
         from google.cloud import firestore
+
         db = firestore.AsyncClient()
         doc_ref = db.collection("agent_sessions").document(conversation_id)
         await doc_ref.delete()
@@ -173,6 +183,7 @@ async def delete_session(conversation_id: str):
     except Exception as e:
         logger.warning(f"Using mock database delete fallback: {e}")
         from agent.config import MOCK_HISTORY_DB
+
         if conversation_id in MOCK_HISTORY_DB:
             del MOCK_HISTORY_DB[conversation_id]
         return {"status": "success", "conversation_id": conversation_id}
@@ -183,6 +194,7 @@ async def get_session_history(conversation_id: str):
     """Retrieve the conversation step history for a specific session."""
     try:
         from google.cloud import firestore
+
         db = firestore.AsyncClient()
         doc = await db.collection("agent_sessions").document(conversation_id).get()
         if doc.exists:
@@ -191,6 +203,7 @@ async def get_session_history(conversation_id: str):
     except Exception as e:
         logger.warning(f"Using mock database history fallback: {e}")
         from agent.config import MOCK_HISTORY_DB
+
         return {"conversation_id": conversation_id, "history": MOCK_HISTORY_DB.get(conversation_id, [])}
 
 
@@ -228,12 +241,12 @@ async def get_chat_ui() -> HTMLResponse:
     """Serves the rich SRE Chat interface Web page."""
     html_path = os.path.join(os.path.dirname(__file__), "index.html")
     try:
-        with open(html_path, "r", encoding="utf-8") as f:
+        with open(html_path, encoding="utf-8") as f:
             content = f.read()
         return HTMLResponse(content=content)
     except Exception as e:
         logger.error(f"Failed to load chat UI file: {e}")
-        raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {e!s}") from e
 
 
 @router.post("/chat")
@@ -244,8 +257,12 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
 
     # 1. Infer if the request is an SRE diagnostics command
     # SRE-related keywords trigger direct A2A SRE streaming proxy
-    is_sre_prompt = any(x in request.prompt.lower() for x in ("diagnose", "latency", "error", "trace", "sre", "monkey", "scan"))
-    is_refresh = request.refresh or any(x in request.prompt.lower() for x in ("rescan", "refresh", "re-discover", "re-scan"))
+    is_sre_prompt = any(
+        x in request.prompt.lower() for x in ("diagnose", "latency", "error", "trace", "sre", "monkey", "scan")
+    )
+    is_refresh = request.refresh or any(
+        x in request.prompt.lower() for x in ("rescan", "refresh", "re-discover", "re-scan")
+    )
 
     # 2. Check if this conversation was already an SRE session
     is_sre_session = False
@@ -253,6 +270,7 @@ async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingRespo
     if conv_id:
         try:
             from google.cloud import firestore
+
             db = firestore.AsyncClient()
             doc = await db.collection("agent_sessions").document(conv_id).get()
             if doc.exists:
@@ -278,32 +296,34 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
     """Invokes SRE sub-agent directly via A2A HTTP/SSE and forwards stream to the browser."""
     sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
-    
+
     # Resolve or create conversation ID
     conv_id = request.conversation_id
     if not conv_id:
         import uuid
+
         conv_id = f"sre-{uuid.uuid4().hex}"
 
     payload = {
         "prompt": request.prompt,
         "conversation_id": conv_id,
         "project_id": request.project_id,
-        "refresh": is_refresh
+        "refresh": is_refresh,
     }
 
     async def event_generator():
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
-        
+
         accumulated_text = ""
         client = None
         response = None
         try:
             from sre_common import is_transient_error
+
             max_retries = 3
             initial_delay = 1.0
             backoff_factor = 2.0
-            
+
             for attempt in range(max_retries + 1):
                 try:
                     client = httpx.AsyncClient()
@@ -311,7 +331,7 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
                     response = await client.stream("POST", url, json=payload, timeout=300.0).__aenter__()
                     if response.status_code == 200:
                         break
-                    
+
                     response.raise_for_status()
                 except Exception as e:
                     if response:
@@ -320,24 +340,26 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
                     if client:
                         await client.__aexit__(None, None, None)
                         client = None
-                    
-                    is_transient = is_transient_error(e) or (hasattr(e, "response") and e.response.status_code in (429, 500, 502, 503, 504))
+
+                    is_transient = is_transient_error(e) or (
+                        hasattr(e, "response") and e.response.status_code in (429, 500, 502, 503, 504)
+                    )
                     if attempt == max_retries or not is_transient:
                         raise
-                    
-                    delay = initial_delay * (backoff_factor ** attempt)
+
+                    delay = initial_delay * (backoff_factor**attempt)
                     logger.warning(
-                        f"Transient SRE agent connection error on attempt {attempt+1}/{max_retries+1}. "
+                        f"Transient SRE agent connection error on attempt {attempt + 1}/{max_retries + 1}. "
                         f"Retrying in {delay:.2f}s... Error: {e}"
                     )
                     yield f"data: {json.dumps({'type': 'thought', 'text': f'⚠️ Connection failed. Retrying in {delay:.1f}s...'})}\n\n"
                     await asyncio.sleep(delay)
-            
+
             async for line in response.aiter_lines():
                 if await fastapi_request.is_disconnected():
                     logger.info("Client disconnected. Aborting SRE A2A stream.")
                     break
-                
+
                 if line.startswith("data: "):
                     try:
                         event_data = json.loads(line[6:])
@@ -363,9 +385,9 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
                 "source": "USER",
                 "target": "MODEL",
                 "status": "SUCCESS",
-                "content": request.prompt
+                "content": request.prompt,
             }
-            
+
             model_step = {
                 "step_index": 1,
                 "type": "TEXT_RESPONSE",
@@ -375,30 +397,29 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
                 "content": accumulated_text,
                 "thinking": "Delegated SRE diagnostics to sub-agent.",
                 "response_a2ui": response_a2ui,
-                "tool_calls": [{"name": "diagnose_sre", "args": {"prompt": request.prompt}}]
+                "tool_calls": [{"name": "diagnose_sre", "args": {"prompt": request.prompt}}],
             }
 
             history = [user_step, model_step]
-            
+
             # Save history
             try:
                 from google.cloud import firestore
+
                 db = firestore.AsyncClient()
                 doc_ref = db.collection("agent_sessions").document(conv_id)
                 doc = await doc_ref.get()
                 existing_prompt = doc.to_dict().get("prompt") if doc.exists else None
-                
-                update_data = {
-                    "history": history,
-                    "updated_at": firestore.SERVER_TIMESTAMP
-                }
+
+                update_data = {"history": history, "updated_at": firestore.SERVER_TIMESTAMP}
                 if not existing_prompt or existing_prompt == "Untitled Session":
                     update_data["prompt"] = request.prompt
-                
+
                 await doc_ref.set(update_data, merge=True)
             except Exception as e:
                 logger.warning(f"Using mock session persistence fallback: {e}")
                 from agent.config import MOCK_HISTORY_DB
+
                 MOCK_HISTORY_DB[conv_id] = history
 
             yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
@@ -412,16 +433,16 @@ async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, 
             if client:
                 await client.__aexit__(None, None, None)
 
-
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
 
 async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
     """Invokes local Orchestrator agent reasoning loop (standard conversation)."""
+
     async def event_generator():
         response = None
         try:
@@ -430,37 +451,39 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
 
             async with Agent(config) as agent:
                 conv_id = agent.conversation_id or request.conversation_id
-                
+
                 # Load history steps if available
                 if conv_id:
                     if HAS_ANTIGRAVITY:
                         try:
                             from google.cloud import firestore
+
                             db = firestore.AsyncClient()
                             doc = await db.collection("agent_sessions").document(conv_id).get()
                             if doc.exists:
                                 history_data = doc.to_dict().get("history", [])
                                 from google.antigravity.types import Step
+
                                 agent.conversation._steps = [Step(**step) for step in history_data]
                         except Exception:
                             pass
                     else:
-                        from agent.config import MOCK_HISTORY_DB
-                        from agent.config import MockStep
+                        from agent.config import MOCK_HISTORY_DB, MockStep
+
                         history_data = MOCK_HISTORY_DB.get(conv_id, [])
                         agent.conversation._steps = [MockStep(**step) for step in history_data]
 
                 response = await agent.chat(request.prompt)
-                
+
                 yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
-                
+
                 accumulated_text = ""
                 async for chunk in response.chunks:
                     if await fastapi_request.is_disconnected():
                         logger.info("Client disconnected. Aborting orchestrator chat stream.")
                         await response.cancel()
                         break
-                    
+
                     cls_name = chunk.__class__.__name__
                     if cls_name == "Thought":
                         yield f"data: {json.dumps({'type': 'thought', 'text': chunk.text})}\n\n"
@@ -471,7 +494,7 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
                 # Stream complete
                 if not await fastapi_request.is_disconnected():
                     response_a2ui = translate_markdown_to_a2ui(accumulated_text)
-                    
+
                     steps = []
                     for step in agent.conversation.history:
                         step_dict = step.model_dump(mode="json") if hasattr(step, "model_dump") else step.model_dump()
@@ -482,17 +505,18 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
                     if HAS_ANTIGRAVITY:
                         try:
                             from google.cloud import firestore
+
                             db = firestore.AsyncClient()
                             doc_ref = db.collection("agent_sessions").document(conv_id)
-                            await doc_ref.set({
-                                "history": steps,
-                                "updated_at": firestore.SERVER_TIMESTAMP,
-                                "prompt": request.prompt
-                            }, merge=True)
+                            await doc_ref.set(
+                                {"history": steps, "updated_at": firestore.SERVER_TIMESTAMP, "prompt": request.prompt},
+                                merge=True,
+                            )
                         except Exception:
                             pass
                     else:
                         from agent.config import MOCK_HISTORY_DB
+
                         MOCK_HISTORY_DB[conv_id] = steps
 
                     yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
@@ -504,5 +528,5 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

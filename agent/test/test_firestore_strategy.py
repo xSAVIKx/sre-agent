@@ -1,13 +1,14 @@
 """Unit tests for Firestore Connection Strategy."""
 
 import os
-import tempfile
 import shutil
+import tempfile
 import unittest
 from unittest import mock
+
 from agent.firestore_strategy import (
-    FirestoreConnectionStrategy,
     MOCK_FIRESTORE_DB,
+    FirestoreConnectionStrategy,
 )
 
 
@@ -44,7 +45,7 @@ class TestFirestoreConnectionStrategy(unittest.IsolatedAsyncioTestCase):
 
         # Verify that underlying local strategy enter was called
         mock_local.__aenter__.assert_awaited_once()
-        
+
         # Verify no files were created because there was no conversation_id to restore
         assert len(os.listdir(save_dir)) == 0
 

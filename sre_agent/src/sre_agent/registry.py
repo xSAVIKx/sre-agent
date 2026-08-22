@@ -4,7 +4,9 @@ This module provides decorators to dynamically register custom Python functions
 as agent tools, supporting future additions like Grafana or SigNoz query tools.
 """
 
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any
+
 
 class ToolRegistry:
     """Registry to manage and retrieve custom agent tools."""
@@ -34,8 +36,10 @@ class ToolRegistry:
         """
         return self._tools
 
+
 # Global registry instance
 registry = ToolRegistry()
+
 
 def register_tool(func: Callable[..., Any]) -> Callable[..., Any]:
     """Decorator to register a function in the global ToolRegistry.

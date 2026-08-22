@@ -3,11 +3,12 @@
 Provides a fail-safe, unified otel_trace decorator and start_span context manager.
 """
 
+import contextlib
 import functools
 import inspect
-import contextlib
 import logging
-from typing import Callable, Any
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("sre_common.otel")
 
@@ -15,6 +16,7 @@ logger = logging.getLogger("sre_common.otel")
 try:
     from opentelemetry import trace
     from opentelemetry.trace import StatusCode
+
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
@@ -46,17 +48,23 @@ def otel_trace(span_name: str, tracer_name: str = "sre_common"):
 
     Supports both synchronous and asynchronous functions.
     """
+
     def decorator(func: Callable[..., Any]):
         if inspect.iscoroutinefunction(func):
+
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 with start_span(span_name, tracer_name):
                     return await func(*args, **kwargs)
+
             return async_wrapper
         else:
+
             @functools.wraps(func)
             def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
                 with start_span(span_name, tracer_name):
                     return func(*args, **kwargs)
+
             return sync_wrapper
+
     return decorator

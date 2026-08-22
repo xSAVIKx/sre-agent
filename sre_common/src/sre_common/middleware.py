@@ -6,9 +6,11 @@ and contextvar storage for HTTP request lifetimes.
 
 import contextvars
 import logging
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from sre_common.logging import request_trace_id, request_span_id
+
+from sre_common.logging import request_span_id, request_trace_id
 
 logger = logging.getLogger("sre_common.middleware")
 
@@ -20,6 +22,7 @@ class TraceContextMiddleware(BaseHTTPMiddleware):
     """Starlette middleware to extract trace/span IDs from request headers
     and store them in context variables for logging correlation.
     """
+
     async def dispatch(self, request: Request, call_next):
         trace_id = None
         span_id = None

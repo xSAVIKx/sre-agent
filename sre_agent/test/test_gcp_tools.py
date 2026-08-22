@@ -1,11 +1,12 @@
 """Unit tests for GCP Observability Tools (Metrics)."""
 
-import os
 import json
+import os
 import tempfile
 import unittest
 from unittest import mock
-from sre_agent.gcp_tools import query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem
+
+from sre_agent.gcp_tools import analyze_trace_cascade, generate_post_mortem, list_metric_descriptors, query_metrics
 
 # Checked-in telemetry fixtures. These are what `app/main.py:_generate_mock_trace`
 # and `app/main.py:_log_structured` write into `mock_telemetry_data/` when the
@@ -34,37 +35,28 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(tmp.cleanup)
         mock_dir = tmp.name
         metrics_file = os.path.join(mock_dir, "metrics.json")
-        
+
         mock_metrics = [
             {
                 "metric": {
                     "type": "run.googleapis.com/container/cpu/utilizations",
-                    "labels": {
-                        "service_name": "sre-chaos-monkey"
-                    }
+                    "labels": {"service_name": "sre-chaos-monkey"},
                 },
-                "points": [
-                    {
-                        "value": {
-                            "double_value": 0.15
-                        }
-                    }
-                ]
+                "points": [{"value": {"double_value": 0.15}}],
             }
         ]
-        
+
         with open(metrics_file, "w", encoding="utf-8") as f:
             json.dump(mock_metrics, f)
 
         # Ensure we are testing mock mode
-        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", mock_dir):
+        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", mock_dir):
             # Query for CPU utilization of sre-chaos-monkey
             result_str = await query_metrics(
                 filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="sre-chaos-monkey"'
             )
             result = json.loads(result_str)
-            
+
             # Assert we found matching metric
             self.assertIsInstance(result, list)
             self.assertTrue(len(result) > 0)
@@ -86,7 +78,7 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
             result = json.loads(result_str)
             self.assertIsInstance(result, list)
             self.assertTrue(len(result) >= 3)
-            
+
             # Query with filter
             result_str_filtered = await list_metric_descriptors(filter_expression="postgresql")
             result_filtered = json.loads(result_str_filtered)
@@ -95,8 +87,10 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_trace_cascade_mock(self) -> None:
         """Verifies analyze_trace_cascade correctly parses trace spans and identifies the bottleneck in mock mode."""
-        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR):
+        with (
+            mock.patch("sre_agent.gcp_tools.IS_MOCK", True),
+            mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR),
+        ):
             report = await analyze_trace_cascade(FIXTURE_TRACE_ID)
             self.assertIn("Multi-Service Cascade Latency & Bottleneck Analysis", report)
             self.assertIn("Identified Bottleneck", report)
@@ -110,8 +104,10 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_generate_post_mortem_mock(self) -> None:
         """Verifies generate_post_mortem generates a structured markdown post-mortem report in mock mode."""
-        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR):
+        with (
+            mock.patch("sre_agent.gcp_tools.IS_MOCK", True),
+            mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR),
+        ):
             report = await generate_post_mortem(FIXTURE_TRACE_ID)
             self.assertIn("Incident Post-Mortem", report)
             self.assertIn("Incident Timeline", report)
@@ -134,7 +130,9 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
 
     async def test_analyze_trace_cascade_unknown_trace(self) -> None:
         """Verifies analyze_trace_cascade reports a clean error when the trace is absent."""
-        with mock.patch("sre_agent.gcp_tools.IS_MOCK", True), \
-             mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR):
+        with (
+            mock.patch("sre_agent.gcp_tools.IS_MOCK", True),
+            mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR),
+        ):
             report = await analyze_trace_cascade("0" * 32)
             self.assertIn("Error retrieving trace cascade", report)

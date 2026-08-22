@@ -5,17 +5,18 @@ backs up and restores agent session files in Google Cloud Firestore, enabling st
 session resumption across server instances.
 """
 
+import logging
 import os
 import shutil
-import logging
-from sre_common import retry_async, otel_trace
 from typing import Any
+
 from google.antigravity.connections import connection
-from google.antigravity.connections.local.local_connection_config import LocalAgentConfig
 from google.antigravity.connections.local.local_connection import LocalConnectionStrategy
+from google.antigravity.connections.local.local_connection_config import LocalAgentConfig
+
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("sre_agent.firestore_strategy")
-
 
 
 # Global in-memory DB for local testing/mock mode
@@ -85,11 +86,10 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         if not self._mock_mode:
             try:
                 from google.cloud import firestore
+
                 self._db = firestore.AsyncClient()
             except Exception as e:
-                logger.warning(
-                    f"Failed to initialize Firestore client, falling back to mock mode: {e}"
-                )
+                logger.warning(f"Failed to initialize Firestore client, falling back to mock mode: {e}")
                 self._mock_mode = True
 
         # 2. Download files from Firestore/Mock DB
@@ -115,6 +115,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                         if isinstance(file_data, str):
                             try:
                                 import base64
+
                                 file_bytes = base64.b64decode(file_data)
                             except Exception:
                                 file_bytes = file_data.encode("utf-8")
@@ -164,12 +165,13 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         # 4. Upload session files to Firestore/Mock DB
         if files_dict:
             import datetime
+
             resolved_prompt = self._existing_prompt or self.prompt
             if self._mock_mode:
                 session_data = {
                     "conversation_id": active_conversation_id,
                     "files": files_dict,
-                    "updated_at": datetime.datetime.now(datetime.timezone.utc),
+                    "updated_at": datetime.datetime.now(datetime.UTC),
                     "prompt": resolved_prompt,
                 }
                 if active_conversation_id not in MOCK_FIRESTORE_DB:
@@ -179,6 +181,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
             else:
                 try:
                     from google.cloud import firestore
+
                     session_data = {
                         "conversation_id": active_conversation_id,
                         "files": files_dict,
@@ -205,6 +208,7 @@ class FirestoreAgentConfig(LocalAgentConfig):
     Extends LocalAgentConfig to wrap the LocalConnectionStrategy with
     FirestoreConnectionStrategy remote backup/restore capability.
     """
+
     prompt: str | None = None
 
     def create_strategy(

@@ -5,10 +5,10 @@ generate mock trace and log files, then spins up the Antigravity SRE Agent
 locally to analyze the mock files and output a diagnostic report.
 """
 
-import os
-import sys
 import asyncio
 import logging
+import os
+import sys
 
 # Ensure workspace root is in Python path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
@@ -16,6 +16,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("simulator")
+
 
 async def run_simulation() -> None:
     """Runs the SRE diagnostics simulation.
@@ -34,10 +35,13 @@ async def run_simulation() -> None:
     # 1. Generate simulated telemetry
     logger.info("Simulating target application incident (Gateway -> Backend -> Database)...")
     from fastapi import HTTPException
+
     trace_id = None
     try:
         from fastapi import Request
+
         from app.main import gateway
+
         # Create a dummy Request for the FastAPI endpoint
         scope = {"type": "http", "headers": []}
         request = Request(scope)
@@ -57,7 +61,8 @@ async def run_simulation() -> None:
     # 2. Boot the SRE agent
     logger.info("Booting Antigravity SRE Agent...")
     try:
-        from agent.config import load_agent_config, Agent
+        from agent.config import Agent, load_agent_config
+
         config = load_agent_config()
 
         logger.info("Invoking agent diagnosis loop...")
@@ -69,14 +74,15 @@ async def run_simulation() -> None:
             report = await response.text()
 
             # Print the markdown report
-            print("\n" + "="*50)
+            print("\n" + "=" * 50)
             print("AGENT DIAGNOSIS REPORT")
-            print("="*50)
+            print("=" * 50)
             print(report)
-            print("="*50 + "\n")
+            print("=" * 50 + "\n")
 
     except Exception as e:
         logger.exception(f"Failed to run SRE Agent diagnostics: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(run_simulation())

@@ -1,20 +1,19 @@
-"""Unit tests for the shared retry utilities.
-"""
+"""Unit tests for the shared retry utilities."""
 
 import unittest
-import asyncio
-from unittest import mock
-import httpx
 
 from sre_common.retry import is_transient_error, retry_async, retry_sync
+
 
 class MockTransientException(Exception):
     def __init__(self, message="Simulated transient error"):
         super().__init__(message)
         self.status_code = 429
 
+
 class MockNonTransientException(Exception):
     pass
+
 
 class TestRetryUtilities(unittest.IsolatedAsyncioTestCase):
     """Tests the transient error detection and backoff retry logic."""
@@ -23,17 +22,21 @@ class TestRetryUtilities(unittest.IsolatedAsyncioTestCase):
         """Verifies is_transient_error correctly identifies transient vs permanent failures."""
         # 1. Test status code attribute
         self.assertTrue(is_transient_error(MockTransientException()))
-        
+
         # 2. Test generic exception naming
-        class ResourceExhausted(Exception): pass
-        class ServiceUnavailable(Exception): pass
+        class ResourceExhausted(Exception):
+            pass
+
+        class ServiceUnavailable(Exception):
+            pass
+
         self.assertTrue(is_transient_error(ResourceExhausted("Rate exceeded")))
         self.assertTrue(is_transient_error(ServiceUnavailable("Unavailable")))
-        
+
         # 3. Test message substring matches
         self.assertTrue(is_transient_error(Exception("429 rate limit reached")))
         self.assertTrue(is_transient_error(Exception("quota exceeded")))
-        
+
         # 4. Test non-transient exceptions
         self.assertFalse(is_transient_error(MockNonTransientException("Fatal database error")))
         self.assertFalse(is_transient_error(ValueError("Invalid argument")))
@@ -66,7 +69,7 @@ class TestRetryUtilities(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(MockTransientException) as ctx:
             await mock_async_func()
-        
+
         self.assertEqual(str(ctx.exception), "Fail 3")  # initial attempt + 2 retries = 3 total attempts
         self.assertEqual(call_count, 3)
 
@@ -82,7 +85,7 @@ class TestRetryUtilities(unittest.IsolatedAsyncioTestCase):
 
         with self.assertRaises(MockNonTransientException):
             await mock_async_func()
-        
+
         self.assertEqual(call_count, 1)
 
     def test_retry_sync_success(self) -> None:

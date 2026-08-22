@@ -23,16 +23,31 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # package directory -> importable module names inside it.
 PACKAGES: dict[str, tuple[str, ...]] = {
-    "agent/src": ("agent.a2ui_translator", "agent.config", "agent.firestore_strategy",
-                  "agent.main", "agent.routes"),
-    "sre_agent/src": ("sre_agent.config", "sre_agent.firestore_strategy", "sre_agent.gcp_tools",
-                      "sre_agent.itinerary", "sre_agent.main", "sre_agent.registry",
-                      "sre_agent.routes", "sre_agent.sre_workflow"),
-    "inventory_agent/src": ("inventory_agent.config", "inventory_agent.discovery",
-                            "inventory_agent.firestore_strategy", "inventory_agent.main",
-                            "inventory_agent.routes"),
-    "sre_common/src": ("sre_common", "sre_common.logging", "sre_common.middleware",
-                       "sre_common.otel", "sre_common.retry"),
+    "agent/src": ("agent.a2ui_translator", "agent.config", "agent.firestore_strategy", "agent.main", "agent.routes"),
+    "sre_agent/src": (
+        "sre_agent.config",
+        "sre_agent.firestore_strategy",
+        "sre_agent.gcp_tools",
+        "sre_agent.itinerary",
+        "sre_agent.main",
+        "sre_agent.registry",
+        "sre_agent.routes",
+        "sre_agent.sre_workflow",
+    ),
+    "inventory_agent/src": (
+        "inventory_agent.config",
+        "inventory_agent.discovery",
+        "inventory_agent.firestore_strategy",
+        "inventory_agent.main",
+        "inventory_agent.routes",
+    ),
+    "sre_common/src": (
+        "sre_common",
+        "sre_common.logging",
+        "sre_common.middleware",
+        "sre_common.otel",
+        "sre_common.retry",
+    ),
     ".": ("app.main",),
     # AGENTS.md calls this a portable copy of the diagnostics engine that has to
     # keep working, and it is the one tree with no tests of its own. Its three
@@ -63,7 +78,7 @@ class TestWorkspaceImports(unittest.TestCase):
             for name in modules:
                 try:
                     importlib.import_module(name)
-                except Exception as exc:  # noqa: BLE001 - we want the whole list
+                except Exception as exc:
                     failures.append(f"{name}: {type(exc).__name__}: {exc}")
         self.assertEqual([], failures, "modules failed to import:\n" + "\n".join(failures))
 

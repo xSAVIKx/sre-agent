@@ -1,24 +1,22 @@
-"""API Route definitions for the SRE Diagnostics Agent.
-"""
+"""API Route definitions for the SRE Diagnostics Agent."""
 
-import os
+import asyncio
+import datetime
 import json
 import logging
-import asyncio
 from typing import Any
+
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import httpx
-import datetime
+from sre_common.middleware import target_project_contextvar
 
-from sre_agent.config import IS_MOCK, INVENTORY_AGENT_URL, PROJECT_ID
+from sre_agent.config import INVENTORY_AGENT_URL, PROJECT_ID
+from sre_agent.firestore_strategy import get_sre_session, save_sre_session
 from sre_agent.gcp_tools import query_traces
 from sre_agent.sre_workflow import run_sre_diagnostics
-from sre_agent.firestore_strategy import get_sre_session, save_sre_session
-from sre_common.middleware import target_project_contextvar
-from sre_common import retry_async, otel_trace
-
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("sre_agent.routes")
 
@@ -27,6 +25,7 @@ router = APIRouter()
 
 class SreMessageRequest(BaseModel):
     """Pydantic model representing an A2A message request to the SRE Agent."""
+
     prompt: str
     conversation_id: str | None = None
     project_id: str | None = None
@@ -56,11 +55,12 @@ async def get_trace(trace_id: str, project_id: str | None = None):
     logger.info(f"Retrieving trace details via GET for trace_id={trace_id}")
     try:
         from sre_agent.gcp_tools import get_trace_details
+
         details_str = await get_trace_details(trace_id, project_id)
         return json.loads(details_str)
     except Exception as e:
         logger.error(f"Failed to get trace details for {trace_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}") from e
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {e!s}") from e
 
 
 @router.get("/trace")
@@ -70,12 +70,12 @@ async def get_trace_query(trace_id: str, project_id: str | None = None):
     logger.info(f"Retrieving trace details via GET query for trace_id={trace_id}")
     try:
         from sre_agent.gcp_tools import get_trace_details
+
         details_str = await get_trace_details(trace_id, project_id)
         return json.loads(details_str)
     except Exception as e:
         logger.error(f"Failed to get trace details for {trace_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {str(e)}") from e
-
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {e!s}") from e
 
 
 @router.post("/v1/agents/sre/messages")
@@ -85,7 +85,9 @@ async def sre_message(request: SreMessageRequest, fastapi_request: Request):
 
     Runs SRE trace-log correlation and streams thoughts and final reports via SSE.
     """
-    logger.info(f"Received SRE diagnostics request for project={request.project_id} (conversation_id={request.conversation_id})")
+    logger.info(
+        f"Received SRE diagnostics request for project={request.project_id} (conversation_id={request.conversation_id})"
+    )
 
     resolved_project = request.project_id or PROJECT_ID
     # Set target project ContextVar for this request execution task context
@@ -95,7 +97,7 @@ async def sre_message(request: SreMessageRequest, fastapi_request: Request):
         try:
             # 1. Fetch project topology cache from Inventory Agent (A2A call)
             yield f"data: {json.dumps({'type': 'thought', 'text': f'🔧 Contacting Inventory Agent to fetch topology for project `{resolved_project}`...'})}\n\n"
-            
+
             topology = {}
             try:
                 inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
@@ -112,27 +114,26 @@ async def sre_message(request: SreMessageRequest, fastapi_request: Request):
                 logger.error(f"Failed to query Inventory Agent after retries: {e}")
                 yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Inventory Agent query failed. Proceeding with default service topology parameters.'})}\n\n"
 
-
             # 2. Retrieve recent traces
             yield f"data: {json.dumps({'type': 'thought', 'text': f'🔍 Fetching recent traces from project `{resolved_project}`...'})}\n\n"
-            
+
             try:
                 traces_json = await query_traces(project_id=resolved_project, limit=10)
             except Exception as e:
                 logger.error(f"Failed to query traces: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'detail': f'Trace API query failed: {str(e)}'})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'detail': f'Trace API query failed: {e!s}'})}\n\n"
                 return
 
             # 3. Run SRE ADK Multi-Agent Diagnostics
             yield f"data: {json.dumps({'type': 'thought', 'text': '🧠 Running multi-agent ADK correlation workflow (TraceAnalyzer + LogCorrelator)...'})}\n\n"
-            
+
             # Execute workflow
             report = await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
-            
+
             # 4. Stream final report to Orchestrator chunk-by-chunk
             # Yield thoughts complete
             yield f"data: {json.dumps({'type': 'thought', 'text': '✅ Diagnostics complete. Generating Markdown report...'})}\n\n"
-            
+
             # Stream the report text
             words = report.split(" ")
             accumulated_text = ""
@@ -149,18 +150,18 @@ async def sre_message(request: SreMessageRequest, fastapi_request: Request):
             # 5. Persist private SRE session history
             if request.conversation_id:
                 history_record = {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "prompt": request.prompt,
                     "traces_analyzed": traces_json,
                     "topology": topology,
-                    "report": accumulated_text
+                    "report": accumulated_text,
                 }
-                
+
                 # Retrieve existing history
                 sess = await get_sre_session(request.conversation_id) or {}
                 history = sess.get("history", [])
                 history.append(history_record)
-                
+
                 await save_sre_session(request.conversation_id, history)
 
             # Done event
@@ -173,5 +174,5 @@ async def sre_message(request: SreMessageRequest, fastapi_request: Request):
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )

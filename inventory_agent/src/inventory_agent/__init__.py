@@ -1,2 +1,1 @@
-"""Inventory Agent Service package.
-"""
+"""Inventory Agent Service package."""

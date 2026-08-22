@@ -1,11 +1,11 @@
-"""Firestore access utilities for Inventory caching.
-"""
+"""Firestore access utilities for Inventory caching."""
 
-import os
-import logging
 import datetime
+import logging
+import os
 from typing import Any
-from sre_common import retry_async, otel_trace
+
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("inventory_agent.firestore_strategy")
 
@@ -18,13 +18,14 @@ MOCK_INVENTORY_DB: dict[str, dict[str, Any]] = {}
 
 async def _get_db() -> Any:
     """Helper to initialize Async Firestore Client.
-    
+
     If FIRESTORE_EMULATOR_HOST is set, Firestore client automatically connects to it.
     """
     if IS_MOCK and "FIRESTORE_EMULATOR_HOST" not in os.environ:
         return None
     try:
         from google.cloud import firestore
+
         return firestore.AsyncClient()
     except Exception as e:
         logger.warning(f"Failed to load Firestore client, using in-memory mock: {e}")
@@ -56,21 +57,18 @@ async def get_project_inventory(project_id: str) -> dict[str, Any] | None:
 @retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("inventory_firestore.update_project_inventory")
 async def update_project_inventory(
-    project_id: str,
-    discovered_resources: dict[str, Any],
-    aggregated_metadata: dict[str, Any],
-    status: str = "ACTIVE"
+    project_id: str, discovered_resources: dict[str, Any], aggregated_metadata: dict[str, Any], status: str = "ACTIVE"
 ) -> None:
     """Saves/updates a project's cached inventory in Firestore or mock database."""
     db = await _get_db()
-    now = datetime.datetime.now(datetime.timezone.utc)
-    
+    now = datetime.datetime.now(datetime.UTC)
+
     payload = {
         "project_id": project_id,
         "discovered_resources": discovered_resources,
         "aggregated_metadata": aggregated_metadata,
         "status": status,
-        "last_update_time": now
+        "last_update_time": now,
     }
 
     if db is None:
@@ -91,8 +89,8 @@ async def update_project_inventory(
 async def set_project_status(project_id: str, status: str) -> None:
     """Helper to update a project's scanning status in Firestore/Mock DB."""
     db = await _get_db()
-    now = datetime.datetime.now(datetime.timezone.utc)
-    
+    now = datetime.datetime.now(datetime.UTC)
+
     if db is None:
         if project_id in MOCK_INVENTORY_DB:
             MOCK_INVENTORY_DB[project_id]["status"] = status
@@ -103,16 +101,13 @@ async def set_project_status(project_id: str, status: str) -> None:
                 "status": status,
                 "discovered_resources": {},
                 "aggregated_metadata": {},
-                "last_update_time": now
+                "last_update_time": now,
             }
         return
 
     try:
         doc_ref = db.collection("project_inventories").document(project_id)
-        await doc_ref.set({
-            "status": status,
-            "last_update_time": now
-        }, merge=True)
+        await doc_ref.set({"status": status, "last_update_time": now}, merge=True)
         logger.info(f"Updated status for {project_id} to {status} in Firestore")
     except Exception as e:
         logger.error(f"Failed to set status for {project_id}: {e}")

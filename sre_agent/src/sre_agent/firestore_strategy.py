@@ -1,12 +1,11 @@
-"""Firestore persistence utilities for private SRE diagnostic sessions.
-"""
+"""Firestore persistence utilities for private SRE diagnostic sessions."""
 
-import os
-import logging
 import datetime
+import logging
+import os
 from typing import Any
 
-from sre_common import retry_async, otel_trace
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("sre_agent.firestore_strategy")
 
@@ -22,6 +21,7 @@ async def _get_db() -> Any:
         return None
     try:
         from google.cloud import firestore
+
         return firestore.AsyncClient()
     except Exception as e:
         logger.warning(f"Failed to load Firestore client, using in-memory mock: {e}")
@@ -51,13 +51,9 @@ async def get_sre_session(conversation_id: str) -> dict[str, Any] | None:
 async def save_sre_session(conversation_id: str, history: list[dict[str, Any]]) -> None:
     """Saves/appends private SRE reasoning steps to Firestore or mock DB."""
     db = await _get_db()
-    now = datetime.datetime.now(datetime.timezone.utc)
-    
-    payload = {
-        "conversation_id": conversation_id,
-        "history": history,
-        "updated_at": now
-    }
+    now = datetime.datetime.now(datetime.UTC)
+
+    payload = {"conversation_id": conversation_id, "history": history, "updated_at": now}
 
     if db is None:
         MOCK_SRE_DB[conversation_id] = payload

@@ -319,6 +319,7 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
     if os.getenv("MOCK_GCP", "false").lower() == "true":
         from sre_agent.gcp_tools import query_traces
         from sre_agent.sre_workflow import run_sre_diagnostics
+
         traces_json = await query_traces(project_id=project_id, limit=10)
         return await run_sre_diagnostics(traces_json=traces_json, project_id=project_id)
 
@@ -344,11 +345,19 @@ if "# 🚨 Incident Post-Mortem" in text or "Incident Post-Mortem" in text:
     return {
         "type": "container",
         "components": [
-            {"type": "alert", "level": "success", "title": title,
-             "text": "The SRE agent has auto-generated the incident post-mortem report."},
+            {
+                "type": "alert",
+                "level": "success",
+                "title": title,
+                "text": "The SRE agent has auto-generated the incident post-mortem report.",
+            },
             {"type": "section", "title": "Document Preview", "content": text},
-            {"type": "download_button", "text": "Download Post-Mortem Markdown",
-             "filename": "post_mortem.md", "content": text},
+            {
+                "type": "download_button",
+                "text": "Download Post-Mortem Markdown",
+                "filename": "post_mortem.md",
+                "content": text,
+            },
         ],
     }
 ```

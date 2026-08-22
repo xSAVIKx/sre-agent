@@ -1,6 +1,7 @@
 """Unit tests for the A2UI translator."""
 
 import unittest
+
 from agent.a2ui_translator import translate_markdown_to_a2ui
 
 
@@ -11,7 +12,7 @@ class TestA2uiTranslator(unittest.TestCase):
         """Verifies simple text strings are wrapped in a text component."""
         text = "Hello! I am ready to help you with SRE tasks."
         a2ui = translate_markdown_to_a2ui(text)
-        
+
         self.assertEqual(a2ui["type"], "container")
         self.assertEqual(len(a2ui["components"]), 1)
         self.assertEqual(a2ui["components"][0]["type"], "text")
@@ -21,7 +22,7 @@ class TestA2uiTranslator(unittest.TestCase):
         """Verifies valid A2UI JSON output from agent is returned directly as a dict."""
         json_payload = '{"type": "container", "components": [{"type": "header", "text": "Direct JSON"}]}'
         a2ui = translate_markdown_to_a2ui(json_payload)
-        
+
         self.assertEqual(a2ui["type"], "container")
         self.assertEqual(a2ui["components"][0]["text"], "Direct JSON")
 
@@ -67,8 +68,7 @@ class TestA2uiTranslator(unittest.TestCase):
         self.assertEqual(components[2]["type"], "section")
         self.assertEqual(components[2]["title"], "🔍 Root Cause Analysis")
         self.assertEqual(
-            components[2]["content"],
-            "We found that database timeout occurred due to connection pool exhaustion."
+            components[2]["content"], "We found that database timeout occurred due to connection pool exhaustion."
         )
 
         # 4. Logs Block
@@ -86,7 +86,9 @@ class TestA2uiTranslator(unittest.TestCase):
 
     def test_translate_healthy_diagnostics_report(self) -> None:
         """Verifies that a clean system health report maps to a success alert."""
-        text = "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        text = (
+            "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        )
         a2ui = translate_markdown_to_a2ui(text)
 
         self.assertEqual(a2ui["type"], "container")
@@ -107,21 +109,21 @@ class TestA2uiTranslator(unittest.TestCase):
             "Here is the report details..."
         )
         a2ui = translate_markdown_to_a2ui(text)
-        
+
         self.assertEqual(a2ui["type"], "container")
         components = a2ui["components"]
         self.assertEqual(len(components), 3)
-        
+
         # 1. Alert component
         self.assertEqual(components[0]["type"], "alert")
         self.assertEqual(components[0]["level"], "success")
         self.assertEqual(components[0]["title"], "Incident Post-Mortem")
-        
+
         # 2. Section component (preview)
         self.assertEqual(components[1]["type"], "section")
         self.assertEqual(components[1]["title"], "Document Preview")
         self.assertEqual(components[1]["content"], text)
-        
+
         # 3. Download button component
         self.assertEqual(components[2]["type"], "download_button")
         self.assertEqual(components[2]["text"], "Download Post-Mortem Markdown")
