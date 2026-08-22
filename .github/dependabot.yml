@@ -1,0 +1,62 @@
+version: 2
+
+updates:
+  # One entry covers the whole uv workspace. Since dependabot-core #13824 and
+  # #14627 the uv ecosystem expands `[tool.uv.workspace] members`, parses the
+  # dependencies declared in each member `pyproject.toml`, and regenerates the
+  # single shared root `uv.lock`. Per-member entries would overlap and are not
+  # allowed.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Kyiv"
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "chore(deps)"
+    # The whole point. This repo drifted because the DECLARED floors went stale
+    # while uv.lock stayed internally consistent: google-adk was declared
+    # >=1.35.0 with 2.2.0 installed and 2.7.1 current. Under the default `auto`
+    # strategy Dependabot only touches the lockfile while the existing `>=`
+    # floor still admits the new version, so the floor rots exactly as it did
+    # here. `increase` rewrites the lower bound in pyproject.toml instead.
+    versioning-strategy: increase
+    groups:
+      # These two are the ones that actually break. Keep them out of every
+      # group so each arrives as its own PR with its own changelog:
+      # google-adk 1.x -> 2.x replaced the execution model outright, and
+      # google-antigravity is a 0.x SDK that removes public API in patch
+      # releases (LocalAgentConfig.gemini_config vanished in 0.1.4).
+      google-cloud:
+        patterns: ["google-cloud-*"]
+        update-types: ["minor", "patch"]
+      opentelemetry:
+        # Often held back on purpose: google-adk caps opentelemetry-sdk at 1.42.1.
+        patterns: ["opentelemetry-*"]
+        update-types: ["minor", "patch"]
+      web-stack:
+        patterns: ["fastapi", "uvicorn", "httpx", "starlette", "pydantic*"]
+        update-types: ["minor", "patch"]
+      dev-tooling:
+        patterns: ["ruff"]
+
+  # A workflow silently pinned to a two-year-old action is the same class of
+  # problem as a two-year-old library. The pins here are exact releases
+  # (astral-sh/setup-uv stopped publishing floating major tags after v7), so
+  # without this they would never move.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "Europe/Kyiv"
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
