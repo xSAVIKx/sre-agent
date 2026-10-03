@@ -53,7 +53,7 @@ steps 1–3 solved; `step-05` is the finished project.
 | check everything                   | `uv run workshop/check.py all`                                       |
 | see the solution for step N        | `git diff step-0<N-1> step-0N -- ':!skills'`                         |
 | apply just step N's solution       | `git apply workshop/steps/0N-*/solution.patch`                       |
-| catch up to the start of step N+1  | `git stash && git switch -c catch-up step-0N`                        |
+| catch up to the start of step N+1  | `git stash && git switch -C catch-up step-0N`                        |
 | start over                         | `git switch -c fresh step-00`                                        |
 
 No git? Download the repository as a ZIP from the `workshop` branch and use

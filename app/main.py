@@ -204,9 +204,17 @@ def _mock_metric_series(trigger_error: bool) -> list[dict[str, Any]]:
 
 
 def _write_mock_metrics(trigger_error: bool) -> None:
-    """Writes `metrics.json` so the SRE agent's `query_metrics` has data in mock mode."""
+    """Writes `metrics.json` so the SRE agent's `query_metrics` has data in mock mode.
+
+    An incident always records its (saturated) readings; a healthy request only fills
+    in a missing file, so it cannot paper over an incident that is still in the trace
+    list.
+    """
     os.makedirs(MOCK_DATA_DIR, exist_ok=True)
-    with open(os.path.join(MOCK_DATA_DIR, "metrics.json"), "w", encoding="utf-8") as f:
+    path = os.path.join(MOCK_DATA_DIR, "metrics.json")
+    if not trigger_error and os.path.exists(path):
+        return
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(_mock_metric_series(trigger_error), f, indent=2)
 
 

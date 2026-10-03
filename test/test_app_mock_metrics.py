@@ -41,6 +41,16 @@ class TestMockMetrics(unittest.TestCase):
         self.assertEqual(len(cpu), 1, "expected one sre-chaos-monkey CPU series")
         self.assertTrue(all(0.0 <= p["value"] <= 1.0 for p in cpu[0]["points"]))
 
+    def test_healthy_request_keeps_incident_metrics(self) -> None:
+        """A healthy call after an incident must not reset the saturated readings."""
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(chaos_monkey, "MOCK_DATA_DIR", tmp):
+            chaos_monkey._write_mock_metrics(trigger_error=True)
+            chaos_monkey._write_mock_metrics(trigger_error=False)
+            with open(f"{tmp}/metrics.json", encoding="utf-8") as f:
+                series = json.load(f)
+        db = [s for s in series if s["metric"]["labels"].get("database_id") == "db-primary"]
+        self.assertEqual(db[0]["points"][-1]["value"], chaos_monkey.DB_MAX_CONNECTIONS)
+
     def test_query_metrics_finds_what_the_app_wrote(self) -> None:
         """The SRE agent's query_metrics tool must match both series by its filters."""
         with tempfile.TemporaryDirectory() as tmp:
