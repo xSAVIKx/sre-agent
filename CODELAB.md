@@ -454,14 +454,19 @@ Antigravity CLI and the Antigravity 2.0 desktop app auto-discover. A skill is ju
 metadata file:
 
 ```markdown
-# SRE Incident Solver
+---
+name: sre_incident_solver
+description: Diagnoses distributed service failures in a GCP stack - scans Cloud Trace for slow
+  or failing requests, finds the bottleneck span, correlates logs, and writes a post-mortem.
+---
 
-* **Name**: `sre_incident_solver`
-* **Version**: `0.1.0`
-* **Entrypoint**: `sre_workflow.py`
-* **Description**: Inspect distributed trace latency, correlate logs, and
-  identify database connection timeouts in GCP.
+# SRE Incident Solver
+...
 ```
+
+The YAML frontmatter is what skill loaders read to decide when to use the skill. The Python
+modules next to it are generated from `sre_agent/` by `scripts/sync_skill.py`, so the skill never
+drifts from the engine the services run.
 
 Drop the skill folder into an Antigravity workspace and it appears on the visual canvas, ready to
 run — no service wiring required.

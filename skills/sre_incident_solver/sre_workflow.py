@@ -1,3 +1,5 @@
+# GENERATED from sre_agent/src/sre_agent/sre_workflow.py by scripts/sync_skill.py - do not edit.
+# Change the engine module instead, then run: uv run python scripts/sync_skill.py
 """ADK multi-agent workflow for SRE incident diagnostics.
 
 This module orchestrates two specialized ADK agents:
@@ -8,7 +10,16 @@ This module orchestrates two specialized ADK agents:
 import logging
 from typing import Any
 
-from .gcp_tools import analyze_trace_cascade, generate_post_mortem, get_trace_details, otel_trace, query_logs_by_trace
+from .gcp_tools import (
+    analyze_trace_cascade,
+    generate_post_mortem,
+    get_trace_details,
+    list_metric_descriptors,
+    otel_trace,
+    query_logs_by_trace,
+    query_metrics,
+)
+from sre_common import retry_async
 
 # Setup logger
 logger = logging.getLogger("sre_workflow")
@@ -78,13 +89,28 @@ log_correlator = AdkAgent(
         "You are a senior SRE debugging assistant. Analyze the trace details "
         "and correlated logs provided. Identify the failing span, the root cause "
         "of the issue (such as connection timeouts, resource exhaustion, or "
-        "logic errors), and recommend a mitigation plan."
+        "logic errors), and recommend a mitigation plan. "
+        "You have access to tools to query observability metrics (e.g., container CPU or memory utilization) "
+        "as well as trace cascade bottleneck analysis and incident post-mortem generation "
+        "if you need more context or need to build a post-mortem report."
     ),
+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
     model="gemini-3.8-flash",
 )
 
 
+@retry_async(max_retries=3, initial_delay=1.0)
+async def _fetch_topology_with_retry(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(inv_url, params=params, timeout=15.0)
+        resp.raise_for_status()
+        return resp.json()
+
+
 # 2. Orchestrate the diagnostic workflow
+@retry_async(max_retries=3, initial_delay=2.0)
 @otel_trace("_run_adk_diagnostics")
 async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) -> str:
     """Runs the real multi-agent ADK reasoning workflow.
@@ -124,6 +150,118 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         # Load project ID
         proj_id = project_id or os.environ.get("GCP_PROJECT")
 
+        # Fetch topology from Inventory Agent
+        topology = {}
+        try:
+            from .config import INVENTORY_AGENT_URL, IS_MOCK
+
+            inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
+            params = {"project_id": proj_id or "mock-project"}
+            if IS_MOCK:
+                import httpx
+
+                async with httpx.AsyncClient() as client:
+                    resp = await client.get(inv_url, params=params, timeout=2.0)
+                    if resp.status_code == 200:
+                        topology = resp.json()
+            else:
+                topology = await _fetch_topology_with_retry(inv_url, params)
+        except Exception as e:
+            if IS_MOCK:
+                # Expected in the standalone simulation: no Inventory Agent is running.
+                logger.info(f"Inventory Agent unavailable in mock mode ({e}); using the built-in mock topology.")
+            else:
+                logger.error(f"Failed to query Inventory Agent: {e}")
+
+        # Fallback topology in mock mode
+        if IS_MOCK and not topology.get("discovered_resources"):
+            topology = {
+                "discovered_resources": {
+                    "services": [
+                        {
+                            "name": "sre-chaos-monkey",
+                            "url": "https://sre-chaos-monkey-mock.run.app",
+                            "vpc_connector": "sre-vpc",
+                        },
+                        {"name": "sre-agent", "url": "https://sre-agent-mock.run.app"},
+                    ],
+                    "databases": [{"name": "(default)", "type": "FIRESTORE"}],
+                }
+            }
+
+        # Initialize Firestore and seed
+        from .firestore_strategy import _get_db
+        from .itinerary import find_matching_template, seed_templates_if_empty
+
+        db = await _get_db()
+        if db is not None:
+            await seed_templates_if_empty(db)
+
+        # Enrich discovered topology resources
+        enriched_catalog = []
+
+        # Helper to map database type to GCP resource type
+        def get_db_resource_type(db_type: str) -> str:
+            db_type = db_type.upper()
+            if "FIRESTORE" in db_type or "DATASTORE" in db_type:
+                return "datastore_database"
+            elif "SQL" in db_type or "POSTGRES" in db_type or "MYSQL" in db_type:
+                return "cloudsql_database"
+            return "cloudsql_database"
+
+        services = topology.get("discovered_resources", {}).get("services", [])
+        for svc in services:
+            svc_name = svc.get("name")
+            resource_type = "cloud_run_revision"
+            description_query = f"service: {svc_name}, type: {resource_type}"
+
+            template = await find_matching_template(db, resource_type, description_query)
+            if template:
+                helpers = template.get("helpers", {})
+                metrics = helpers.get("metrics", "").replace("{service_name}", svc_name)
+                logs = helpers.get("logs", "").replace("{service_name}", svc_name)
+                enriched_catalog.append(
+                    {
+                        "resource_name": svc_name,
+                        "resource_type": resource_type,
+                        "suggested_metrics_query": metrics,
+                        "suggested_logs_query": logs,
+                    }
+                )
+
+        databases = topology.get("discovered_resources", {}).get("databases", [])
+        for db_res in databases:
+            db_name = db_res.get("name")
+            db_type = db_res.get("type", "FIRESTORE")
+            resource_type = get_db_resource_type(db_type)
+            description_query = f"database: {db_name}, type: {resource_type}"
+
+            template = await find_matching_template(db, resource_type, description_query)
+            if template:
+                helpers = template.get("helpers", {})
+                metrics = helpers.get("metrics", "").replace("{database_id}", db_name)
+                logs = helpers.get("logs", "").replace("{database_id}", db_name)
+                enriched_catalog.append(
+                    {
+                        "resource_name": db_name,
+                        "resource_type": resource_type,
+                        "suggested_metrics_query": metrics,
+                        "suggested_logs_query": logs,
+                    }
+                )
+
+        enriched_catalog_md = ""
+        if enriched_catalog:
+            enriched_catalog_md = "\n=== Enriched Service Catalog (Pre-defined Diagnostic Helpers) ===\n"
+            enriched_catalog_md += "Use these pre-defined queries when using your query_metrics or logging tools instead of inventing them:\n"
+            for item in enriched_catalog:
+                enriched_catalog_md += f"- **Resource**: `{item['resource_name']}` ({item['resource_type']})\n"
+                if item["suggested_metrics_query"]:
+                    enriched_catalog_md += f"  - Suggested Metrics Filter: `{item['suggested_metrics_query']}`\n"
+                if item["suggested_logs_query"]:
+                    enriched_catalog_md += f"  - Suggested Logs Filter: `{item['suggested_logs_query']}`\n"
+            enriched_catalog_md += "\n"
+
         # Fetch telemetry
         trace_details = await get_trace_details(trace_id, proj_id)
         logs = await query_logs_by_trace(trace_id, proj_id)
@@ -131,6 +269,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         analysis_prompt = (
             f"Trace Spans:\n{trace_details}\n\n"
             f"Correlated Logs:\n{logs}\n\n"
+            f"{enriched_catalog_md}"
             f"Provide a root cause analysis and mitigation plan."
         )
         return analysis_prompt
@@ -144,11 +283,17 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         session_service = InMemorySessionService()
         runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
 
+        # Create session before running (InMemorySessionService requires explicit creation)
+        session = await session_service.create_session(
+            app_name="sre_diagnostics",
+            user_id="sre_user",
+        )
+
         msg = types.Content(
             parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")]
         )
         diagnosis = ""
-        async for event in runner.run_async(user_id="sre_user", session_id="session_1", new_message=msg):
+        async for event in runner.run_async(user_id="sre_user", session_id=session.id, new_message=msg):
             # Only the Log Correlator writes the report. The Trace Analyzer's output is the
             # bare trace ID, which would otherwise be prepended to it.
             if event.author == log_correlator.name and event.content and event.content.parts:
@@ -250,19 +395,73 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         trace_id = failing_trace.get("traceId", "unknown_trace_id")
         logger.info(f"[Simulation] Identified trace ID: {trace_id}")
 
-        # Fetch trace details and logs from mock files
+        # Fetch trace details, logs, and metrics from mock files
         trace_details = await get_trace_details(trace_id, project_id)
         logs = await query_logs_by_trace(trace_id, project_id)
+        metrics = await query_metrics(
+            filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="sre-chaos-monkey"',
+            project_id=project_id,
+        )
+        db_connections = await query_metrics(
+            filter_expression='metric.type="cloudsql.googleapis.com/database/postgresql/connection_count" AND resource.labels.database_id="db-primary"',
+            project_id=project_id,
+        )
 
         # Build mock SRE analysis response based on telemetry
         trace_data = json.loads(trace_details)
         log_data = json.loads(logs)
+
+        # Parse CPU utilization
+        cpu_info = "No CPU utilization data available."
+        try:
+            cpu_data = json.loads(metrics)
+            if isinstance(cpu_data, list) and len(cpu_data) > 0:
+                points = cpu_data[0].get("points", [])
+                if points:
+                    latest_val = points[-1].get("value", 0)
+                    cpu_info = f"{latest_val * 100:.1f}% (Healthy)"
+        except Exception as e:
+            logger.warning(f"Failed to parse mock CPU metrics in simulation: {e}")
+
+        # Parse DB connection count
+        db_conn_info = "No DB connection count data available."
+        try:
+            db_data = json.loads(db_connections)
+            if isinstance(db_data, list) and len(db_data) > 0:
+                points = db_data[0].get("points", [])
+                if points:
+                    latest_val = points[-1].get("value", 0)
+                    db_conn_info = f"{latest_val} connections (Warning: Max capacity reached)"
+        except Exception as e:
+            logger.warning(f"Failed to parse mock DB connection metrics in simulation: {e}")
 
         error_msg = "Unknown error"
         if isinstance(log_data, list):
             for log in log_data:
                 if log.get("severity") in ("ERROR", "CRITICAL"):
                     error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
+
+        # Simulate Itinerary Catalog enrichment in report
+        from .itinerary import DEFAULT_TEMPLATES
+
+        catalog_md = "## 🗺️ Enriched Service Catalog\n"
+        catalog_md += "Pre-defined diagnostic helper filters mapped via similarity lookup:\n"
+        for template in DEFAULT_TEMPLATES:
+            if template["resource_type"] == "cloud_run_revision":
+                # For sre-chaos-monkey
+                metrics = template["helpers"]["metrics"].replace("{service_name}", "sre-chaos-monkey")
+                logs = template["helpers"]["logs"].replace("{service_name}", "sre-chaos-monkey")
+                catalog_md += "- **Resource**: `sre-chaos-monkey` (cloud_run_revision)\n"
+                catalog_md += f"  - Metrics: `{metrics}`\n"
+                catalog_md += f"  - Logs: `{logs}`\n"
+            elif template["resource_type"] == "datastore_database":
+                # For (default)
+                metrics = template["helpers"]["metrics"].replace("{database_id}", "(default)")
+                logs = template["helpers"]["logs"].replace("{database_id}", "(default)")
+                catalog_md += "- **Resource**: `(default)` (datastore_database)\n"
+                catalog_md += f"  - Metrics: `{metrics}`\n"
+                catalog_md += f"  - Logs: `{logs}`\n"
+        catalog_md += "\n"
 
         # Call the new cascade analysis and post-mortem tools
         cascade_report = await analyze_trace_cascade(trace_id, project_id)
@@ -278,6 +477,10 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
             f"`/api/database` was slow and marked with an error status.\n\n"
             f"Correlating this trace with Cloud Logging logs revealed the following error message:\n"
             f"```\n{error_msg}\n```\n\n"
+            f"## 📊 Observability Metrics\n"
+            f"- **CPU Utilization (sre-chaos-monkey)**: `{cpu_info}`\n"
+            f"- **Database Connections (db-primary)**: `{db_conn_info}`\n\n"
+            f"{catalog_md}"
             f"{cascade_report}\n\n"
             f"## 🛠️ Recommended Mitigation\n"
             f"1. **Check Database Health**: Verify that the database instance `db-primary.gcp.internal` is running and accessible.\n"
@@ -287,7 +490,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         )
         return report
     except Exception as e:
-        return f"### Diagnostic Simulation Failure\nFailed to parse traces or logs during simulation: {e}"
+        return f"### Diagnostic Simulation Failure\nFailed to parse telemetry during simulation: {e}"
 
 
 @otel_trace("run_sre_diagnostics")
@@ -349,7 +552,7 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
 
     import os
 
-    if HAS_ADK and "GEMINI_API_KEY" in os.environ:
+    if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
         return await _run_adk_diagnostics(traces_json, project_id)
     else:
         return await _run_simulated_diagnostics(traces_json, project_id)

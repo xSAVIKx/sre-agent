@@ -1,3 +1,5 @@
+# GENERATED from sre_agent/src/sre_agent/registry.py by scripts/sync_skill.py - do not edit.
+# Change the engine module instead, then run: uv run python scripts/sync_skill.py
 """Module defining the extensible ToolRegistry for the SRE agent.
 
 This module provides decorators to dynamically register custom Python functions

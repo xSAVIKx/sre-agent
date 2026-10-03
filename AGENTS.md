@@ -25,7 +25,9 @@ The codebase is a **`uv` workspace** organized into five packages:
 
 > A portable copy of the diagnostics engine also lives under `skills/sre_incident_solver/` as an
 > Antigravity Agent Skill (auto-discovered by the Antigravity CLI / desktop app). The running
-> services import the `sre_agent` package — **add or modify tools there**, not in the skill mirror.
+> services import the `sre_agent` package — **add or modify tools there**, not in the skill mirror. The
+> mirror is generated: run `uv run python scripts/sync_skill.py` after changing `sre_agent`, and the
+> root test suite fails if you forget.
 
 ---
 
