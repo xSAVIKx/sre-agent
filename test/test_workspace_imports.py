@@ -53,7 +53,10 @@ PACKAGES: dict[str, tuple[str, ...]] = {
     # keep working, and it is the one tree with no tests of its own. Its three
     # modules import cleanly today; this keeps them that way.
     "skills": (
+        "sre_incident_solver.config",
+        "sre_incident_solver.firestore_strategy",
         "sre_incident_solver.gcp_tools",
+        "sre_incident_solver.itinerary",
         "sre_incident_solver.registry",
         "sre_incident_solver.sre_workflow",
     ),
