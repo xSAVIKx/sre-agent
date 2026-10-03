@@ -374,33 +374,49 @@ def _emit_progress(text: str) -> None:
 
 
 @retry_async(max_retries=3, initial_delay=2.0)
+async def _open_sre_stream(client: httpx.AsyncClient, url: str, payload: dict[str, Any]) -> httpx.Response:
+    """Opens the SSE response. Only this step is retried: once events flow, a retry
+    would re-run the whole (expensive, non-idempotent) diagnosis."""
+    response = await client.send(client.build_request("POST", url, json=payload), stream=True)
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError:
+        await response.aclose()
+        raise
+    return response
+
+
 async def _stream_from_sre_agent(url: str, payload: dict[str, Any]) -> str:
     """Calls the SRE sub-agent's A2A SSE endpoint and returns its final report.
 
     `thought` events are forwarded to the active `DiagnosisSink` as they arrive,
     so the chat UI shows live progress while the sub-agent works.
+
+    Raises:
+        RuntimeError: if the sub-agent reports an error or the stream ends without
+            a final `done` event.
     """
-    report = ""
     timeout = httpx.Timeout(10.0, read=300.0)
-    async with httpx.AsyncClient(timeout=timeout) as client, client.stream("POST", url, json=payload) as response:
-        response.raise_for_status()
-        async for line in response.aiter_lines():
-            if not line.startswith("data: "):
-                continue
-            try:
-                event = json.loads(line[6:])
-            except json.JSONDecodeError:
-                continue
-            kind = event.get("type")
-            if kind == "thought":
-                _emit_progress(event.get("text", ""))
-            elif kind == "chunk":
-                report += event.get("text", "")
-            elif kind == "done":
-                return event.get("response", "") or report
-            elif kind == "error":
-                raise RuntimeError(f"SRE sub-agent error: {event.get('detail', '')}")
-    return report
+    async with httpx.AsyncClient(timeout=timeout) as client:
+        response = await _open_sre_stream(client, url, payload)
+        try:
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+                kind = event.get("type")
+                if kind == "thought":
+                    _emit_progress(event.get("text", ""))
+                elif kind == "done":
+                    return event.get("response", "")
+                elif kind == "error":
+                    raise RuntimeError(f"SRE sub-agent error: {event.get('detail', '')}")
+        finally:
+            await response.aclose()
+    raise RuntimeError("SRE sub-agent stream ended without a final report")
 
 
 @register_tool
