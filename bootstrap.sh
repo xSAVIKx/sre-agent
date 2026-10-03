@@ -58,7 +58,8 @@ else
 fi
 
 # 5. Check if project exists or needs to be created
-PROJECT_EXISTS=$(gcloud projects list --filter="projectId:$PROJECT_ID" --format="value(projectId)" 2>/dev/null || true)
+# `describe`, not `list`: the project list is eventually consistent and misses projects created moments ago.
+PROJECT_EXISTS=$(gcloud projects describe "$PROJECT_ID" --format="value(projectId)" 2>/dev/null || true)
 if [ -z "$PROJECT_EXISTS" ]; then
     echo -e "${YELLOW}Project '$PROJECT_ID' does not exist in your account.${NC}"
     read -p "Would you like to create a new project named '$PROJECT_ID'? (y/n): " CREATE_PROJECT
@@ -83,7 +84,12 @@ if [ "$BILLING_ENABLED" != "True" ]; then
     gcloud billing accounts list --filter="open=true" --format="table(name.basename(), displayName)" || true
     read -p "Enter the billing account ID to link (leave empty to skip): " BILLING_ACCOUNT
     if [ -n "$BILLING_ACCOUNT" ]; then
-        gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"
+        if ! gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT"; then
+            echo -e "${RED}Error: could not link billing account $BILLING_ACCOUNT.${NC}"
+            echo "If the error mentions a billing quota, pick another account or unlink an unused project."
+            echo "Re-run ./bootstrap.sh with the same project ID once billing is sorted."
+            exit 1
+        fi
         echo -e "${GREEN}✓ Linked billing account $BILLING_ACCOUNT${NC}"
     else
         echo -e "${YELLOW}Skipped. deploy.sh will fail until billing is enabled for this project.${NC}"
