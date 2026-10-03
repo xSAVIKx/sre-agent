@@ -42,6 +42,14 @@ jobs:
 
       - run: uv run ruff format --check .
 
+      # The workshop's solution patches are derived from the finished code by
+      # workshop/build_steps.py. Regenerate them and fail if anything moved, so a
+      # change to a step's code cannot silently break the workshop.
+      - name: Workshop step patches are up to date
+        run: |
+          uv run python workshop/build_steps.py
+          git diff --exit-code -- workshop/
+
   test:
     name: tests (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
