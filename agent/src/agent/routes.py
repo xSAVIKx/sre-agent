@@ -303,16 +303,24 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
                 pump = asyncio.create_task(pump_chunks())
                 accumulated_text = ""
                 disconnected = False
+                finished = False
                 try:
                     while True:
-                        kind, item = await queue.get()
+                        try:
+                            # Wake up regularly so a long, silent tool call still
+                            # notices a client that went away.
+                            kind, item = await asyncio.wait_for(queue.get(), timeout=1.0)
+                        except TimeoutError:
+                            if await fastapi_request.is_disconnected():
+                                disconnected = True
+                                break
+                            continue
                         if kind == "end":
+                            finished = True
                             break
                         if kind == "error":
                             raise item
                         if await fastapi_request.is_disconnected():
-                            logger.info("Client disconnected. Aborting orchestrator chat stream.")
-                            await response.cancel()
                             disconnected = True
                             break
                         if kind == "progress":
@@ -328,8 +336,17 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
                             accumulated_text += item.text
                             yield _sse({"type": "chunk", "text": item.text})
                 finally:
+                    # Runs on normal exit, errors, and when Starlette cancels the
+                    # stream because the client disconnected: stop the agent turn
+                    # and the pump instead of leaving them running.
+                    if not finished:
+                        logger.info("Chat stream ended early (client gone or error). Cancelling the agent turn.")
+                        with contextlib.suppress(Exception, asyncio.CancelledError):
+                            await asyncio.shield(response.cancel())
                     if not pump.done():
                         pump.cancel()
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await pump
 
                 # Stream complete
                 if not disconnected and not await fastapi_request.is_disconnected():
