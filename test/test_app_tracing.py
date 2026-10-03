@@ -1,15 +1,21 @@
-"""Tests for how `app/main.py` parents and marks its manual OpenTelemetry spans.
+"""Tests for how `app/main.py` traces requests and reports errors.
 
 FastAPI 0.142+ creates its own request spans. When the app also parented its manual spans
 on the caller's `traceparent` header, each request produced two sibling span hierarchies,
 and the SRE agent's cascade analysis named a framework span as the bottleneck.
 """
 
+import asyncio
+import contextlib
+import io
 import pathlib
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
+import httpx
+from fastapi import HTTPException
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 
@@ -52,6 +58,42 @@ class TestAppSpanParenting(unittest.TestCase):
         self.assertEqual(trace.StatusCode.ERROR, span.status.status_code)
         self.assertEqual("ConnectionTimeoutError", span.attributes["error.type"])
         self.assertEqual("timed out", span.attributes["error.message"])
+
+
+class TestAppErrorReporting(unittest.TestCase):
+    """Covers how errors are passed up from the database to the gateway's response."""
+
+    DB_ERROR = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
+
+    def test_downstream_error_reads_detail(self) -> None:
+        """The caller reports the downstream service's error, whether detail is a string or a dict."""
+        request = httpx.Request("GET", "http://localhost:8080/api/database")
+        for body in ({"detail": self.DB_ERROR}, {"detail": {"error": self.DB_ERROR, "trace_id": TRACE_ID}}):
+            response = httpx.Response(500, json=body, request=request)
+            self.assertEqual(self.DB_ERROR, chaos_monkey._downstream_error(response))
+
+    def test_downstream_error_without_json_body(self) -> None:
+        """A non-JSON error response still produces a message naming the status and path."""
+        request = httpx.Request("GET", "http://localhost:8080/api/database")
+        response = httpx.Response(502, text="Bad Gateway", request=request)
+        self.assertEqual("HTTP 502 from /api/database", chaos_monkey._downstream_error(response))
+
+    def test_exception_message_never_empty(self) -> None:
+        """httpx timeouts have an empty message; the exception type stands in for it."""
+        self.assertEqual("ReadTimeout", chaos_monkey._exception_message(httpx.ReadTimeout("")))
+        self.assertEqual("boom", chaos_monkey._exception_message(ValueError("boom")))
+
+    def test_gateway_response_carries_database_error(self) -> None:
+        """In mock mode, the gateway's 500 response names the database error, not a generic one."""
+        with (
+            tempfile.TemporaryDirectory() as mock_dir,
+            mock.patch.object(chaos_monkey, "IS_MOCK", True),
+            mock.patch.object(chaos_monkey, "MOCK_DATA_DIR", mock_dir),
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            asyncio.run(chaos_monkey.gateway(mock.Mock(), trigger_error=True))
+        self.assertEqual(self.DB_ERROR, raised.exception.detail["error"])
 
 
 if __name__ == "__main__":
