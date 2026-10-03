@@ -8,6 +8,8 @@ from unittest import mock
 
 from sre_agent.gcp_tools import analyze_trace_cascade, generate_post_mortem, list_metric_descriptors, query_metrics
 
+from sre_agent import gcp_tools
+
 # Checked-in telemetry fixtures. These are what `app/main.py:_generate_mock_trace`
 # and `app/main.py:_log_structured` write into `mock_telemetry_data/` when the
 # chaos-monkey app is driven with `trigger_error=True` - identically, bar the random
@@ -127,6 +129,30 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
             self.assertIn(f"**Trace ID**: `{FIXTURE_TRACE_ID}`", report)
             self.assertIn("**Impact Duration**: `10270 ms`", report)
             self.assertIn("**Root Service**: `gateway`", report)
+
+    async def test_generate_post_mortem_tolerates_payloadless_error_log(self) -> None:
+        """Verifies an ERROR entry with neither payload does not crash the post-mortem.
+
+        Cloud Run's own request log for a 500 response carries the trace ID and ERROR
+        severity but no text or JSON payload, so real Cloud Logging returns it with
+        both payload fields set to None.
+        """
+        real_query_logs = gcp_tools.query_logs_by_trace
+
+        async def query_logs_with_payloadless_entry(trace_id: str, project_id: str | None = None) -> str:
+            logs = json.loads(await real_query_logs(trace_id, project_id))
+            logs.append({"severity": "ERROR", "text_payload": None, "json_payload": None})
+            return json.dumps(logs)
+
+        with (
+            mock.patch("sre_agent.gcp_tools.IS_MOCK", True),
+            mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR),
+            mock.patch("sre_agent.gcp_tools.query_logs_by_trace", query_logs_with_payloadless_entry),
+        ):
+            report = await generate_post_mortem(FIXTURE_TRACE_ID)
+            self.assertIn("Incident Post-Mortem", report)
+            # The payload-less entry must not overwrite the error message found before it.
+            self.assertIn("Gateway received error from backend: ConnectionTimeoutError", report)
 
     async def test_analyze_trace_cascade_unknown_trace(self) -> None:
         """Verifies analyze_trace_cascade reports a clean error when the trace is absent."""

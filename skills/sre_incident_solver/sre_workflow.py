@@ -260,7 +260,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         if isinstance(log_data, list):
             for log in log_data:
                 if log.get("severity") in ("ERROR", "CRITICAL"):
-                    error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
+                    error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
 
         # Call the new cascade analysis and post-mortem tools
         cascade_report = await analyze_trace_cascade(trace_id, project_id)

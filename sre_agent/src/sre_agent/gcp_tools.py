@@ -923,7 +923,7 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
     if isinstance(logs, list) and logs:
         for log in logs:
             if log.get("severity") in ("ERROR", "CRITICAL"):
-                error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
+                error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
             if log.get("timestamp"):
                 trigger_time = log.get("timestamp")
 
