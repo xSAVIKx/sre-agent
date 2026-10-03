@@ -6,9 +6,12 @@ to the SRE Sub-Agent, registers the A2A tool, and establishes safety policies.
 """
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -40,6 +43,37 @@ try:
     HAS_ANTIGRAVITY = "GEMINI_API_KEY" in os.environ
 except ImportError:
     HAS_ANTIGRAVITY = False
+
+
+@dataclass(frozen=True)
+class MockPolicy:
+    """Simulation-mode stand-in for an Antigravity policy rule."""
+
+    tool: str
+    decision: str  # "allow" | "deny" | "ask_user"
+
+
+def evaluate_mock_policy(policies: list[Any], tool_name: str) -> str:
+    """Decides a tool call the way the Antigravity harness does, for simulation mode.
+
+    Mirrors the SDK precedence: specific deny > specific ask > specific allow >
+    wildcard deny > wildcard ask > wildcard allow. With no matching rule the call
+    is denied, so a missing policy fails closed.
+
+    Args:
+        policies: The `MockPolicy` rules from the agent config.
+        tool_name: The name of the tool the model wants to call.
+
+    Returns:
+        "allow", "deny" or "ask_user".
+    """
+    rules = [p for p in policies if isinstance(p, MockPolicy)]
+    for target in (tool_name, "*"):
+        for decision in ("deny", "ask_user", "allow"):
+            if any(p.tool == target and p.decision == decision for p in rules):
+                return decision
+    return "deny"
+
 
 # Global database to persist mock session history in local simulation mode
 MOCK_HISTORY_DB: dict[str, list[dict[str, Any]]] = {}
@@ -116,52 +150,39 @@ if not HAS_ANTIGRAVITY:
             }
 
     class MockResponse:
-        def __init__(self, is_diag: bool, prompt: str, conversation: Any) -> None:
+        def __init__(self, is_diag: bool, prompt: str, conversation: Any, policies: list[Any]) -> None:
             self._is_diag = is_diag
             self.prompt = prompt
             self.conversation = conversation
+            self.policies = policies
             self._text = ""
 
         @property
         def chunks(self) -> Any:
             async def _gen():
                 if self._is_diag:
-                    yield Thought(text="Initiating A2A connection to SRE Diagnostics Sub-Agent...")
-                    await asyncio.sleep(0.5)
-                    yield Thought(text="Contacting SRE Agent HTTP/SSE endpoint...")
-                    await asyncio.sleep(0.5)
-
-                    # Simulate streaming of thoughts from SRE agent
-                    yield Thought(text="SRE Agent: Querying traces from project...")
-                    await asyncio.sleep(0.8)
-                    yield Thought(text="SRE Agent: Executing ADK workflow logic...")
-                    await asyncio.sleep(0.8)
-
-                    fallback_diagnosis = (
-                        "# 🚨 Simulated Diagnostics Report\n\n"
-                        "This is a simulated fallback report for local testing.\n"
-                        "Anomalous trace found with latency spiked in child database spans."
-                    )
-                    # Delegate to the real in-process SRE workflow so the offline
-                    # simulation surfaces the full cascade + post-mortem report,
-                    # just like the deployed orchestrator calling its diagnose_sre tool.
-                    if os.getenv("MOCK_GCP", "false").lower() == "true":
+                    # Stand-in for the model deciding to call `diagnose_sre`. The call
+                    # still goes through the configured policies, exactly as it would
+                    # in the real Antigravity harness.
+                    yield ToolCall(name="diagnose_sre", args={"prompt": self.prompt})
+                    decision = evaluate_mock_policy(self.policies, "diagnose_sre")
+                    if decision == "allow":
                         try:
                             diagnosis = await diagnose_sre(self.prompt)
                         except Exception as diag_err:
                             logger.error(f"Mock orchestrator failed to run diagnose_sre: {diag_err}")
-                            diagnosis = fallback_diagnosis
+                            diagnosis = f"Error: diagnose_sre failed: {diag_err!s}"
                     else:
-                        diagnosis = fallback_diagnosis
+                        logger.warning(f"Policy decision for diagnose_sre is '{decision}'. Tool call blocked.")
+                        diagnosis = (
+                            f"The `diagnose_sre` tool call was blocked by the safety policy (decision: {decision})."
+                        )
                     self._text = diagnosis
-
-                    yield Thought(text="Orchestration complete. Streaming report...")
-                    await asyncio.sleep(0.5)
 
                     words = diagnosis.split(" ")
                     for i, word in enumerate(words):
                         yield Text(text=word + (" " if i < len(words) - 1 else ""))
-                        await asyncio.sleep(0.02)
+                        await asyncio.sleep(0.005)
 
                     model_step = MockStep(
                         step_index=len(self.conversation._steps),
@@ -170,7 +191,7 @@ if not HAS_ANTIGRAVITY:
                         target="TARGET_USER",
                         status="DONE",
                         content=self._text,
-                        thinking="Orchestration complete. Streaming report...",
+                        thinking="Delegated SRE diagnostics to the diagnose_sre tool.",
                         tool_calls=[{"name": "diagnose_sre", "args": {"prompt": self.prompt}}],
                     )
                     self.conversation._steps.append(model_step)
@@ -237,8 +258,8 @@ if not HAS_ANTIGRAVITY:
             self.conversation._steps.append(user_step)
 
             class MockResponseWrapper:
-                def __init__(self, is_diag: bool, prompt: str, conversation: Any) -> None:
-                    self.response = MockResponse(is_diag, prompt, conversation)
+                def __init__(self, is_diag: bool, prompt: str, conversation: Any, policies: list[Any]) -> None:
+                    self.response = MockResponse(is_diag, prompt, conversation, policies)
 
                 @property
                 def chunks(self):
@@ -253,7 +274,7 @@ if not HAS_ANTIGRAVITY:
                 async def cancel(self):
                     pass
 
-            return MockResponseWrapper(is_diag, prompt, self.conversation)
+            return MockResponseWrapper(is_diag, prompt, self.conversation, self.config.policies)
 
         @property
         def conversation_id(self) -> str | None:
@@ -279,13 +300,13 @@ if not HAS_ANTIGRAVITY:
             self.hooks = hooks or []
 
     def deny(target: str) -> Any:
-        return f"deny:{target}"
+        return MockPolicy(tool=target, decision="deny")
 
     def allow(target: str) -> Any:
-        return f"allow:{target}"
+        return MockPolicy(tool=target, decision="allow")
 
     def ask_user(target: str, *, handler: Any = None) -> Any:
-        return f"ask_user:{target}"
+        return MockPolicy(tool=target, decision="ask_user")
 
     class OnToolErrorHook:
         pass
@@ -324,26 +345,62 @@ class SreToolErrorHook(OnToolErrorHook):
         return f"[System: Failed to call SRE Diagnostics Sub-Agent: {data}]"
 
 
-@retry_async(max_retries=3, initial_delay=2.0)
-async def _post_to_sre_agent(url: str, payload: dict[str, Any]) -> str:
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, json=payload, timeout=60.0)
-        response.raise_for_status()
+@dataclass
+class DiagnosisSink:
+    """Per-request channel between the `diagnose_sre` tool and the chat stream.
 
-        # Consume SSE stream events to extract final report
-        accumulated_report = ""
-        for line in response.iter_lines():
-            if line.startswith("data: "):
-                try:
-                    event_data = json.loads(line[6:])
-                    if event_data.get("type") == "done":
-                        accumulated_report = event_data.get("response", "")
-                        break
-                    elif event_data.get("type") == "chunk":
-                        accumulated_report += event_data.get("text", "")
-                except Exception:
-                    pass
-        return accumulated_report
+    The route installs one in `diagnosis_sink` before the agent starts; the tool
+    pushes the SRE sub-agent's progress messages into it while it waits, and
+    leaves the full report behind so the UI can render the post-mortem even if
+    the model only summarizes it.
+    """
+
+    on_progress: Callable[[str], None] = lambda _text: None
+    report: str = ""
+    progress: list[str] = field(default_factory=list)
+
+    def emit(self, text: str) -> None:
+        self.progress.append(text)
+        self.on_progress(text)
+
+
+diagnosis_sink: contextvars.ContextVar[DiagnosisSink | None] = contextvars.ContextVar("diagnosis_sink", default=None)
+
+
+def _emit_progress(text: str) -> None:
+    sink = diagnosis_sink.get()
+    if sink is not None:
+        sink.emit(text)
+
+
+@retry_async(max_retries=3, initial_delay=2.0)
+async def _stream_from_sre_agent(url: str, payload: dict[str, Any]) -> str:
+    """Calls the SRE sub-agent's A2A SSE endpoint and returns its final report.
+
+    `thought` events are forwarded to the active `DiagnosisSink` as they arrive,
+    so the chat UI shows live progress while the sub-agent works.
+    """
+    report = ""
+    timeout = httpx.Timeout(10.0, read=300.0)
+    async with httpx.AsyncClient(timeout=timeout) as client, client.stream("POST", url, json=payload) as response:
+        response.raise_for_status()
+        async for line in response.aiter_lines():
+            if not line.startswith("data: "):
+                continue
+            try:
+                event = json.loads(line[6:])
+            except json.JSONDecodeError:
+                continue
+            kind = event.get("type")
+            if kind == "thought":
+                _emit_progress(event.get("text", ""))
+            elif kind == "chunk":
+                report += event.get("text", "")
+            elif kind == "done":
+                return event.get("response", "") or report
+            elif kind == "error":
+                raise RuntimeError(f"SRE sub-agent error: {event.get('detail', '')}")
+    return report
 
 
 @register_tool
@@ -358,48 +415,63 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
     Returns:
         A markdown-formatted SRE incident diagnosis report.
     """
-    if os.getenv("MOCK_GCP", "false").lower() == "true":
-        logger.info("MOCK_GCP is true. Running SRE sub-agent diagnostics workflow in-process.")
+    sre_agent_url = os.getenv("SRE_AGENT_URL")
+    mock_mode = os.getenv("MOCK_GCP", "false").lower() == "true"
+
+    # Standalone simulation (simulate_incident.py): no sub-agent service is
+    # running, so run the same workflow in-process. When SRE_AGENT_URL is set
+    # (docker-compose, Cloud Run) always delegate over A2A.
+    if mock_mode and not sre_agent_url:
+        logger.info("MOCK_GCP is true and SRE_AGENT_URL is unset. Running SRE workflow in-process.")
+        _emit_progress("Running the SRE diagnostics workflow in-process (simulation mode)...")
         try:
             from sre_agent.gcp_tools import query_traces
             from sre_agent.sre_workflow import run_sre_diagnostics
 
             resolved_project = project_id or os.environ.get("GCP_PROJECT") or "simulation-project-123"
             traces_json = await query_traces(project_id=resolved_project, limit=10)
-            return await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
+            report = await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
         except Exception as mock_err:
             logger.error(f"Failed to run in-process mock diagnostics: {mock_err}")
-            return (
-                "# 🚨 Simulated Diagnostics Report (In-Process Fallback)\n\n"
-                "This is a simulated fallback report for local testing.\n"
-                "Anomalous trace found with latency spiked in child database spans."
-            )
+            report = f"Error: in-process SRE diagnostics failed: {mock_err!s}"
+    else:
+        url = f"{sre_agent_url or 'http://sre-agent:8080'}/v1/agents/sre/messages"
+        payload = {"prompt": prompt, "project_id": project_id, "refresh": refresh}
+        logger.info(f"Orchestrating A2A call to SRE Agent: {url}")
+        _emit_progress("Contacting the SRE diagnostics sub-agent...")
+        try:
+            report = await _stream_from_sre_agent(url, payload)
+        except Exception as e:
+            logger.error(f"Failed to communicate with SRE sub-agent: {e}")
+            report = f"Error: Failed to contact SRE Sub-Agent after retries: {e!s}"
 
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
-    url = f"{sre_agent_url}/v1/agents/sre/messages"
-    payload = {"prompt": prompt, "project_id": project_id, "refresh": refresh}
+    sink = diagnosis_sink.get()
+    if sink is not None:
+        sink.report = report
+    return report
 
-    logger.info(f"Orchestrating A2A POST to SRE Agent: {url}")
-    try:
-        return await _post_to_sre_agent(url, payload)
-    except Exception as e:
-        logger.error(f"Failed to communicate with SRE sub-agent: {e}")
-        return f"Error: Failed to contact SRE Sub-Agent after retries: {e!s}"
+
+SYSTEM_INSTRUCTIONS = (
+    "You are a user-facing Orchestrator agent.\n"
+    "Your role is to assist the user. If the user requests SRE incident diagnostics, "
+    "trace analysis, error log reviews, or database debugging, delegate the task "
+    "immediately to the SRE diagnostics agent using the 'diagnose_sre' tool and present "
+    "the final report to the user verbatim, including any post-mortem section. "
+    "Do not attempt to run diagnostics yourself."
+)
+
+
+def build_safety_policies() -> list[Any]:
+    """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""
+    return [deny("*"), allow("diagnose_sre")]
 
 
 def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:
     tools: list[Any] = []
     tools.extend(registry.get_tools())
 
-    safety_policies = [deny("*"), allow("diagnose_sre")]
-
-    system_instructions = (
-        "You are a user-facing Orchestrator agent.\n"
-        "Your role is to assist the user. If the user requests SRE incident diagnostics, "
-        "trace analysis, error log reviews, or database debugging, delegate the task "
-        "immediately to the SRE diagnostics agent using the 'diagnose_sre' tool and present "
-        "the final report to the user. Do not attempt to run diagnostics yourself."
-    )
+    safety_policies = build_safety_policies()
+    system_instructions = SYSTEM_INSTRUCTIONS
 
     return LocalAgentConfig(
         system_instructions=system_instructions, tools=tools, policies=safety_policies, hooks=[SreToolErrorHook()]
@@ -412,15 +484,8 @@ def load_firestore_agent_config(
     tools: list[Any] = []
     tools.extend(registry.get_tools())
 
-    safety_policies = [deny("*"), allow("diagnose_sre")]
-
-    system_instructions = (
-        "You are a user-facing Orchestrator agent.\n"
-        "Your role is to assist the user. If the user requests SRE incident diagnostics, "
-        "trace analysis, error log reviews, or database debugging, delegate the task "
-        "immediately to the SRE diagnostics agent using the 'diagnose_sre' tool and present "
-        "the final report to the user. Do not attempt to run diagnostics yourself."
-    )
+    safety_policies = build_safety_policies()
+    system_instructions = SYSTEM_INSTRUCTIONS
 
     if HAS_ANTIGRAVITY:
         from agent.firestore_strategy import FirestoreAgentConfig
