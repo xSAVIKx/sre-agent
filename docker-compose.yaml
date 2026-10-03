@@ -20,7 +20,7 @@ services:
       - "8083:8080"
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
-      - GCP_PROJECT=${GCP_PROJECT}
+      - GCP_PROJECT=${GCP_PROJECT:-local-dev}
       - MOCK_GCP=true
     depends_on:
       firestore-emulator:
@@ -36,7 +36,9 @@ services:
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
       - INVENTORY_AGENT_URL=http://inventory-agent:8080
-      - GCP_PROJECT=${GCP_PROJECT}
+      - GCP_PROJECT=${GCP_PROJECT:-local-dev}
+      # Optional: with a key the sub-agent runs the real ADK + Gemini tier.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - MOCK_GCP=true
     volumes:
       - mock-telemetry:/workspace/mock_telemetry_data
@@ -55,9 +57,12 @@ services:
       - "8080:8080"
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      # Setting SRE_AGENT_URL makes diagnose_sre call the sub-agent over A2A
+      # instead of running the workflow in-process.
       - SRE_AGENT_URL=http://sre-agent:8080
-      - GCP_PROJECT=${GCP_PROJECT}
-      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GCP_PROJECT=${GCP_PROJECT:-local-dev}
+      # Optional: without a key the Orchestrator runs its simulated agent.
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - MOCK_GCP=true
     depends_on:
       firestore-emulator:
@@ -73,7 +78,7 @@ services:
     ports:
       - "8081:8080"
     environment:
-      - GCP_PROJECT=${GCP_PROJECT}
+      - GCP_PROJECT=${GCP_PROJECT:-local-dev}
       - MOCK_GCP=true
     volumes:
       - mock-telemetry:/workspace/mock_telemetry_data

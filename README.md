@@ -157,8 +157,14 @@ This single command:
 Want the full multi-service experience (Orchestrator + SRE + Inventory + Firestore emulator + target app) with the web chat UI?
 
 ```bash
-docker-compose up --build   # then open the chat at /chat
+docker compose up --build                                   # GEMINI_API_KEY is optional
+curl "http://localhost:8081/api/gateway?trigger_error=true" # trigger an incident in the target app
+# then open http://localhost:8080/chat and ask: "Diagnose the recent latency spikes"
 ```
+
+Without `GEMINI_API_KEY` every agent runs its deterministic simulated tier; with it, the
+Orchestrator and the SRE sub-agent use Gemini. Either way, the chat goes through the
+Orchestrator's deny-by-default policy and reaches the SRE sub-agent over A2A.
 
 ---
 

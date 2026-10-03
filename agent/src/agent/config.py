@@ -40,7 +40,8 @@ try:
     from google.antigravity.hooks.policy import allow, ask_user, deny
     from google.antigravity.types import Text, Thought, ToolCall, ToolResult
 
-    HAS_ANTIGRAVITY = "GEMINI_API_KEY" in os.environ
+    # An empty value (e.g. docker-compose's `${GEMINI_API_KEY:-}`) counts as no key.
+    HAS_ANTIGRAVITY = bool(os.environ.get("GEMINI_API_KEY"))
 except ImportError:
     HAS_ANTIGRAVITY = False
 
