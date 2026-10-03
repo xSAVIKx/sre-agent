@@ -71,24 +71,19 @@ flowchart LR
 
 ## 🟢 Level 1 — Warm-Ups (Tools & Reports)
 
-### Exercise 1 · Make the metrics real 🟢
+### Exercise 1 · Make the metrics tell the truth 🟢
 
-**Goal.** Run the simulation today and the report says *"No CPU utilization data available."* —
-because `simulate_incident.py` never writes a `metrics.json`. Fix that so the **Observability
-Metrics** section shows real numbers.
+**Goal.** The [workshop](workshop/README.md) (step 2) made the target app write `metrics.json`, so
+the **Observability Metrics** section now shows numbers. But its verdicts are hard-coded: CPU is
+always "(Healthy)" and the connection count always says "Max capacity reached". Derive them from
+the data instead.
 
-**Start here.** `app/main.py` (write a `metrics.json` alongside the trace/log files when an incident
-is generated) and `mock_telemetry_data/`. Mirror the shape that [
-`query_metrics`](sre_agent/src/sre_agent/gcp_tools.py) expects (`metric.type`,
-`metric.labels.service_name`/`database_id`, `points[].value`) —
-`sre_agent/test/test_gcp_tools.py::test_query_metrics_mock` shows the exact schema.
+**Start here.** `_run_simulated_diagnostics` in
+[`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py). Compare the latest DB connection
+reading with a configurable pool size, and the CPU fraction with a threshold.
 
-**Hints.** The simulated report in `sre_workflow.py` already queries CPU for `sre-chaos-monkey` and
-a connection count for `db-primary`; you just need matching mock points so a saturated DB pool shows
-up.
-
-**Done when.** `uv run simulate_incident.py` prints a real CPU % and DB connection count in the
-report instead of the "No data" placeholders.
+**Done when.** A healthy run (`trigger_error=False` in `app/main.py`) reports a healthy pool, and the
+incident run still reports saturation. Add a unit test for each.
 
 ---
 
@@ -124,18 +119,18 @@ SLO Impact"** block.
 
 ---
 
-### Exercise 4 · Surface severity in the web UI 🟢
+### Exercise 4 · Carry severity into the post-mortem 🟢
 
-**Goal.** Color-code incidents. Map the bottleneck's contribution % to a severity (e.g. ≥90% = SEV1)
-and render a colored badge in the chat.
+**Goal.** Workshop step 5 renders a SEV1/2/3 badge in the chat, but the downloaded
+`post_mortem.md` doesn't mention severity. Put it in the document itself, and color the chat's
+"Incident Detected" alert by severity too.
 
-**Start here.** Add a `severity` field where the A2UI components are assembled in [
-`a2ui_translator.py`](agent/src/agent/a2ui_translator.py), then render it in the component switch
-in [`agent/src/agent/index.html`](agent/src/agent/index.html) (follow the existing `case 'alert':` /
-`case 'download_button':` pattern).
+**Start here.** `classify_severity` in [`a2ui_translator.py`](agent/src/agent/a2ui_translator.py)
+and `generate_post_mortem` in [`gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py). Keep the exact
+`# 🚨 Incident Post-Mortem` heading: the translator depends on it.
 
-**Done when.** A SEV1 incident shows a red badge; a healthy report shows green. Add an assertion to
-`test_a2ui_translator.py`.
+**Done when.** The downloaded post-mortem has a `Severity` line in its overview, and a test covers
+it.
 
 ---
 
