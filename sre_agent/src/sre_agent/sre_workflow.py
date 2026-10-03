@@ -7,14 +7,15 @@ This module orchestrates two specialized ADK agents:
 
 import logging
 from typing import Any
+
 from sre_agent.gcp_tools import (
+    analyze_trace_cascade,
+    generate_post_mortem,
     get_trace_details,
-    query_logs_by_trace,
-    query_metrics,
     list_metric_descriptors,
     otel_trace,
-    analyze_trace_cascade,
-    generate_post_mortem
+    query_logs_by_trace,
+    query_metrics,
 )
 from sre_common import retry_async
 
@@ -24,20 +25,21 @@ logger = logging.getLogger("sre_workflow")
 # Resilient imports for google-adk
 try:
     from google.adk import Agent as AdkAgent
-    from google.adk import Workflow as AdkWorkflow
-    from google.adk.workflow import node, START
     from google.adk import Context
+    from google.adk import Workflow as AdkWorkflow
+    from google.adk.workflow import START, node
+
     HAS_ADK = True
 except ImportError as e:
     HAS_ADK = False
     logger.warning(
-        f"google-adk is not installed or failed to import. Using simulated agent fallbacks. Error: {e}",
-        exc_info=True
+        f"google-adk is not installed or failed to import. Using simulated agent fallbacks. Error: {e}", exc_info=True
     )
 
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""
-        def __init__(self, name: str, instruction: str, model: str = "gemini-3-flash-preview") -> None:
+
+        def __init__(self, name: str, instruction: str, model: str = "gemini-3.8-flash") -> None:
             self.name = name
             self.instruction = instruction
             self.model = model
@@ -48,6 +50,7 @@ except ImportError as e:
 
     class AdkWorkflow:  # type: ignore
         """Mock ADK Workflow for resilience."""
+
         def __init__(self, name: str, edges: list[Any]) -> None:
             self.name = name
             self.edges = edges
@@ -55,12 +58,15 @@ except ImportError as e:
     def node(*args: Any, **kwargs: Any) -> Any:
         def decorator(func: Any) -> Any:
             return func
+
         if args and callable(args[0]):
             return args[0]
         return decorator
 
     START = "START"
-    class Context: pass  # type: ignore
+
+    class Context:  # type: ignore
+        """Mock ADK Context for resilience."""
 
 
 # 1. Define SRE specialized ADK agents
@@ -72,7 +78,7 @@ trace_analyzer = AdkAgent(
         "Extract its traceId and return ONLY the raw 32-character hex traceId. "
         "Do not include any extra text, code block backticks, or explanation."
     ),
-    model="gemini-3-flash-preview"
+    model="gemini-3.8-flash",
 )
 
 log_correlator = AdkAgent(
@@ -87,13 +93,14 @@ log_correlator = AdkAgent(
         "if you need more context or need to build a post-mortem report."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-    model="gemini-3-flash-preview"
+    model="gemini-3.8-flash",
 )
 
 
 @retry_async(max_retries=3, initial_delay=1.0)
 async def _fetch_topology_with_retry(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
     import httpx
+
     async with httpx.AsyncClient() as client:
         resp = await client.get(inv_url, params=params, timeout=15.0)
         resp.raise_for_status()
@@ -116,10 +123,11 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
     Returns:
         The markdown diagnosis report from the Log Correlator agent.
     """
+    import os
+
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
-    import os
 
     @node(name="fetch_telemetry")
     async def fetch_telemetry(ctx: Context, node_input: Any) -> str:
@@ -133,7 +141,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             trace_id = "".join(p.text for p in node_input.parts if p.text)
         elif isinstance(node_input, dict) and "output" in node_input:
             trace_id = str(node_input["output"])
-        
+
         trace_id = trace_id.strip()
         logger.info(f"Workflow: Fetching telemetry for trace ID '{trace_id}'")
 
@@ -144,10 +152,12 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         topology = {}
         try:
             from sre_agent.config import INVENTORY_AGENT_URL, IS_MOCK
+
             inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
             params = {"project_id": proj_id or "mock-project"}
             if IS_MOCK:
                 import httpx
+
                 async with httpx.AsyncClient() as client:
                     resp = await client.get(inv_url, params=params, timeout=2.0)
                     if resp.status_code == 200:
@@ -162,26 +172,28 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             topology = {
                 "discovered_resources": {
                     "services": [
-                        {"name": "sre-chaos-monkey", "url": "https://sre-chaos-monkey-mock.run.app", "vpc_connector": "sre-vpc"},
-                        {"name": "sre-agent", "url": "https://sre-agent-mock.run.app"}
+                        {
+                            "name": "sre-chaos-monkey",
+                            "url": "https://sre-chaos-monkey-mock.run.app",
+                            "vpc_connector": "sre-vpc",
+                        },
+                        {"name": "sre-agent", "url": "https://sre-agent-mock.run.app"},
                     ],
-                    "databases": [
-                        {"name": "(default)", "type": "FIRESTORE"}
-                    ]
+                    "databases": [{"name": "(default)", "type": "FIRESTORE"}],
                 }
             }
 
         # Initialize Firestore and seed
         from sre_agent.firestore_strategy import _get_db
-        from sre_agent.itinerary import seed_templates_if_empty, find_matching_template
-        
+        from sre_agent.itinerary import find_matching_template, seed_templates_if_empty
+
         db = await _get_db()
         if db is not None:
             await seed_templates_if_empty(db)
 
         # Enrich discovered topology resources
         enriched_catalog = []
-        
+
         # Helper to map database type to GCP resource type
         def get_db_resource_type(db_type: str) -> str:
             db_type = db_type.upper()
@@ -196,18 +208,20 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             svc_name = svc.get("name")
             resource_type = "cloud_run_revision"
             description_query = f"service: {svc_name}, type: {resource_type}"
-            
+
             template = await find_matching_template(db, resource_type, description_query)
             if template:
                 helpers = template.get("helpers", {})
                 metrics = helpers.get("metrics", "").replace("{service_name}", svc_name)
                 logs = helpers.get("logs", "").replace("{service_name}", svc_name)
-                enriched_catalog.append({
-                    "resource_name": svc_name,
-                    "resource_type": resource_type,
-                    "suggested_metrics_query": metrics,
-                    "suggested_logs_query": logs
-                })
+                enriched_catalog.append(
+                    {
+                        "resource_name": svc_name,
+                        "resource_type": resource_type,
+                        "suggested_metrics_query": metrics,
+                        "suggested_logs_query": logs,
+                    }
+                )
 
         databases = topology.get("discovered_resources", {}).get("databases", [])
         for db_res in databases:
@@ -215,18 +229,20 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             db_type = db_res.get("type", "FIRESTORE")
             resource_type = get_db_resource_type(db_type)
             description_query = f"database: {db_name}, type: {resource_type}"
-            
+
             template = await find_matching_template(db, resource_type, description_query)
             if template:
                 helpers = template.get("helpers", {})
                 metrics = helpers.get("metrics", "").replace("{database_id}", db_name)
                 logs = helpers.get("logs", "").replace("{database_id}", db_name)
-                enriched_catalog.append({
-                    "resource_name": db_name,
-                    "resource_type": resource_type,
-                    "suggested_metrics_query": metrics,
-                    "suggested_logs_query": logs
-                })
+                enriched_catalog.append(
+                    {
+                        "resource_name": db_name,
+                        "resource_type": resource_type,
+                        "suggested_metrics_query": metrics,
+                        "suggested_logs_query": logs,
+                    }
+                )
 
         enriched_catalog_md = ""
         if enriched_catalog:
@@ -234,9 +250,9 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             enriched_catalog_md += "Use these pre-defined queries when using your query_metrics or logging tools instead of inventing them:\n"
             for item in enriched_catalog:
                 enriched_catalog_md += f"- **Resource**: `{item['resource_name']}` ({item['resource_type']})\n"
-                if item['suggested_metrics_query']:
+                if item["suggested_metrics_query"]:
                     enriched_catalog_md += f"  - Suggested Metrics Filter: `{item['suggested_metrics_query']}`\n"
-                if item['suggested_logs_query']:
+                if item["suggested_logs_query"]:
                     enriched_catalog_md += f"  - Suggested Logs Filter: `{item['suggested_logs_query']}`\n"
             enriched_catalog_md += "\n"
 
@@ -252,22 +268,14 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         )
         return analysis_prompt
 
-
     try:
         # Define the ADK 2.0 graph workflow
         sre_diagnostics_workflow = AdkWorkflow(
-            name="sre_diagnostics_workflow",
-            edges=[
-                (START, trace_analyzer, fetch_telemetry, log_correlator)
-            ]
+            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
         )
 
         session_service = InMemorySessionService()
-        runner = Runner(
-            node=sre_diagnostics_workflow,
-            app_name="sre_diagnostics",
-            session_service=session_service
-        )
+        runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
 
         # Create session before running (InMemorySessionService requires explicit creation)
         session = await session_service.create_session(
@@ -275,13 +283,11 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             user_id="sre_user",
         )
 
-        msg = types.Content(parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")])
+        msg = types.Content(
+            parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")]
+        )
         diagnosis = ""
-        async for event in runner.run_async(
-            user_id="sre_user",
-            session_id=session.id,
-            new_message=msg
-        ):
+        async for event in runner.run_async(user_id="sre_user", session_id=session.id, new_message=msg):
             if event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
@@ -291,6 +297,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         trace_id = None
         try:
             import json
+
             traces = json.loads(traces_json)
             if isinstance(traces, list):
                 for t in traces:
@@ -337,6 +344,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         A simulated markdown diagnostics report.
     """
     import json
+
     try:
         data = json.loads(traces_json)
         # Find the first trace with error = True or slow latency (> 5000ms)
@@ -352,16 +360,17 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
             if not failing_trace:
                 # Check if there are mock logs with ERROR/CRITICAL severity in the database
                 from sre_agent.gcp_tools import _load_mock_file
+
                 mock_logs = _load_mock_file("logs.json") or []
                 has_error_logs = False
                 for log in mock_logs:
                     if log.get("severity") in ("ERROR", "CRITICAL"):
                         has_error_logs = True
                         break
-                
+
                 if not has_error_logs:
                     return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
-                
+
                 # If there are error logs, fallback to first non-diagnose trace to analyze it
                 if data:
                     for t in data:
@@ -383,11 +392,11 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         logs = await query_logs_by_trace(trace_id, project_id)
         metrics = await query_metrics(
             filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="sre-chaos-monkey"',
-            project_id=project_id
+            project_id=project_id,
         )
         db_connections = await query_metrics(
             filter_expression='metric.type="cloudsql.googleapis.com/database/postgresql/connection_count" AND resource.labels.database_id="db-primary"',
-            project_id=project_id
+            project_id=project_id,
         )
 
         # Build mock SRE analysis response based on telemetry
@@ -426,6 +435,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
 
         # Simulate Itinerary Catalog enrichment in report
         from sre_agent.itinerary import DEFAULT_TEMPLATES
+
         catalog_md = "## 🗺️ Enriched Service Catalog\n"
         catalog_md += "Pre-defined diagnostic helper filters mapped via similarity lookup:\n"
         for template in DEFAULT_TEMPLATES:
@@ -433,14 +443,14 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
                 # For sre-chaos-monkey
                 metrics = template["helpers"]["metrics"].replace("{service_name}", "sre-chaos-monkey")
                 logs = template["helpers"]["logs"].replace("{service_name}", "sre-chaos-monkey")
-                catalog_md += f"- **Resource**: `sre-chaos-monkey` (cloud_run_revision)\n"
+                catalog_md += "- **Resource**: `sre-chaos-monkey` (cloud_run_revision)\n"
                 catalog_md += f"  - Metrics: `{metrics}`\n"
                 catalog_md += f"  - Logs: `{logs}`\n"
             elif template["resource_type"] == "datastore_database":
                 # For (default)
                 metrics = template["helpers"]["metrics"].replace("{database_id}", "(default)")
                 logs = template["helpers"]["logs"].replace("{database_id}", "(default)")
-                catalog_md += f"- **Resource**: `(default)` (datastore_database)\n"
+                catalog_md += "- **Resource**: `(default)` (datastore_database)\n"
                 catalog_md += f"  - Metrics: `{metrics}`\n"
                 catalog_md += f"  - Logs: `{logs}`\n"
         catalog_md += "\n"
@@ -475,7 +485,6 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         return f"### Diagnostic Simulation Failure\nFailed to parse telemetry during simulation: {e}"
 
 
-
 @otel_trace("run_sre_diagnostics")
 async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -> str:
     """Executes the SRE diagnostic workflow using ADK agents.
@@ -496,6 +505,7 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     has_problems = False
     try:
         import json
+
         traces = json.loads(traces_json)
         if isinstance(traces, list):
             for t in traces:
@@ -514,6 +524,7 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
         logger.info("No anomalous traces found. Checking logs for recent errors...")
         try:
             from sre_agent.gcp_tools import query_logs
+
             log_res = await query_logs(query="severity=ERROR OR severity=CRITICAL", project_id=project_id, limit=5)
             logs = json.loads(log_res)
             if isinstance(logs, list) and len(logs) > 0:
@@ -527,9 +538,12 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     # 3. If everything is healthy, return clean report
     if not has_problems:
         logger.info("Diagnostics workflow found no anomalous traces or error logs. All systems healthy.")
-        return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        return (
+            "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
+        )
 
     import os
+
     if HAS_ADK and "GEMINI_API_KEY" in os.environ:
         return await _run_adk_diagnostics(traces_json, project_id)
     else:

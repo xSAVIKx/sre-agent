@@ -1,3 +1,15 @@
-google-adk>=1.35.0
-google-cloud-trace>=1.19.0
-google-cloud-logging>=3.16.0
+# PyPI dependencies for this portable copy of the diagnostics engine, at the same
+# floors sre_agent/pyproject.toml declares (see AGENTS.md).
+#
+# This file is not installable on its own, and cannot be made so: gcp_tools.py
+# imports `sre_common` at module scope, and sre-common is a workspace-local
+# package with no PyPI release, so no requirement line can express it. To run the
+# skill outside this repo, install the lines below and either add
+# `sre_common/src` to PYTHONPATH or `pip install -e path/to/sre_common`.
+#
+# opentelemetry-sdk is deliberately absent: nothing here imports it. It arrives
+# through sre_common, which declares its own floor for it.
+google-adk>=2.11.0,<3
+google-genai>=2.28.0,<3
+google-cloud-trace>=1.20.0
+google-cloud-logging>=3.16.2

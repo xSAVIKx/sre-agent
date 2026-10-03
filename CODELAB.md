@@ -260,7 +260,7 @@ trace_analyzer = AdkAgent(
         "You are an SRE trace analyst. Locate the slowest or failing request "
         "and return ONLY the raw 32-character hex traceId — no extra text."
     ),
-    model="gemini-3-flash-preview",
+    model="gemini-3.8-flash",
 )
 
 log_correlator = AdkAgent(
@@ -271,7 +271,7 @@ log_correlator = AdkAgent(
         "mitigation plan. Use your tools for metrics, cascade analysis, and post-mortems."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-    model="gemini-3-flash-preview",
+    model="gemini-3.8-flash",
 )
 
 sre_diagnostics_workflow = AdkWorkflow(
@@ -319,6 +319,7 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
     if os.getenv("MOCK_GCP", "false").lower() == "true":
         from sre_agent.gcp_tools import query_traces
         from sre_agent.sre_workflow import run_sre_diagnostics
+
         traces_json = await query_traces(project_id=project_id, limit=10)
         return await run_sre_diagnostics(traces_json=traces_json, project_id=project_id)
 
@@ -344,11 +345,19 @@ if "# 🚨 Incident Post-Mortem" in text or "Incident Post-Mortem" in text:
     return {
         "type": "container",
         "components": [
-            {"type": "alert", "level": "success", "title": title,
-             "text": "The SRE agent has auto-generated the incident post-mortem report."},
+            {
+                "type": "alert",
+                "level": "success",
+                "title": title,
+                "text": "The SRE agent has auto-generated the incident post-mortem report.",
+            },
             {"type": "section", "title": "Document Preview", "content": text},
-            {"type": "download_button", "text": "Download Post-Mortem Markdown",
-             "filename": "post_mortem.md", "content": text},
+            {
+                "type": "download_button",
+                "text": "Download Post-Mortem Markdown",
+                "filename": "post_mortem.md",
+                "content": text,
+            },
         ],
     }
 ```
@@ -508,12 +517,29 @@ see the example `curl` printed at the end of `deploy.sh`).
 
 ## Step 12: Run the Tests
 
-The `src/` layout means each package's tests run with its `src` on `PYTHONPATH`:
+The `src/` layout means each package's tests run with its `src` on `PYTHONPATH`. A third suite at
+the repository root imports every module in the workspace, which is the only coverage `app/`,
+`inventory_agent/` and `sre_common/` get:
 
 ```bash
 PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
 PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
+uv run python -m unittest discover -s test
 ```
+
+Lint and formatting are `ruff`, configured in the root `pyproject.toml`:
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
+
+All of the above runs in GitHub Actions on every push and pull request
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The tests run against **Python 3.11 and
+3.14** — the floor `requires-python` declares and the version the Dockerfiles ship; testing only one
+of them is how the floor quietly stopped working the first time. `ruff` runs once, on its own:
+`target-version = "py311"` decides which rules apply, so the interpreter it happens to run under
+makes no difference to the answer.
 
 ---
 

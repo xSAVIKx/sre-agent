@@ -5,9 +5,15 @@ description = "SRE Chaos Monkey FastAPI Target Application"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.137.0",
-    "uvicorn>=0.49.0",
+    "fastapi>=0.141.1",
+    "uvicorn>=0.52.4",
     "httpx>=0.28.1",
-    "opentelemetry-sdk>=1.41.0",
-    "opentelemetry-exporter-gcp-trace>=1.12.0",
+    # A floor, not a pin. This package declares no google-adk dependency, so adk's
+    # `opentelemetry-sdk<=1.42.1` ceiling does not apply to it - and `app/Dockerfile`
+    # resolves straight from this file (`uv pip install -r pyproject.toml`, no
+    # `uv.lock`), so an exact pin would freeze the image at 1.42.1 forever and break
+    # the build outright the day `opentelemetry-exporter-gcp-trace` raises its floor
+    # past it.
+    "opentelemetry-sdk>=1.42.1",
+    "opentelemetry-exporter-gcp-trace>=1.15.0",
 ]

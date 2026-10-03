@@ -5,9 +5,9 @@ them into structured A2UI (Agent-to-User Interface) declarative JSON payloads,
 enabling rich rendering on custom frontends.
 """
 
-import re
 import json
 import logging
+import re
 from typing import Any
 
 logger = logging.getLogger("sre_agent.a2ui_translator")
@@ -27,10 +27,7 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
         A dictionary representation of the A2UI payload.
     """
     if not text:
-        return {
-            "type": "container",
-            "components": [{"type": "text", "content": ""}]
-        }
+        return {"type": "container", "components": [{"type": "text", "content": ""}]}
 
     # 1. Check if the output is already JSON
     trimmed = text.strip()
@@ -53,20 +50,16 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
                     "type": "alert",
                     "level": "success",
                     "title": title,
-                    "text": "The SRE diagnostics agent has auto-generated the incident post-mortem report. You can download the complete markdown document using the button below."
+                    "text": "The SRE diagnostics agent has auto-generated the incident post-mortem report. You can download the complete markdown document using the button below.",
                 },
-                {
-                    "type": "section",
-                    "title": "Document Preview",
-                    "content": text
-                },
+                {"type": "section", "title": "Document Preview", "content": text},
                 {
                     "type": "download_button",
                     "text": "Download Post-Mortem Markdown",
                     "filename": "post_mortem.md",
-                    "content": text
-                }
-            ]
+                    "content": text,
+                },
+            ],
         }
 
     # 3. Parse SRE Incident Diagnosis Report
@@ -105,68 +98,41 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
                 "type": "alert",
                 "level": "error",
                 "title": "Incident Detected",
-                "text": f"Service failure detected on root service `{root_service or 'unknown'}`. Anomalous trace `{trace_id or 'unknown'}` indicates a backend exception or timeout."
+                "text": f"Service failure detected on root service `{root_service or 'unknown'}`. Anomalous trace `{trace_id or 'unknown'}` indicates a backend exception or timeout.",
             },
             {
                 "type": "card",
                 "title": "Incident Metadata",
                 "fields": [
                     {"label": "Anomalous Trace ID", "value": trace_id or "Unknown"},
-                    {"label": "Root Service", "value": root_service or "Unknown"}
-                ]
-            }
+                    {"label": "Root Service", "value": root_service or "Unknown"},
+                ],
+            },
         ]
 
         if root_cause:
-            components.append({
-                "type": "section",
-                "title": "🔍 Root Cause Analysis",
-                "content": root_cause
-            })
+            components.append({"type": "section", "title": "🔍 Root Cause Analysis", "content": root_cause})
 
         if logs:
-            components.append({
-                "type": "code_block",
-                "title": "Correlated Diagnostics Logs",
-                "code": logs
-            })
+            components.append({"type": "code_block", "title": "Correlated Diagnostics Logs", "code": logs})
 
         if mitigations:
-            components.append({
-                "type": "list",
-                "title": "🛠️ Recommended Mitigations",
-                "items": mitigations
-            })
+            components.append({"type": "list", "title": "🛠️ Recommended Mitigations", "items": mitigations})
 
-        return {
-            "type": "container",
-            "components": components
-        }
+        return {"type": "container", "components": components}
 
     # 4. Success / Health Check Alert Fallback
-    if any(x in text.lower() for x in ("no anomalous traces", "diagnostics completed", "successfully connected", "redeploy completed")):
+    if any(
+        x in text.lower()
+        for x in ("no anomalous traces", "diagnostics completed", "successfully connected", "redeploy completed")
+    ):
         title = "Diagnostics Clean"
         if "successfully connected" in text.lower():
             title = "Agent Health Clean"
         return {
             "type": "container",
-            "components": [
-                {
-                    "type": "alert",
-                    "level": "success",
-                    "title": title,
-                    "text": text
-                }
-            ]
+            "components": [{"type": "alert", "level": "success", "title": title, "text": text}],
         }
 
     # 5. Standard Text Chat Fallback
-    return {
-        "type": "container",
-        "components": [
-            {
-                "type": "text",
-                "content": text
-            }
-        ]
-    }
+    return {"type": "container", "components": [{"type": "text", "content": text}]}

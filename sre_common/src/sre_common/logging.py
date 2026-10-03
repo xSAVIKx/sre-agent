@@ -4,12 +4,12 @@ Provides a structured JSON logging formatter and setup functions that enable
 GCP log-trace correlation across multi-agent workspace services.
 """
 
-import os
+import contextvars
+import datetime
 import json
 import logging
-import datetime
+import os
 import sys
-import contextvars
 from typing import Any
 
 # ContextVars to store trace ID and span ID for the current request
@@ -19,6 +19,7 @@ request_span_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("re
 # Try importing opentelemetry trace
 try:
     from opentelemetry import trace
+
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
@@ -77,7 +78,7 @@ class StructuredGcpLoggingFormatter(logging.Formatter):
 
         # 3. Construct the base GCP structured log entry
         log_entry: dict[str, Any] = {
-            "timestamp": datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc).isoformat() + "Z",
+            "timestamp": datetime.datetime.fromtimestamp(record.created, datetime.UTC).isoformat() + "Z",
             "severity": severity,
             "message": record.getMessage(),
             "serviceName": self.service_name,
@@ -85,7 +86,7 @@ class StructuredGcpLoggingFormatter(logging.Formatter):
                 "file": record.pathname,
                 "line": str(record.lineno),
                 "function": record.funcName,
-            }
+            },
         }
 
         # 4. Handle exceptions
@@ -104,10 +105,27 @@ class StructuredGcpLoggingFormatter(logging.Formatter):
 
         # 6. Extract extra fields and map them to GCP labels or root attributes
         standard_attrs = {
-            "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-            "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-            "created", "msecs", "relativeCreated", "thread", "threadName",
-            "processName", "process", "message"
+            "name",
+            "msg",
+            "args",
+            "levelname",
+            "levelno",
+            "pathname",
+            "filename",
+            "module",
+            "exc_info",
+            "exc_text",
+            "stack_info",
+            "lineno",
+            "funcName",
+            "created",
+            "msecs",
+            "relativeCreated",
+            "thread",
+            "threadName",
+            "processName",
+            "process",
+            "message",
         }
 
         labels: dict[str, str] = {
@@ -156,8 +174,7 @@ def setup_logging(service_name: str, level: int = logging.INFO) -> None:
         handler.setFormatter(StructuredGcpLoggingFormatter(service_name=service_name))
     else:
         formatter = logging.Formatter(
-            fmt=f"%(asctime)s [%(levelname)s] [{service_name}] %(name)s: %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S"
+            fmt=f"%(asctime)s [%(levelname)s] [{service_name}] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
         )
         handler.setFormatter(formatter)
 

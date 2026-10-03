@@ -5,17 +5,18 @@ backs up and restores agent session files in Google Cloud Firestore, enabling st
 session resumption across server instances.
 """
 
+import logging
 import os
 import shutil
-import logging
-from sre_common import retry_async, otel_trace
 from typing import Any
+
 from google.antigravity.connections import connection
-from google.antigravity.connections.local.local_connection_config import LocalAgentConfig
 from google.antigravity.connections.local.local_connection import LocalConnectionStrategy
+from google.antigravity.connections.local.local_connection_config import LocalAgentConfig
+
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("sre_agent.firestore_strategy")
-
 
 
 # Global in-memory DB for local testing/mock mode
@@ -85,11 +86,10 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         if not self._mock_mode:
             try:
                 from google.cloud import firestore
+
                 self._db = firestore.AsyncClient()
             except Exception as e:
-                logger.warning(
-                    f"Failed to initialize Firestore client, falling back to mock mode: {e}"
-                )
+                logger.warning(f"Failed to initialize Firestore client, falling back to mock mode: {e}")
                 self._mock_mode = True
 
         # 2. Download files from Firestore/Mock DB
@@ -115,6 +115,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
                         if isinstance(file_data, str):
                             try:
                                 import base64
+
                                 file_bytes = base64.b64decode(file_data)
                             except Exception:
                                 file_bytes = file_data.encode("utf-8")
@@ -164,12 +165,13 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
         # 4. Upload session files to Firestore/Mock DB
         if files_dict:
             import datetime
+
             resolved_prompt = self._existing_prompt or self.prompt
             if self._mock_mode:
                 session_data = {
                     "conversation_id": active_conversation_id,
                     "files": files_dict,
-                    "updated_at": datetime.datetime.now(datetime.timezone.utc),
+                    "updated_at": datetime.datetime.now(datetime.UTC),
                     "prompt": resolved_prompt,
                 }
                 if active_conversation_id not in MOCK_FIRESTORE_DB:
@@ -179,6 +181,7 @@ class FirestoreConnectionStrategy(connection.ConnectionStrategy):
             else:
                 try:
                     from google.cloud import firestore
+
                     session_data = {
                         "conversation_id": active_conversation_id,
                         "files": files_dict,
@@ -205,6 +208,7 @@ class FirestoreAgentConfig(LocalAgentConfig):
     Extends LocalAgentConfig to wrap the LocalConnectionStrategy with
     FirestoreConnectionStrategy remote backup/restore capability.
     """
+
     prompt: str | None = None
 
     def create_strategy(
@@ -216,17 +220,31 @@ class FirestoreAgentConfig(LocalAgentConfig):
         """Creates a FirestoreConnectionStrategy instance for SRE diagnostics."""
         save_dir = self._get_or_create_save_dir()
 
+        # Mirrors LocalAgentConfig.create_strategy in google-antigravity, so every
+        # field the SDK forwards is forwarded here too. `gemini_config` was replaced
+        # by the `models` list in 0.1.14, and `compaction_config` is new since then;
+        # any field not passed through here is silently dropped.
         local_strategy = LocalConnectionStrategy(
             tool_runner=tool_runner,
             hook_runner=hook_runner,
-            gemini_config=self.gemini_config,
+            models=self.models,
             system_instructions=self._get_system_instructions(),
             capabilities_config=self.capabilities,
+            compaction_config=self._get_effective_compaction_config(),
             conversation_id=self.conversation_id,
+            session_continuation_mode=self.session_continuation_mode,
             save_dir=save_dir,
             workspaces=self.workspaces,
             app_data_dir=self.app_data_dir,
             skills_paths=self.skills_paths,
+            mcp_servers=self.mcp_servers,
+            env=self.env,
+            subagents=self.subagents,
+            debug_config=self.debug_config,
+            retry_config=self.retry_config,
+            budget_config=self.budget_config,
+            policies=list(self.policies) if self.policies is not None else None,
+            tools=self.tools,
         )
 
         mock_gcp = os.getenv("MOCK_GCP", "false").lower() in ("true", "1")

@@ -9,3 +9,45 @@ dependencies = []
 [tool.uv.workspace]
 members = ["app", "agent", "sre_agent", "inventory_agent", "sre_common"]
 
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.4",
+]
+
+[tool.ruff]
+# The floor the workspace declares (`requires-python = ">=3.11"`), not the
+# version the venv happens to resolve to. Linting against the floor is what
+# stops a 3.12+/3.14-only construct reaching a 3.11 user.
+target-version = "py311"
+# The existing code runs long; 88 would turn every commit into a reflow.
+line-length = 120
+# BLOGPOST.md mirrors a published post; its code samples stay as published.
+extend-exclude = ["mock_telemetry_data", "scratch_save_dir", "BLOGPOST.md"]
+
+[tool.ruff.lint]
+select = [
+    "F",    # pyflakes
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "I",    # import sorting
+    "UP",   # pyupgrade - enforces the "3.14-style typing" AGENTS.md mandates
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    # The tool docstrings are prose written for the LLM planner, not for a
+    # docstring linter; D is deliberately not enabled, and these three
+    # pycodestyle/bugbear rules fight the existing style for no real gain.
+    "E501",    # line length is enforced by the formatter, not the linter
+    "B008",    # FastAPI's `Query(...)` in defaults is the documented idiom
+    "SIM105",  # `contextlib.suppress` is not always clearer than try/except
+]
+
+[tool.ruff.lint.per-file-ignores]
+# `skills/sre_incident_solver/` is a deliberate portable copy of the diagnostics
+# engine (see AGENTS.md); keeping it byte-comparable to the original matters more
+# than lint purity.
+"skills/sre_incident_solver/*" = ["E402", "F401"]

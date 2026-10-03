@@ -3,7 +3,7 @@ FROM python:3.14-slim AS builder
 WORKDIR /workspace
 
 # Install uv package manager
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv==0.12.23
 
 # Copy workspace configuration and dependency specifications
 COPY pyproject.toml uv.lock ./

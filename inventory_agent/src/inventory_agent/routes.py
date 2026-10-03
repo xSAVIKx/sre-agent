@@ -1,21 +1,31 @@
-"""API Route definitions for the Inventory Agent.
-"""
+"""API Route definitions for the Inventory Agent."""
 
-import os
-import logging
 import asyncio
+import logging
+import os
 from typing import Any
-from sre_common import retry_async, otel_trace
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
-from inventory_agent.config import IS_MOCK, SCANNER_JOB_NAME, SCANNER_JOB_REGION, PROJECT_ID
-from inventory_agent.firestore_strategy import (
-    get_project_inventory,
-    update_project_inventory,
-    set_project_status
-)
+
+from inventory_agent.config import IS_MOCK, PROJECT_ID, SCANNER_JOB_NAME, SCANNER_JOB_REGION
+from inventory_agent.firestore_strategy import get_project_inventory, set_project_status, update_project_inventory
+from sre_common import otel_trace, retry_async
 
 logger = logging.getLogger("inventory_agent.routes")
+
+# asyncio only holds a weak reference to a running task, so a fire-and-forget
+# `create_task` can be garbage-collected mid-flight. Keep a strong reference
+# until the task finishes.
+_BACKGROUND_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _spawn_background(coro: Any) -> None:
+    """Schedules a coroutine and keeps a reference to it until it completes."""
+    task = asyncio.create_task(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+
 
 router = APIRouter()
 
@@ -29,11 +39,13 @@ async def health_check() -> dict[str, str]:
 
 class RefreshRequest(BaseModel):
     """Pydantic model representing a manual refresh request."""
+
     project_id: str
 
 
 class CallbackRequest(BaseModel):
     """Pydantic model representing the scanner job completion callback."""
+
     project_id: str
     discovered_resources: dict[str, Any]
     aggregated_metadata: dict[str, Any]
@@ -44,29 +56,24 @@ async def run_discovery_mock(project_id: str) -> None:
     """Simulates active GCP discovery locally and caches mock results after a brief delay."""
     logger.info(f"[Mock Scan] Initiating asynchronous mock discovery for project {project_id}...")
     await asyncio.sleep(3)  # Simulate discovery time
-    
+
     # Load mock resources from traces.json / mock data directory
     mock_resources = {
         "services": [
             {"name": "sre-chaos-monkey", "url": "https://sre-chaos-monkey-mock.run.app", "vpc_connector": "sre-vpc"},
-            {"name": "sre-agent", "url": "https://sre-agent-mock.run.app"}
+            {"name": "sre-agent", "url": "https://sre-agent-mock.run.app"},
         ],
-        "databases": [
-            {"name": "(default)", "type": "FIRESTORE"}
-        ]
+        "databases": [{"name": "(default)", "type": "FIRESTORE"}],
     }
-    
+
     mock_metadata = {
         "region": "us-central1",
         "resource_count": 3,
-        "labels": {"env": "development", "owner": "sre-team"}
+        "labels": {"env": "development", "owner": "sre-team"},
     }
-    
+
     await update_project_inventory(
-        project_id=project_id,
-        discovered_resources=mock_resources,
-        aggregated_metadata=mock_metadata,
-        status="ACTIVE"
+        project_id=project_id, discovered_resources=mock_resources, aggregated_metadata=mock_metadata, status="ACTIVE"
     )
     logger.info(f"[Mock Scan] Mock discovery complete and saved to cache for {project_id}.")
 
@@ -76,6 +83,7 @@ async def run_discovery_mock(project_id: str) -> None:
 async def _run_scanner_job_gcp(job_path: str, overrides: dict[str, Any]) -> str:
     """Helper to call Google Cloud Run Job client library with retries."""
     from google.cloud import run_v2
+
     client = run_v2.JobsClient()
     operation = await asyncio.to_thread(client.run_job, name=job_path, overrides=overrides)
     return operation.metadata.name if hasattr(operation, "metadata") else "unknown"
@@ -86,15 +94,18 @@ async def trigger_scanner_job(target_project_id: str) -> None:
     """Triggers the Cloud Run Job (Task) to perform cross-project asset discovery."""
     if IS_MOCK:
         # Spawn local simulation task in the background
-        asyncio.create_task(run_discovery_mock(target_project_id))
+        _spawn_background(run_discovery_mock(target_project_id))
         return
 
-    logger.info(f"Triggering Cloud Run scanner job '{SCANNER_JOB_NAME}' in {SCANNER_JOB_REGION} for project '{target_project_id}'")
+    logger.info(
+        f"Triggering Cloud Run scanner job '{SCANNER_JOB_NAME}' in {SCANNER_JOB_REGION} for project '{target_project_id}'"
+    )
     try:
         from google.cloud import run_v2
+
         client = run_v2.JobsClient()
         job_path = client.job_path(PROJECT_ID, SCANNER_JOB_REGION, SCANNER_JOB_NAME)
-        
+
         # Override environment variables for the task execution
         inventory_agent_url = os.getenv("INVENTORY_AGENT_URL")
         if inventory_agent_url:
@@ -108,19 +119,19 @@ async def trigger_scanner_job(target_project_id: str) -> None:
                     "env": [
                         {"name": "TARGET_PROJECT_ID", "value": target_project_id},
                         {"name": "MOCK_GCP", "value": "false"},
-                        {"name": "CALLBACK_URL", "value": cb_url}
+                        {"name": "CALLBACK_URL", "value": cb_url},
                     ]
                 }
             ]
         }
-        
+
         op_name = await _run_scanner_job_gcp(job_path, overrides)
         logger.info(f"Cloud Run scanner job triggered successfully. Operation Name: {op_name}")
     except Exception as e:
         logger.error(f"Failed to trigger Cloud Run scanner job after retries: {e}")
         # Graceful fallback: run local simulation if API call fails
         logger.warning("Falling back to local simulation due to GCP API failure.")
-        asyncio.create_task(run_discovery_mock(target_project_id))
+        _spawn_background(run_discovery_mock(target_project_id))
 
 
 @router.get("/v1/agents/inventory")
@@ -132,9 +143,9 @@ async def get_inventory(project_id: str, refresh: bool = False, background_tasks
     it triggers an asynchronous scanner job and updates status.
     """
     logger.info(f"Received inventory request for project={project_id} (refresh={refresh})")
-    
+
     cache = await get_project_inventory(project_id)
-    
+
     if refresh or not cache:
         if not cache:
             # First scan scenario: set status to DISCOVERING and trigger job
@@ -145,7 +156,7 @@ async def get_inventory(project_id: str, refresh: bool = False, background_tasks
                 "project_id": project_id,
                 "status": "DISCOVERING",
                 "discovered_resources": {},
-                "aggregated_metadata": {}
+                "aggregated_metadata": {},
             }
         else:
             # Refresh requested on existing cache: return stale cache instantly, trigger refresh in bg
@@ -176,6 +187,6 @@ async def discovery_callback(request: CallbackRequest):
         project_id=request.project_id,
         discovered_resources=request.discovered_resources,
         aggregated_metadata=request.aggregated_metadata,
-        status=request.status
+        status=request.status,
     )
     return {"status": "success", "detail": f"Cached updated for project {request.project_id}"}

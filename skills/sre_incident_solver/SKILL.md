@@ -20,7 +20,11 @@ microservices stack.
 
 ## Dependencies
 
-* **Python Libraries**: Declared in [requirements.txt](file:///d:/AntigravityProjects/TestAntigravity/skills/sre_incident_solver/requirements.txt):
-  - `google-adk>=1.28.1`
-  - `google-cloud-trace>=1.11.0`
-  - `google-cloud-logging>=3.8.0`
+* **Python Libraries**: Declared in [requirements.txt](./requirements.txt):
+  - `google-adk>=2.11.0,<3`
+  - `google-genai>=2.28.0,<3`
+  - `google-cloud-trace>=1.20.0`
+  - `google-cloud-logging>=3.16.2`
+* **Workspace-local**: `gcp_tools.py` imports `sre_common` at module scope. That package
+  is not published to PyPI, so `requirements.txt` cannot express it - install it from
+  this repository (`pip install -e sre_common`) or put `sre_common/src` on `PYTHONPATH`.

@@ -5,18 +5,19 @@ It features an automatic local simulation fallback when real GCP credentials
 or projects are not configured.
 """
 
-import os
+import contextlib
+import datetime
 import json
 import logging
-import datetime
+import os
 from typing import Any
+
+from sre_common import otel_trace, retry_async, start_span
+
 from .registry import register_tool
-import contextlib
-from sre_common import retry_async, otel_trace, start_span
 
 # Setup basic logging
 logger = logging.getLogger("sre_tools")
-
 
 
 # Fail-safe imports of Google Cloud client libraries
@@ -37,6 +38,7 @@ IS_MOCK = os.getenv("MOCK_GCP", "true").lower() in ("true", "1", "yes") or trace
 # Path to the mock telemetry data
 MOCK_DATA_DIR = os.getenv("MOCK_DATA_DIR", "mock_telemetry_data")
 
+
 def _load_mock_file(filename: str) -> Any:
     """Helper to load mock data from a JSON file.
 
@@ -50,7 +52,7 @@ def _load_mock_file(filename: str) -> Any:
     logger.info(f"[Mock Telemetry Check] Looking for mock file: {path}")
     if os.path.exists(path):
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
                 logger.info(f"[Mock Telemetry Check] Successfully loaded mock data from: {path}")
                 return data
@@ -80,6 +82,7 @@ def _get_project_id(project_id: str | None = None) -> str:
     # Try google.auth
     try:
         import google.auth
+
         _, default_project = google.auth.default()
         if default_project:
             return default_project
@@ -103,13 +106,13 @@ def _parse_timestamp(ts_str: str) -> datetime.datetime | None:
     if not ts_str:
         return None
     try:
-        ts_str = ts_str.rstrip('Z')
-        if '.' in ts_str:
-            base, frac = ts_str.split('.')
+        ts_str = ts_str.rstrip("Z")
+        if "." in ts_str:
+            base, frac = ts_str.split(".")
             frac = frac[:6]
             ts_str = f"{base}.{frac}"
-            return datetime.datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S.%f')
-        return datetime.datetime.strptime(ts_str, '%Y-%m-%dT%H:%M:%S')
+            return datetime.datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S.%f")
+        return datetime.datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
     except Exception as e:
         logger.warning(f"Failed to parse timestamp string '{ts_str}': {e}")
         return None
@@ -169,10 +172,7 @@ def _check_span_error(span: dict[str, Any]) -> bool:
     status_code = labels.get("/http/status_code", "")
     if status_code.startswith("5"):
         return True
-    for key in labels:
-        if "error" in key.lower():
-            return True
-    return False
+    return any("error" in key.lower() for key in labels)
 
 
 def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
@@ -184,10 +184,7 @@ def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
     Returns:
         True if any span has an error, False otherwise.
     """
-    for span in spans:
-        if _check_span_error(span):
-            return True
-    return False
+    return any(_check_span_error(span) for span in spans)
 
 
 @register_tool
@@ -223,15 +220,15 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 
     try:
         client = trace_v1.TraceServiceClient()
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         start = now - datetime.timedelta(hours=2)
         req = trace_v1.ListTracesRequest(
             project_id=resolved_project,
-            start_time=start.strftime('%Y-%m-%dT%H:%M:%SZ'),
-            view=trace_v1.ListTracesRequest.ViewType.COMPLETE
+            start_time=start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            view=trace_v1.ListTracesRequest.ViewType.COMPLETE,
         )
         pager = client.list_traces(request=req)
-        
+
         traces_list = []
         for trace_item in pager:
             if len(traces_list) >= 100:
@@ -239,37 +236,39 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
             trace_dict = trace_v1.Trace.to_dict(trace_item)
             t_id = trace_dict.get("trace_id", "")
             spans = trace_dict.get("spans", [])
-            
+
             root_span = _find_root_span(spans)
             start_time_str = ""
             duration_ms = 0
             root_name = "unknown"
-            
+
             if root_span:
                 root_name = root_span.get("name", "unknown")
                 start_time_str = root_span.get("start_time", "")
                 end_time_str = root_span.get("end_time", "")
                 duration_ms = _calculate_duration_ms(start_time_str, end_time_str)
-                        
+
             has_error = _check_trace_error(spans)
-                    
-            traces_list.append({
-                "traceId": t_id,
-                "name": root_name,
-                "startTime": start_time_str,
-                "durationMs": duration_ms,
-                "error": has_error
-            })
-            
+
+            traces_list.append(
+                {
+                    "traceId": t_id,
+                    "name": root_name,
+                    "startTime": start_time_str,
+                    "durationMs": duration_ms,
+                    "error": has_error,
+                }
+            )
+
         # Sort traces by startTime descending (newest first)
         traces_list.sort(key=lambda x: x["startTime"], reverse=True)
         traces_list = traces_list[:limit]
-            
+
         logger.info(f"[GCP Observability] Successfully queried {len(traces_list)} traces from real GCP Trace API")
         return json.dumps(traces_list, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query real GCP Trace API: {e}")
-        return json.dumps({"error": f"GCP Trace API Error: {str(e)}"}, indent=2)
+        return json.dumps({"error": f"GCP Trace API Error: {e!s}"}, indent=2)
 
 
 @register_tool
@@ -296,7 +295,9 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
             return json.dumps(trace_details, indent=2)
 
         # Fallback search inside traces.json
-        logger.info(f"[GCP Observability] Trace file trace_{trace_id}.json not found. Searching fallback traces.json...")
+        logger.info(
+            f"[GCP Observability] Trace file trace_{trace_id}.json not found. Searching fallback traces.json..."
+        )
         traces = _load_mock_file("traces.json")
         if traces:
             for t in traces:
@@ -307,7 +308,9 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
         return json.dumps({"error": f"Trace ID {trace_id} not found in mock data."}, indent=2)
 
     resolved_project = _get_project_id(project_id)
-    logger.info(f"[GCP Observability] Querying real GCP Cloud Trace details for Trace ID: {trace_id} (Project={resolved_project})")
+    logger.info(
+        f"[GCP Observability] Querying real GCP Cloud Trace details for Trace ID: {trace_id} (Project={resolved_project})"
+    )
     if trace_v1 is None:
         logger.error("[GCP Observability] google-cloud-trace library is missing")
         return json.dumps({"error": "google-cloud-trace library is not installed."}, indent=2)
@@ -316,20 +319,20 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
         client = trace_v1.TraceServiceClient()
         trace = client.get_trace(project_id=resolved_project, trace_id=trace_id)
         trace_dict = trace_v1.Trace.to_dict(trace)
-        
+
         spans_list = []
         duration_ms = 0
         root_name = "unknown"
-        
+
         spans = trace_dict.get("spans", [])
         root_span = _find_root_span(spans)
-            
+
         if root_span:
             root_name = root_span.get("name", "unknown")
             start_time_str = root_span.get("start_time", "")
             end_time_str = root_span.get("end_time", "")
             duration_ms = _calculate_duration_ms(start_time_str, end_time_str)
-                    
+
         has_error = _check_trace_error(spans)
 
         for span in spans:
@@ -338,29 +341,31 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
             error_message = labels.get("/error/message") or labels.get("error_message") or labels.get("/error/name")
             p_id = span.get("parent_span_id", "0")
             parent_span_id = None if (p_id == "0" or p_id == "" or p_id is None) else p_id
-            
-            spans_list.append({
-                "name": span.get("name", ""),
-                "spanId": span.get("span_id", ""),
-                "parentSpanId": parent_span_id,
-                "startTime": span.get("start_time", ""),
-                "endTime": span.get("end_time", ""),
-                "status": "ERROR" if span_error else "OK",
-                "error_message": error_message
-            })
-            
+
+            spans_list.append(
+                {
+                    "name": span.get("name", ""),
+                    "spanId": span.get("span_id", ""),
+                    "parentSpanId": parent_span_id,
+                    "startTime": span.get("start_time", ""),
+                    "endTime": span.get("end_time", ""),
+                    "status": "ERROR" if span_error else "OK",
+                    "error_message": error_message,
+                }
+            )
+
         result = {
             "traceId": trace_id,
             "root_span": root_name,
             "durationMs": duration_ms,
             "error": has_error,
-            "spans": spans_list
+            "spans": spans_list,
         }
         logger.info(f"[GCP Observability] Successfully formatted trace details for {trace_id}")
         return json.dumps(result, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to get trace details for {trace_id}: {e}")
-        return json.dumps({"error": f"GCP Trace API Error: {str(e)}"}, indent=2)
+        return json.dumps({"error": f"GCP Trace API Error: {e!s}"}, indent=2)
 
 
 @register_tool
@@ -385,7 +390,9 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
         logs = _load_mock_file(f"logs_{trace_id}.json")
         if not logs:
             # Fallback search in general logs.json
-            logger.info(f"[GCP Observability] Logs file logs_{trace_id}.json not found. Searching fallback logs.json...")
+            logger.info(
+                f"[GCP Observability] Logs file logs_{trace_id}.json not found. Searching fallback logs.json..."
+            )
             all_logs = _load_mock_file("logs.json")
             if all_logs:
                 logs = [log for log in all_logs if log.get("traceId") == trace_id]
@@ -404,21 +411,25 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
                         is_json = True
                 except Exception:
                     pass
-                
-                formatted_logs.append({
-                    "timestamp": log.get("timestamp"),
-                    "severity": log.get("severity"),
-                    "text_payload": msg if not is_json else None,
-                    "json_payload": msg if is_json else None,
-                    "resource": "cloud_run_revision"
-                })
+
+                formatted_logs.append(
+                    {
+                        "timestamp": log.get("timestamp"),
+                        "severity": log.get("severity"),
+                        "text_payload": msg if not is_json else None,
+                        "json_payload": msg if is_json else None,
+                        "resource": "cloud_run_revision",
+                    }
+                )
             return json.dumps(formatted_logs, indent=2)
 
         logger.warning(f"[GCP Observability] No mock logs found for Trace ID: {trace_id}")
         return json.dumps({"error": f"No logs found correlated with Trace ID {trace_id}."}, indent=2)
 
     resolved_project = _get_project_id(project_id)
-    logger.info(f"[GCP Observability] Querying real GCP Cloud Logging for Trace ID: {trace_id} (Project={resolved_project}, limit={limit})")
+    logger.info(
+        f"[GCP Observability] Querying real GCP Cloud Logging for Trace ID: {trace_id} (Project={resolved_project}, limit={limit})"
+    )
     if cloud_logging is None:
         logger.error("[GCP Observability] google-cloud-logging library is missing")
         return json.dumps({"error": "google-cloud-logging library is not installed."}, indent=2)
@@ -432,18 +443,20 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
         logs_list = []
         for entry in entries:
             is_json = isinstance(entry.payload, dict)
-            logs_list.append({
-                "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
-                "severity": entry.severity,
-                "text_payload": entry.payload if not is_json else None,
-                "json_payload": entry.payload if is_json else None,
-                "resource": entry.resource.type if entry.resource else None
-            })
+            logs_list.append(
+                {
+                    "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+                    "severity": entry.severity,
+                    "text_payload": entry.payload if not is_json else None,
+                    "json_payload": entry.payload if is_json else None,
+                    "resource": entry.resource.type if entry.resource else None,
+                }
+            )
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
         return json.dumps(logs_list, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query GCP Logging API for trace {trace_id}: {e}")
-        return json.dumps({"error": f"GCP Logging API Error: {str(e)}"}, indent=2)
+        return json.dumps({"error": f"GCP Logging API Error: {e!s}"}, indent=2)
 
 
 @register_tool
@@ -470,48 +483,48 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
             # Return both positive and negative execution outcomes
             mock_agent_logs = [
                 {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "severity": "INFO",
                     "message": "Antigravity SRE Agent version 0.1.0 starting up...",
                 },
                 {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "severity": "INFO",
                     "message": "Successfully registered safety policy: denyAllExceptObservability",
                 },
                 {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "severity": "INFO",
                     "message": "Successfully connected to Firestore default database (native).",
                 },
                 {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "severity": "WARNING",
                     "message": "SRE Agent database fetch timeout when reading session metadata (1500ms). Retrying...",
                 },
                 {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "severity": "ERROR",
                     "message": "FirestoreStrategyException: Failed to update document session_9999 - write transaction aborted.",
                 },
                 {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
                     "severity": "INFO",
                     "message": "Retrying Firestore update for session_9999: attempt 2 succeeded.",
-                }
+                },
             ]
             return json.dumps(mock_agent_logs, indent=2)
 
         logger.info(f"[GCP Observability] Querying mock logs for filter '{query}' (limit={limit})")
         logs = _load_mock_file("logs.json") or []
         filtered_logs = []
-        
+
         # Clean query to extract keywords for filter matching
         clean_query = query.lower()
-        for term in ("and", "or", "resource.type", "severity", "resource.labels.service_name", "=", "\"", "'"):
+        for term in ("and", "or", "resource.type", "severity", "resource.labels.service_name", "=", '"', "'"):
             clean_query = clean_query.replace(term, " ")
         keywords = [k.strip() for k in clean_query.split() if k.strip()]
-        
+
         # Parse severity
         severity_filter = None
         for sev in ("error", "critical", "warning", "info", "debug"):
@@ -523,10 +536,10 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
             msg = log.get("message", "")
             msg_str = str(msg).lower()
             sev_str = str(log.get("severity", "")).upper()
-            
+
             if severity_filter and severity_filter != sev_str:
                 continue
-                
+
             if keywords:
                 matches_keywords = True
                 for kw in keywords:
@@ -535,7 +548,7 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
                         break
                 if not matches_keywords:
                     continue
-            
+
             is_json = isinstance(msg, dict)
             try:
                 if isinstance(msg, str) and (msg.startswith("{") or msg.startswith("[")):
@@ -543,20 +556,24 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
                     is_json = True
             except Exception:
                 pass
-                
-            filtered_logs.append({
-                "timestamp": log.get("timestamp"),
-                "severity": log.get("severity"),
-                "text_payload": msg if not is_json else None,
-                "json_payload": msg if is_json else None,
-                "resource": "cloud_run_revision"
-            })
-            
+
+            filtered_logs.append(
+                {
+                    "timestamp": log.get("timestamp"),
+                    "severity": log.get("severity"),
+                    "text_payload": msg if not is_json else None,
+                    "json_payload": msg if is_json else None,
+                    "resource": "cloud_run_revision",
+                }
+            )
+
         logger.info(f"[GCP Observability] Filtered {len(filtered_logs)} mock logs for query '{query}'")
         return json.dumps(filtered_logs[:limit], indent=2)
 
     resolved_project = _get_project_id(project_id)
-    logger.info(f"[GCP Observability] Querying real GCP Cloud Logging with query: {query} (Project={resolved_project}, limit={limit})")
+    logger.info(
+        f"[GCP Observability] Querying real GCP Cloud Logging with query: {query} (Project={resolved_project}, limit={limit})"
+    )
     if cloud_logging is None:
         logger.error("[GCP Observability] google-cloud-logging library is missing")
         return json.dumps({"error": "google-cloud-logging library is not installed."}, indent=2)
@@ -569,18 +586,20 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
         logs_list = []
         for entry in entries:
             is_json = isinstance(entry.payload, dict)
-            logs_list.append({
-                "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
-                "severity": entry.severity,
-                "text_payload": entry.payload if not is_json else None,
-                "json_payload": entry.payload if is_json else None,
-                "resource": entry.resource.type if entry.resource else None
-            })
+            logs_list.append(
+                {
+                    "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+                    "severity": entry.severity,
+                    "text_payload": entry.payload if not is_json else None,
+                    "json_payload": entry.payload if is_json else None,
+                    "resource": entry.resource.type if entry.resource else None,
+                }
+            )
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
         return json.dumps(logs_list, indent=2)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query GCP Logging API with query '{query}': {e}")
-        return json.dumps({"error": f"GCP Logging API Error: {str(e)}"}, indent=2)
+        return json.dumps({"error": f"GCP Logging API Error: {e!s}"}, indent=2)
 
 
 @register_tool
@@ -611,7 +630,7 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
     # Build parent-child relationships and calculate inclusive durations
     span_map = {s["spanId"]: s for s in spans}
     children_map = {s["spanId"]: [] for s in spans}
-    
+
     for s in spans:
         parent_id = s.get("parentSpanId")
         if parent_id and parent_id in span_map:
@@ -642,17 +661,17 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
 
     # Format results into markdown
     report = [
-        f"## ⛓️ Multi-Service Cascade Latency & Bottleneck Analysis",
+        "## ⛓️ Multi-Service Cascade Latency & Bottleneck Analysis",
         f"**Trace ID**: `{trace_id}`",
         f"**Total Trace Duration**: `{total_duration} ms`",
         "",
         "### 🔍 Span Latency Breakdown",
         "| Service / Span Name | Span ID | Parent ID | Status | Inclusive Time | Exclusive (Self) Time | Contribution |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |"
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
     ]
 
     roots = [s for s in spans if not s.get("parentSpanId") or s.get("parentSpanId") not in span_map]
-    
+
     def render_node(span_id, indent=0):
         s = span_map[span_id]
         name = s["name"]
@@ -662,7 +681,7 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
         contrib = (exc / total_duration) * 100
         prefix = "&nbsp;&nbsp;" * indent + ("└── " if indent > 0 else "")
         status_str = f"**{status}**" if status == "ERROR" else status
-        
+
         report.append(
             f"| {prefix}`{name}` | `{span_id}` | `{s.get('parentSpanId') or 'None'}` | {status_str} | {inc} ms | {exc} ms | {contrib:.1f}% |"
         )
@@ -675,7 +694,9 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
     report.append("")
     report.append("### 🚨 Identified Bottleneck")
     report.append(f"*   **Bottleneck Span**: `{bottleneck_span['name']}` (`{bottleneck_span_id}`)")
-    report.append(f"*   **Self-Execution Time**: `{bottleneck_exclusive} ms` ({bottleneck_contribution:.1f}% of total trace)")
+    report.append(
+        f"*   **Self-Execution Time**: `{bottleneck_exclusive} ms` ({bottleneck_contribution:.1f}% of total trace)"
+    )
     report.append(f"*   **Status**: `{bottleneck_span['status']}`")
     if bottleneck_span.get("error_message"):
         report.append(f"*   **Error Message**: `{bottleneck_span['error_message']}`")
@@ -697,7 +718,7 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
     logger.info(f"Generating post-mortem for trace: {trace_id}")
     details_str = await get_trace_details(trace_id, project_id)
     logs_str = await query_logs_by_trace(trace_id, project_id)
-    
+
     try:
         data = json.loads(details_str)
         logs = json.loads(logs_str)
@@ -707,17 +728,17 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
     spans = data.get("spans", [])
     duration_ms = data.get("durationMs", 0)
     root_span = data.get("root_span", "unknown")
-    
+
     error_msg = "No error logged"
     trigger_time = "Unknown Time"
-    
+
     if isinstance(logs, list) and logs:
         for log in logs:
             if log.get("severity") in ("ERROR", "CRITICAL"):
                 error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
             if log.get("timestamp"):
                 trigger_time = log.get("timestamp")
-                
+
     if error_msg == "No error logged" and spans:
         for s in spans:
             if s.get("error_message"):

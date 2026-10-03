@@ -43,7 +43,12 @@ busywork — break them and the agent's planner or the local simulation stops wo
 uv run simulate_incident.py                                            # end-to-end smoke test
 PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
 PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
+uv run python -m unittest discover -s test                             # workspace import smoke test
+uv run ruff check . && uv run ruff format --check .                    # lint + formatting
 ```
+
+CI runs exactly these, the tests on both Python 3.11 and 3.14 and `ruff` once, so if they pass
+locally the pull request should be green.
 
 ### Where you can plug in
 
@@ -266,7 +271,7 @@ the loop until a remediation needs approval. Record a short demo. 🎬
 - [ ] New tools have an `IS_MOCK` branch, full type hints, and a clear docstring.
 - [ ] `uv run simulate_incident.py` still produces a complete report (both tiers if you touched the
   workflow).
-- [ ] Both unit-test suites pass.
+- [ ] All three test suites pass, and `ruff check` / `ruff format --check` are clean.
 - [ ] The Orchestrator is still deny-by-default; any new capability is a deliberate `allow(...)` /
   `ask_user(...)`.
 - [ ] You can explain *why* your change is safe.

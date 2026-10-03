@@ -1,0 +1,50 @@
+[
+  {
+    "timestamp": "2026-06-11T16:00:00Z",
+    "severity": "INFO",
+    "message": "Gateway received request to /api/gateway",
+    "logging.googleapis.com/trace": "projects/mock-project/traces/06f96234b89348488f6a2a01b1fc4632",
+    "logging.googleapis.com/spanId": "span-gateway-111",
+    "traceId": "06f96234b89348488f6a2a01b1fc4632"
+  },
+  {
+    "timestamp": "2026-06-11T16:00:00Z",
+    "severity": "INFO",
+    "message": "Routing request to backend service...",
+    "logging.googleapis.com/trace": "projects/mock-project/traces/06f96234b89348488f6a2a01b1fc4632",
+    "logging.googleapis.com/spanId": "span-gateway-111",
+    "traceId": "06f96234b89348488f6a2a01b1fc4632"
+  },
+  {
+    "timestamp": "2026-06-11T16:00:00Z",
+    "severity": "INFO",
+    "message": "Backend service processing business logic",
+    "logging.googleapis.com/trace": "projects/mock-project/traces/06f96234b89348488f6a2a01b1fc4632",
+    "logging.googleapis.com/spanId": "span-backend-222",
+    "traceId": "06f96234b89348488f6a2a01b1fc4632"
+  },
+  {
+    "timestamp": "2026-06-11T16:00:00Z",
+    "severity": "INFO",
+    "message": "Database connecting to instance: db-primary.gcp.internal:5432",
+    "logging.googleapis.com/trace": "projects/mock-project/traces/06f96234b89348488f6a2a01b1fc4632",
+    "logging.googleapis.com/spanId": "span-database-333",
+    "traceId": "06f96234b89348488f6a2a01b1fc4632"
+  },
+  {
+    "timestamp": "2026-06-11T16:00:10Z",
+    "severity": "CRITICAL",
+    "message": "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms",
+    "logging.googleapis.com/trace": "projects/mock-project/traces/06f96234b89348488f6a2a01b1fc4632",
+    "logging.googleapis.com/spanId": "span-database-333",
+    "traceId": "06f96234b89348488f6a2a01b1fc4632"
+  },
+  {
+    "timestamp": "2026-06-11T16:00:10Z",
+    "severity": "ERROR",
+    "message": "Gateway received error from backend: ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms",
+    "logging.googleapis.com/trace": "projects/mock-project/traces/06f96234b89348488f6a2a01b1fc4632",
+    "logging.googleapis.com/spanId": "span-gateway-111",
+    "traceId": "06f96234b89348488f6a2a01b1fc4632"
+  }
+]

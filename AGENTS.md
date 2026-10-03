@@ -104,17 +104,44 @@ Container setups utilize multi-stage builds to optimize image size and security:
 
 ### 3. Running Tests
 Each package follows the `src/` + `test/` layout, so put its `src` on `PYTHONPATH` when running its
-tests from the workspace root:
+tests from the workspace root. There is also a workspace-wide import smoke test at the root, which
+covers `app/`, `inventory_agent/`, `sre_common/` and the `skills/sre_incident_solver/` mirror — the
+trees with no unit tests of their own:
 ```bash
 PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
 PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
+uv run python -m unittest discover -s test
 ```
+
+`agent/test/test_sdk_contract.py` and `sre_agent/test/test_sdk_contract.py` are a deliberate
+exception to the mock-everything rule: they assert against the *real* installed `google-antigravity`
+and `google-adk`. Every other test runs against the `try/except ImportError` fallbacks, so without
+them an upstream rename degrades the agents to their simulated mode silently. If you change an SDK
+call site, update the contract test with it.
+
+### 4. Linting & Formatting
+`ruff` is configured in the root `pyproject.toml` (`target-version = "py311"`, `line-length = 120`).
+Both commands must be clean before you commit:
+```bash
+uv run ruff check .
+uv run ruff format --check .   # drop --check to apply
+```
+
+### 5. Continuous Integration
+`.github/workflows/ci.yml` runs the three test suites and the local `simulate_incident.py` smoke
+test on **Python 3.11 and 3.14** — the declared floor and the version the Dockerfiles actually ship.
+`ruff check` + `ruff format --check` run once, in a separate job: `target-version = "py311"` fixes
+the rules ruff applies, so its verdict does not depend on the interpreter it runs under and a second
+pass would only cost CI time. Dependabot keeps the declared floors and `uv.lock` current; see
+`.github/dependabot.yml`.
 
 ---
 
 ## 🐍 Python Conventions
 
-The workspace targets **Python 3.11+** (`requires-python = ">=3.11"`) and uses modern, 3.14-style typing:
+The workspace targets **Python 3.11+** (`requires-python = ">=3.11"`) and uses modern, 3.14-style
+typing. CI tests both ends of that range, so a 3.12+-only construct will fail the build rather than
+reach a 3.11 user:
 
 * Use native container generics (e.g., `list[str]`, `dict[str, Any]`) instead of importing `List` or
   `Dict` from `typing`.

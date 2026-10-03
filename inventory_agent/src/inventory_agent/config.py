@@ -1,5 +1,4 @@
-"""Runtime configurations for the Inventory Agent.
-"""
+"""Runtime configurations for the Inventory Agent."""
 
 import os
 

@@ -5,20 +5,24 @@ Antigravity SDK. It configures system instructions to delegate SRE queries
 to the SRE Sub-Agent, registers the A2A tool, and establishes safety policies.
 """
 
-import os
+import asyncio
 import json
 import logging
-import asyncio
+import os
 from typing import Any
+
 import httpx
+
 from sre_common import retry_async
 
-# Fail-safe OpenTelemetry imports for tracer initialization
+# Fail-safe OpenTelemetry imports for tracer initialization. These names are a
+# capability probe for HAS_OTEL, not call sites - hence the noqa.
 try:
-    from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+    from opentelemetry import trace  # noqa: F401
+    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter  # noqa: F401
+    from opentelemetry.sdk.trace import TracerProvider  # noqa: F401
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: F401
+
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
@@ -29,9 +33,10 @@ logger = logging.getLogger("orchestrator_agent")
 # Resilient imports for google-antigravity
 try:
     from google.antigravity import Agent, LocalAgentConfig
-    from google.antigravity.hooks.policy import deny, allow, ask_user
-    from google.antigravity.hooks.hooks import OnToolErrorHook, HookContext
+    from google.antigravity.hooks.hooks import HookContext, OnToolErrorHook
+    from google.antigravity.hooks.policy import allow, ask_user, deny
     from google.antigravity.types import Text, Thought, ToolCall, ToolResult
+
     HAS_ANTIGRAVITY = "GEMINI_API_KEY" in os.environ
 except ImportError:
     HAS_ANTIGRAVITY = False
@@ -40,7 +45,9 @@ except ImportError:
 MOCK_HISTORY_DB: dict[str, list[dict[str, Any]]] = {}
 
 if not HAS_ANTIGRAVITY:
-    logger.warning("google-antigravity is not active or GEMINI_API_KEY is missing. Using simulated agent config fallbacks.")
+    logger.warning(
+        "google-antigravity is not active or GEMINI_API_KEY is missing. Using simulated agent config fallbacks."
+    )
 
     class Text:
         def __init__(self, text: str, step_index: int = 0) -> None:
@@ -105,7 +112,7 @@ if not HAS_ANTIGRAVITY:
                 "thinking": self.thinking,
                 "tool_calls": self.tool_calls,
                 "error": self.error,
-                "is_complete_response": self.is_complete_response
+                "is_complete_response": self.is_complete_response,
             }
 
     class MockResponse:
@@ -147,7 +154,7 @@ if not HAS_ANTIGRAVITY:
                     else:
                         diagnosis = fallback_diagnosis
                     self._text = diagnosis
-                    
+
                     yield Thought(text="Orchestration complete. Streaming report...")
                     await asyncio.sleep(0.5)
 
@@ -164,9 +171,7 @@ if not HAS_ANTIGRAVITY:
                         status="DONE",
                         content=self._text,
                         thinking="Orchestration complete. Streaming report...",
-                        tool_calls=[
-                            {"name": "diagnose_sre", "args": {"prompt": self.prompt}}
-                        ]
+                        tool_calls=[{"name": "diagnose_sre", "args": {"prompt": self.prompt}}],
                     )
                     self.conversation._steps.append(model_step)
                 else:
@@ -186,9 +191,10 @@ if not HAS_ANTIGRAVITY:
                         target="TARGET_USER",
                         status="DONE",
                         content=self._text,
-                        thinking="Simulating basic greeting response..."
+                        thinking="Simulating basic greeting response...",
                     )
                     self.conversation._steps.append(model_step)
+
             return _gen()
 
     class MockConversation:
@@ -213,12 +219,12 @@ if not HAS_ANTIGRAVITY:
         async def chat(self, prompt: str) -> Any:
             # Check if SRE diagnostics keyword is present
             is_diag = any(x in prompt.lower() for x in ("diagnose", "error", "trace", "latency", "sre"))
-            
+
             # Setup session in database
             conv_id = self.conversation_id
             if conv_id not in MOCK_HISTORY_DB:
                 MOCK_HISTORY_DB[conv_id] = []
-            
+
             # Record user step
             user_step = MockStep(
                 step_index=len(self.conversation._steps),
@@ -226,21 +232,24 @@ if not HAS_ANTIGRAVITY:
                 source="USER",
                 target="MODEL",
                 status="SUCCESS",
-                content=prompt
+                content=prompt,
             )
             self.conversation._steps.append(user_step)
 
             class MockResponseWrapper:
                 def __init__(self, is_diag: bool, prompt: str, conversation: Any) -> None:
                     self.response = MockResponse(is_diag, prompt, conversation)
+
                 @property
                 def chunks(self):
                     return self.response.chunks
+
                 async def text(self):
                     # Consume the chunks to build the full text
-                    async for chunk in self.response.chunks:
+                    async for _ in self.response.chunks:
                         pass
                     return self.response._text
+
                 async def cancel(self):
                     pass
 
@@ -250,6 +259,7 @@ if not HAS_ANTIGRAVITY:
         def conversation_id(self) -> str | None:
             if not getattr(self.config, "conversation_id", None):
                 import uuid
+
                 self.config.conversation_id = f"mock-{uuid.uuid4().hex}"
             return self.config.conversation_id
 
@@ -268,15 +278,25 @@ if not HAS_ANTIGRAVITY:
             self.policies = policies or []
             self.hooks = hooks or []
 
-    def deny(target: str) -> Any: return f"deny:{target}"
-    def allow(target: str) -> Any: return f"allow:{target}"
-    def ask_user(target: str, *, handler: Any = None) -> Any: return f"ask_user:{target}"
-    class OnToolErrorHook: pass
-    class HookContext: pass
+    def deny(target: str) -> Any:
+        return f"deny:{target}"
+
+    def allow(target: str) -> Any:
+        return f"allow:{target}"
+
+    def ask_user(target: str, *, handler: Any = None) -> Any:
+        return f"ask_user:{target}"
+
+    class OnToolErrorHook:
+        pass
+
+    class HookContext:
+        pass
 
 
 class ToolRegistry:
     """Registry to manage and retrieve custom agent tools."""
+
     def __init__(self) -> None:
         self._tools = []
 
@@ -309,7 +329,7 @@ async def _post_to_sre_agent(url: str, payload: dict[str, Any]) -> str:
     async with httpx.AsyncClient() as client:
         response = await client.post(url, json=payload, timeout=60.0)
         response.raise_for_status()
-        
+
         # Consume SSE stream events to extract final report
         accumulated_report = ""
         for line in response.iter_lines():
@@ -343,6 +363,7 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
         try:
             from sre_agent.gcp_tools import query_traces
             from sre_agent.sre_workflow import run_sre_diagnostics
+
             resolved_project = project_id or os.environ.get("GCP_PROJECT") or "simulation-project-123"
             traces_json = await query_traces(project_id=resolved_project, limit=10)
             return await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
@@ -356,28 +377,21 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
 
     sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
     url = f"{sre_agent_url}/v1/agents/sre/messages"
-    payload = {
-        "prompt": prompt,
-        "project_id": project_id,
-        "refresh": refresh
-    }
-    
+    payload = {"prompt": prompt, "project_id": project_id, "refresh": refresh}
+
     logger.info(f"Orchestrating A2A POST to SRE Agent: {url}")
     try:
         return await _post_to_sre_agent(url, payload)
     except Exception as e:
         logger.error(f"Failed to communicate with SRE sub-agent: {e}")
-        return f"Error: Failed to contact SRE Sub-Agent after retries: {str(e)}"
+        return f"Error: Failed to contact SRE Sub-Agent after retries: {e!s}"
 
 
 def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:
     tools: list[Any] = []
     tools.extend(registry.get_tools())
 
-    safety_policies = [
-        deny("*"),
-        allow("diagnose_sre")
-    ]
+    safety_policies = [deny("*"), allow("diagnose_sre")]
 
     system_instructions = (
         "You are a user-facing Orchestrator agent.\n"
@@ -388,24 +402,17 @@ def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgen
     )
 
     return LocalAgentConfig(
-        system_instructions=system_instructions,
-        tools=tools,
-        policies=safety_policies,
-        hooks=[SreToolErrorHook()]
+        system_instructions=system_instructions, tools=tools, policies=safety_policies, hooks=[SreToolErrorHook()]
     )
 
 
 def load_firestore_agent_config(
-    conversation_id: str | None = None,
-    config_path: str = "agent/agent_config.json"
+    conversation_id: str | None = None, config_path: str = "agent/agent_config.json"
 ) -> Any:
     tools: list[Any] = []
     tools.extend(registry.get_tools())
 
-    safety_policies = [
-        deny("*"),
-        allow("diagnose_sre")
-    ]
+    safety_policies = [deny("*"), allow("diagnose_sre")]
 
     system_instructions = (
         "You are a user-facing Orchestrator agent.\n"
@@ -417,6 +424,7 @@ def load_firestore_agent_config(
 
     if HAS_ANTIGRAVITY:
         from agent.firestore_strategy import FirestoreAgentConfig
+
         return FirestoreAgentConfig(
             system_instructions=system_instructions,
             tools=tools,

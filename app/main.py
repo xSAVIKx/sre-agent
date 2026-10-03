@@ -6,13 +6,14 @@ supports real GCP Cloud Trace/Logging integration as well as a local mock mode
 that writes synthetic telemetry to a local directory for simulation testing.
 """
 
+import json
+import logging
 import os
 import time
 import uuid
-import json
-import logging
-import httpx
 from typing import Any
+
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request
 
 # Setup logging
@@ -26,10 +27,11 @@ MOCK_DATA_DIR = os.getenv("MOCK_DATA_DIR", "mock_telemetry_data")
 # Fail-safe OpenTelemetry imports
 try:
     from opentelemetry import trace
+    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
-    from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
     HAS_OTEL = True
 except ImportError:
     HAS_OTEL = False
@@ -55,7 +57,7 @@ else:
 app = FastAPI(
     title="SRE Codelab Target Application",
     description="Simulated multi-tier application generating traces and logs.",
-    version="0.1.0"
+    version="0.1.0",
 )
 
 
@@ -77,7 +79,7 @@ def _log_structured(message: str, severity: str, trace_id: str, span_id: str | N
         "message": message,
         "logging.googleapis.com/trace": f"projects/{os.getenv('GCP_PROJECT', 'mock-project')}/traces/{trace_id}",
         "logging.googleapis.com/spanId": span_id,
-        "traceId": trace_id
+        "traceId": trace_id,
     }
 
     # Log to console
@@ -91,7 +93,7 @@ def _log_structured(message: str, severity: str, trace_id: str, span_id: str | N
         logs = []
         if os.path.exists(logs_file):
             try:
-                with open(logs_file, "r", encoding="utf-8") as f:
+                with open(logs_file, encoding="utf-8") as f:
                     logs = json.load(f)
             except Exception:
                 pass
@@ -104,7 +106,7 @@ def _log_structured(message: str, severity: str, trace_id: str, span_id: str | N
         all_logs = []
         if os.path.exists(all_logs_file):
             try:
-                with open(all_logs_file, "r", encoding="utf-8") as f:
+                with open(all_logs_file, encoding="utf-8") as f:
                     all_logs = json.load(f)
             except Exception:
                 pass
@@ -154,7 +156,7 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
                 "parentSpanId": None,
                 "startTime": _ts(gw_start),
                 "endTime": _ts(gw_start + gateway_duration),
-                "status": "ERROR" if trigger_error else "OK"
+                "status": "ERROR" if trigger_error else "OK",
             },
             {
                 "name": "/api/backend",
@@ -162,7 +164,7 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
                 "parentSpanId": "span-gateway-111",
                 "startTime": _ts(be_start),
                 "endTime": _ts(be_start + backend_duration),
-                "status": "ERROR" if trigger_error else "OK"
+                "status": "ERROR" if trigger_error else "OK",
             },
             {
                 "name": "/api/database",
@@ -171,9 +173,11 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
                 "startTime": _ts(db_start),
                 "endTime": _ts(db_start + db_duration),
                 "status": "ERROR" if trigger_error else "OK",
-                "error_message": "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms" if trigger_error else None
-            }
-        ]
+                "error_message": "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
+                if trigger_error
+                else None,
+            },
+        ],
     }
 
     # Write trace detail file
@@ -185,18 +189,21 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
     traces = []
     if os.path.exists(traces_file):
         try:
-            with open(traces_file, "r", encoding="utf-8") as f:
+            with open(traces_file, encoding="utf-8") as f:
                 traces = json.load(f)
         except Exception:
             pass
     # Put new traces at the beginning
-    traces.insert(0, {
-        "traceId": trace_id,
-        "name": "/api/gateway",
-        "startTime": "2026-06-11T16:00:00.000Z",
-        "durationMs": gateway_duration,
-        "error": trigger_error
-    })
+    traces.insert(
+        0,
+        {
+            "traceId": trace_id,
+            "name": "/api/gateway",
+            "startTime": "2026-06-11T16:00:00.000Z",
+            "durationMs": gateway_duration,
+            "error": trigger_error,
+        },
+    )
     with open(traces_file, "w", encoding="utf-8") as f:
         json.dump(traces, f, indent=2)
 
@@ -232,7 +239,7 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
         except HTTPException as e:
             _log_structured(f"Gateway received error from backend: {e.detail}", "ERROR", trace_id, "span-gateway-111")
             _generate_mock_trace(trace_id, trigger_error=True)
-            raise HTTPException(status_code=500, detail={"error": "Internal Server Error", "trace_id": trace_id})
+            raise HTTPException(status_code=500, detail={"error": "Internal Server Error", "trace_id": trace_id}) from e
 
     # Real OTEL tracing (if active)
     if tracer:
@@ -247,20 +254,25 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
                 # Inject tracing headers
                 headers["traceparent"] = f"00-{otel_trace_id}-{span.get_span_context().span_id:016x}-01"
                 try:
-                    response = await client.get(f"{backend_url}/api/backend?trace_id={otel_trace_id}&trigger_error={str(trigger_error).lower()}", headers=headers)
+                    response = await client.get(
+                        f"{backend_url}/api/backend?trace_id={otel_trace_id}&trigger_error={str(trigger_error).lower()}",
+                        headers=headers,
+                    )
                     if response.status_code != 200:
                         raise HTTPException(status_code=500, detail="Backend failed")
                     return {"status": "success", "trace_id": otel_trace_id, "data": response.json()}
                 except Exception as e:
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id})
+                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id}) from e
 
     return {"status": "success", "trace_id": trace_id, "info": "OTEL disabled"}
 
 
 @app.get("/api/backend")
-async def backend(request: Request, trace_id: str = Query(...), trigger_error: bool = Query(default=False)) -> dict[str, Any]:
+async def backend(
+    request: Request, trace_id: str = Query(...), trigger_error: bool = Query(default=False)
+) -> dict[str, Any]:
     """Backend service endpoint.
 
     Delegates the processing logic to the database layer.
@@ -292,7 +304,7 @@ async def backend(request: Request, trace_id: str = Query(...), trigger_error: b
                 try:
                     response = await client.get(
                         f"{backend_url}/api/database?trace_id={trace_id}&trigger_error={str(trigger_error).lower()}",
-                        headers=headers
+                        headers=headers,
                     )
                     if response.status_code != 200:
                         raise HTTPException(status_code=500, detail="Database failed")
@@ -300,7 +312,7 @@ async def backend(request: Request, trace_id: str = Query(...), trigger_error: b
                 except Exception as e:
                     span.record_exception(e)
                     span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
+                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
 
     # Real mode without tracer active
     backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
@@ -313,11 +325,13 @@ async def backend(request: Request, trace_id: str = Query(...), trigger_error: b
                 raise HTTPException(status_code=500, detail="Database failed")
             return {"service": "backend", "db": response.json()}
         except Exception as e:
-            raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id})
+            raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
 
 
 @app.get("/api/database")
-async def database(request: Request, trace_id: str = Query(...), trigger_error: bool = Query(default=False)) -> dict[str, Any]:
+async def database(
+    request: Request, trace_id: str = Query(...), trigger_error: bool = Query(default=False)
+) -> dict[str, Any]:
     """Database simulator service.
 
     Simulates the database query layer.
@@ -329,7 +343,9 @@ async def database(request: Request, trace_id: str = Query(...), trigger_error: 
     Returns:
         A dictionary containing query execution status.
     """
-    _log_structured("Database connecting to instance: db-primary.gcp.internal:5432", "INFO", trace_id, "span-database-333")
+    _log_structured(
+        "Database connecting to instance: db-primary.gcp.internal:5432", "INFO", trace_id, "span-database-333"
+    )
 
     if tracer and not IS_MOCK:
         parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
