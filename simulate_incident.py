@@ -8,6 +8,7 @@ locally to analyze the mock files and output a diagnostic report.
 import asyncio
 import logging
 import os
+import shutil
 import sys
 
 # Ensure workspace root is in Python path
@@ -31,6 +32,13 @@ async def run_simulation() -> None:
     os.environ["MOCK_GCP"] = "true"
     os.environ["MOCK_DATA_DIR"] = "mock_telemetry_data"
     os.environ["GCP_PROJECT"] = "simulation-project-123"
+    # Run the diagnostics workflow in-process rather than calling a sub-agent service.
+    os.environ.pop("SRE_AGENT_URL", None)
+
+    # Start every run from a clean slate so the report always describes this run's incident.
+    if "--keep-data" not in sys.argv and os.path.isdir(os.environ["MOCK_DATA_DIR"]):
+        shutil.rmtree(os.environ["MOCK_DATA_DIR"])
+        logger.info("Cleared previous mock telemetry (pass --keep-data to accumulate runs).")
 
     # 1. Generate simulated telemetry
     logger.info("Simulating target application incident (Gateway -> Backend -> Database)...")

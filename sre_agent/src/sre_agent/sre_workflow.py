@@ -165,7 +165,11 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
             else:
                 topology = await _fetch_topology_with_retry(inv_url, params)
         except Exception as e:
-            logger.error(f"Failed to query Inventory Agent: {e}")
+            if IS_MOCK:
+                # Expected in the standalone simulation: no Inventory Agent is running.
+                logger.info(f"Inventory Agent unavailable in mock mode ({e}); using the built-in mock topology.")
+            else:
+                logger.error(f"Failed to query Inventory Agent: {e}")
 
         # Fallback topology in mock mode
         if IS_MOCK and not topology.get("discovered_resources"):
@@ -546,7 +550,7 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
 
     import os
 
-    if HAS_ADK and "GEMINI_API_KEY" in os.environ:
+    if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
         return await _run_adk_diagnostics(traces_json, project_id)
     else:
         return await _run_simulated_diagnostics(traces_json, project_id)
