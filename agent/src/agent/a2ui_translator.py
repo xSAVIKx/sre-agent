@@ -13,6 +13,33 @@ from typing import Any
 logger = logging.getLogger("sre_agent.a2ui_translator")
 
 
+# Bottleneck share of the whole trace at or above which an incident gets each level.
+SEVERITY_THRESHOLDS: tuple[tuple[float, str], ...] = ((90.0, "SEV1"), (50.0, "SEV2"), (0.0, "SEV3"))
+
+
+def classify_severity(text: str) -> dict[str, Any] | None:
+    """Builds a severity badge from the bottleneck contribution in a cascade report.
+
+    `analyze_trace_cascade` reports the bottleneck as e.g.
+    ``*   **Self-Execution Time**: `10200 ms` (99.3% of total trace)``. The larger the
+    share of the request one span is responsible for, the more clearly a single
+    component is down, and the more severe the incident.
+
+    Args:
+        text: A diagnosis or post-mortem report in Markdown.
+
+    Returns:
+        A ``severity_badge`` A2UI component - ``{"type": "severity_badge", "level":
+        "SEV1", "contribution": 99.3}`` - or None when the report has no bottleneck.
+    """
+    match = re.search(r"\(([\d.]+)% of total trace\)", text)
+    if not match:
+        return None
+    contribution = float(match.group(1))
+    level = next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
+    return {"type": "severity_badge", "level": level, "contribution": contribution}
+
+
 def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
     """Translates Markdown responses into structured A2UI declarative JSON.
 
@@ -43,9 +70,11 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
     if "# 🚨 Incident Post-Mortem" in text or "Incident Post-Mortem" in text:
         title_match = re.search(r"#\s*🚨\s*(Incident Post-Mortem[^\n]*)", text)
         title = title_match.group(1).strip() if title_match else "Incident Post-Mortem Report"
+        badge = classify_severity(text)
         return {
             "type": "container",
             "components": [
+                *([badge] if badge else []),
                 {
                     "type": "alert",
                     "level": "success",

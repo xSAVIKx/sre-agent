@@ -168,6 +168,48 @@ def _log_structured(message: str, severity: str, trace_id: str, span_id: str | N
             json.dump(all_logs, f, indent=2)
 
 
+CPU_METRIC = "run.googleapis.com/container/cpu/utilizations"
+DB_CONNECTIONS_METRIC = "cloudsql.googleapis.com/database/postgresql/connection_count"
+DB_MAX_CONNECTIONS = 100
+
+
+def _mock_metric_series(trigger_error: bool) -> list[dict[str, Any]]:
+    """Builds the Cloud Monitoring time series the target app reports in mock mode.
+
+    Each series mirrors the shape `query_metrics` filters on: a `metric.type`, the
+    `metric.labels` that identify the resource, and `points` whose `value` is the
+    reading (oldest first, so the last point is the latest).
+
+    Args:
+        trigger_error: Whether this run simulates the database-timeout incident.
+
+    Returns:
+        Two time series: container CPU utilization of `sre-chaos-monkey` (a 0-1
+        fraction) and the connection count of the `db-primary` database.
+    """
+    # During the incident the app is idle-waiting on the database, so CPU stays low
+    # while the connection pool sits at its limit.
+    cpu = [0.18, 0.21, 0.24] if trigger_error else [0.18, 0.19, 0.17]
+    connections = [62, 97, DB_MAX_CONNECTIONS] if trigger_error else [12, 14, 13]
+    return [
+        {
+            "metric": {"type": CPU_METRIC, "labels": {"service_name": "sre-chaos-monkey"}},
+            "points": [{"value": v} for v in cpu],
+        },
+        {
+            "metric": {"type": DB_CONNECTIONS_METRIC, "labels": {"database_id": "db-primary"}},
+            "points": [{"value": v} for v in connections],
+        },
+    ]
+
+
+def _write_mock_metrics(trigger_error: bool) -> None:
+    """Writes `metrics.json` so the SRE agent's `query_metrics` has data in mock mode."""
+    os.makedirs(MOCK_DATA_DIR, exist_ok=True)
+    with open(os.path.join(MOCK_DATA_DIR, "metrics.json"), "w", encoding="utf-8") as f:
+        json.dump(_mock_metric_series(trigger_error), f, indent=2)
+
+
 def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
     """Generates and writes a mock trace JSON file for local simulation.
 
@@ -259,6 +301,8 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
     )
     with open(traces_file, "w", encoding="utf-8") as f:
         json.dump(traces, f, indent=2)
+
+    _write_mock_metrics(trigger_error)
 
 
 @app.get("/api/gateway")
