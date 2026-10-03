@@ -1,0 +1,28 @@
+--- a/skills/sre_incident_solver/sre_workflow.py
++++ b/skills/sre_incident_solver/sre_workflow.py
+@@ -97,10 +97,7 @@
+         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
+         "if you need more context or need to build a post-mortem report."
+     ),
+-    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
+-    #   on their type hints and docstrings. They are already imported at the top of this file:
+-    #   query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem.
+-    tools=[],
++    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
+     model="gemini-3.8-flash",
+ )
+ 
+--- a/sre_agent/src/sre_agent/sre_workflow.py
++++ b/sre_agent/src/sre_agent/sre_workflow.py
+@@ -95,10 +95,7 @@
+         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
+         "if you need more context or need to build a post-mortem report."
+     ),
+-    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
+-    #   on their type hints and docstrings. They are already imported at the top of this file:
+-    #   query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem.
+-    tools=[],
++    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
+     model="gemini-3.8-flash",
+ )
+ 

@@ -1,0 +1,20 @@
+--- a/agent/src/agent/a2ui_translator.py
++++ b/agent/src/agent/a2ui_translator.py
+@@ -32,11 +32,12 @@
+         A ``severity_badge`` A2UI component - ``{"type": "severity_badge", "level":
+         "SEV1", "contribution": 99.3}`` - or None when the report has no bottleneck.
+     """
+-    # TODO(step-5): Find the "(NN.N% of total trace)" figure in `text` with `re.search`, turn it
+-    #   into a float, pick the first level in SEVERITY_THRESHOLDS whose threshold it reaches, and
+-    #   return {"type": "severity_badge", "level": <level>, "contribution": <the float>}.
+-    #   Return None when the report has no such figure.
+-    return None
++    match = re.search(r"\(([\d.]+)% of total trace\)", text)
++    if not match:
++        return None
++    contribution = float(match.group(1))
++    level = next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
++    return {"type": "severity_badge", "level": level, "contribution": contribution}
+ 
+ 
+ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:

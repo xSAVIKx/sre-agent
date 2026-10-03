@@ -1,0 +1,54 @@
+--- a/skills/sre_incident_solver/gcp_tools.py
++++ b/skills/sre_incident_solver/gcp_tools.py
+@@ -886,14 +886,16 @@
+         inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
+         inclusive_durations[s["spanId"]] = inc_dur
+ 
+-    # TODO(step-1): Calculate the exclusive (self) duration of every span, then pick the bottleneck.
+-    #   - A span's exclusive time is its inclusive time minus the time its children cover.
+-    #     `children_map[span_id]` lists a span's child IDs, `span_map[child_id]` gives the child
+-    #     span, and `_covered_ms(span, children)` returns the ms the children cover (overlaps
+-    #     counted once). Never let it drop below 0.
+-    #   - The bottleneck is the span with the largest exclusive duration.
+-    exclusive_durations = {s["spanId"]: 0 for s in spans}
+-    bottleneck_span_id = spans[0]["spanId"]
++    # Calculate exclusive duration for all spans
++    exclusive_durations = {}
++    for s in spans:
++        span_id = s["spanId"]
++        child_ids = children_map[span_id]
++        covered_ms = _covered_ms(s, [span_map[cid] for cid in child_ids])
++        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - covered_ms)
++
++    # Find the bottleneck (the span with the highest exclusive duration)
++    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
+     bottleneck_span = span_map[bottleneck_span_id]
+     bottleneck_exclusive = exclusive_durations[bottleneck_span_id]
+     total_duration = data.get("durationMs", 1)
+--- a/sre_agent/src/sre_agent/gcp_tools.py
++++ b/sre_agent/src/sre_agent/gcp_tools.py
+@@ -884,14 +884,16 @@
+         inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
+         inclusive_durations[s["spanId"]] = inc_dur
+ 
+-    # TODO(step-1): Calculate the exclusive (self) duration of every span, then pick the bottleneck.
+-    #   - A span's exclusive time is its inclusive time minus the time its children cover.
+-    #     `children_map[span_id]` lists a span's child IDs, `span_map[child_id]` gives the child
+-    #     span, and `_covered_ms(span, children)` returns the ms the children cover (overlaps
+-    #     counted once). Never let it drop below 0.
+-    #   - The bottleneck is the span with the largest exclusive duration.
+-    exclusive_durations = {s["spanId"]: 0 for s in spans}
+-    bottleneck_span_id = spans[0]["spanId"]
++    # Calculate exclusive duration for all spans
++    exclusive_durations = {}
++    for s in spans:
++        span_id = s["spanId"]
++        child_ids = children_map[span_id]
++        covered_ms = _covered_ms(s, [span_map[cid] for cid in child_ids])
++        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - covered_ms)
++
++    # Find the bottleneck (the span with the highest exclusive duration)
++    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
+     bottleneck_span = span_map[bottleneck_span_id]
+     bottleneck_exclusive = exclusive_durations[bottleneck_span_id]
+     total_duration = data.get("durationMs", 1)
