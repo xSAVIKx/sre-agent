@@ -42,8 +42,11 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Export env vars
-export $(grep -v '^#' .env | xargs)
+# Export env vars (sourcing handles blank lines, comments and quoted values)
+set -a
+# shellcheck disable=SC1091
+. ./.env
+set +a
 
 echo "Configuration loaded:"
 echo "GCP Project: $GCP_PROJECT"
@@ -70,7 +73,7 @@ BUILD_SA_EMAIL="${BUILD_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
 
 if [ "$SKIP_INFRA" = "false" ]; then
     # 2. Enable Google Cloud APIs
-    echo -e "${BLUE}[1/5] Enabling GCP APIs...${NC}"
+    echo -e "${BLUE}[1/7] Enabling GCP APIs...${NC}"
     gcloud services enable \
         run.googleapis.com \
         cloudbuild.googleapis.com \
@@ -100,7 +103,7 @@ if [ "$SKIP_INFRA" = "false" ]; then
     fi
 
     # 3. Create Service Accounts
-    echo -e "\n${BLUE}[2/5] Creating service accounts...${NC}"
+    echo -e "\n${BLUE}[2/7] Creating service accounts...${NC}"
 
     # Target App Service Account
     if ! gcloud iam service-accounts describe "$APP_SA_EMAIL" &>/dev/null; then
@@ -147,7 +150,7 @@ if [ "$SKIP_INFRA" = "false" ]; then
     sleep 10
 
     # 4. Grant Least-Privilege IAM Roles
-    echo -e "\n${BLUE}[3/5] Assigning IAM roles (least-privilege)...${NC}"
+    echo -e "\n${BLUE}[3/7] Assigning IAM roles (least-privilege)...${NC}"
 
     # Target App Roles (Write-only telemetry)
     echo "Assigning roles to target application service account..."
@@ -275,12 +278,12 @@ if [ "$SKIP_INFRA" = "false" ]; then
         --field-config=field-path=embedding,vector-config='{"dimension":"768","flat":{}}' --async || true
 fi
 
-# 5. Build and Deploy Target Application (SRE Chaos Monkey) - SKIPPED FOR FAST REDEPLOY
-# echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
-# gcloud builds submit --config=app/cloudbuild.yaml \
-#     --region="$GCP_REGION" \
-#     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-#     --substitutions=_GCP_REGION="$GCP_REGION" .
+# 5. Build and Deploy Target Application (SRE Chaos Monkey)
+echo -e "\n${BLUE}[4/7] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
+gcloud builds submit --config=app/cloudbuild.yaml \
+    --region="$GCP_REGION" \
+    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
+    --substitutions=_GCP_REGION="$GCP_REGION" .
 
 TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" --format="value(status.url)")
 TARGET_APP_URL=$(echo "$TARGET_APP_URL" | sed 's/.*http/http/')
