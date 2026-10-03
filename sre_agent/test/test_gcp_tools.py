@@ -162,3 +162,45 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
         ):
             report = await analyze_trace_cascade("0" * 32)
             self.assertIn("Error retrieving trace cascade", report)
+
+    async def test_analyze_trace_cascade_overlapping_children_and_duplicate_span(self) -> None:
+        """Verifies self time counts overlapping child time once and duplicate spans once.
+
+        Real Cloud Trace data has both: concurrent child spans, and the Trace API returning
+        Cloud Run's root span twice. Summing child durations understated the parent's self
+        time (2000 ms instead of 4000 ms here), and the duplicate rendered the tree twice.
+        """
+
+        def span(name: str, span_id: str, parent: str | None, start_ms: int, end_ms: int) -> dict[str, object]:
+            return {
+                "name": name,
+                "spanId": span_id,
+                "parentSpanId": parent,
+                "startTime": f"2026-10-03T12:00:{start_ms // 1000:02d}.{start_ms % 1000:03d}Z",
+                "endTime": f"2026-10-03T12:00:{end_ms // 1000:02d}.{end_ms % 1000:03d}Z",
+                "status": "OK",
+                "error_message": None,
+            }
+
+        root = span("/api/gateway", "1", None, 0, 10000)
+        trace_details = {
+            "traceId": "a" * 32,
+            "root_span": "/api/gateway",
+            "durationMs": 10000,
+            "error": False,
+            "spans": [
+                root,
+                dict(root),
+                span("/api/backend", "2", "1", 1000, 6000),
+                span("/api/cache", "3", "1", 4000, 7000),
+            ],
+        }
+        with mock.patch(
+            "sre_agent.gcp_tools.get_trace_details", mock.AsyncMock(return_value=json.dumps(trace_details))
+        ):
+            report = await analyze_trace_cascade("a" * 32)
+
+        # The children cover 1000-7000 ms: 6000 ms, not 5000 + 3000 = 8000 ms.
+        self.assertIn("| `/api/gateway` | `1` | `None` | OK | 10000 ms | 4000 ms | 40.0% |", report)
+        self.assertEqual(1, report.count("| `/api/gateway` |"))
+        self.assertIn("**Bottleneck Span**: `/api/backend` (`2`)", report)

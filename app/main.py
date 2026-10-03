@@ -53,6 +53,32 @@ if HAS_OTEL and not IS_MOCK:
 else:
     tracer = None
 
+
+def _span_context(request: Request) -> Any:
+    """Returns the context a manual span should start in.
+
+    FastAPI 0.142+ traces each request itself once a tracer provider is set, so the handler
+    already runs inside a request span that continues the caller's trace. Starting in the
+    current context nests the manual span under it and keeps a single span hierarchy. Older
+    FastAPI versions create no request span, so fall back to the caller's `traceparent` header.
+    """
+    if trace.get_current_span().get_span_context().is_valid:
+        return None
+    return TraceContextTextMapPropagator().extract(carrier=request.headers)
+
+
+def _mark_span_error(span: Any, error_type: str, message: str) -> None:
+    """Marks a manual span as failed in a way the Cloud Trace v1 API can show.
+
+    The v1 API used by the SRE agent does not return span status, only attributes (as labels),
+    so the error is also recorded as `error.type` / `error.message` attributes.
+    """
+    span.set_status(trace.StatusCode.ERROR, message)
+    span.set_attribute("error.type", error_type)
+    if message:
+        span.set_attribute("error.message", message)
+
+
 # Create FastAPI application
 app = FastAPI(
     title="SRE Codelab Target Application",
@@ -263,7 +289,7 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
                     return {"status": "success", "trace_id": otel_trace_id, "data": response.json()}
                 except Exception as e:
                     span.record_exception(e)
-                    span.set_status(trace.StatusCode.ERROR, str(e))
+                    _mark_span_error(span, type(e).__name__, str(e))
                     raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id}) from e
 
     return {"status": "success", "trace_id": trace_id, "info": "OTEL disabled"}
@@ -295,8 +321,7 @@ async def backend(
 
     # Real OTEL tracing (if active)
     if tracer:
-        parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
-        with tracer.start_as_current_span("/api/backend", context=parent_context) as span:
+        with tracer.start_as_current_span("/api/backend", context=_span_context(request)) as span:
             backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
             async with httpx.AsyncClient() as client:
                 headers = {}
@@ -311,7 +336,7 @@ async def backend(
                     return {"service": "backend", "db": response.json()}
                 except Exception as e:
                     span.record_exception(e)
-                    span.set_status(trace.StatusCode.ERROR, str(e))
+                    _mark_span_error(span, type(e).__name__, str(e))
                     raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
 
     # Real mode without tracer active
@@ -348,14 +373,13 @@ async def database(
     )
 
     if tracer and not IS_MOCK:
-        parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
-        with tracer.start_as_current_span("/api/database", context=parent_context) as span:
+        with tracer.start_as_current_span("/api/database", context=_span_context(request)) as span:
             if trigger_error:
                 time.sleep(10.0)
                 err_msg = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
                 _log_structured(err_msg, "CRITICAL", trace_id, "span-database-333")
                 span.record_exception(Exception(err_msg))
-                span.set_status(trace.StatusCode.ERROR, err_msg)
+                _mark_span_error(span, "ConnectionTimeoutError", err_msg)
                 raise HTTPException(status_code=500, detail=err_msg)
             return {"service": "database", "query": "SELECT * FROM users LIMIT 1", "rows": 1}
     else:
