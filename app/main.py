@@ -6,6 +6,7 @@ supports real GCP Cloud Trace/Logging integration as well as a local mock mode
 that writes synthetic telemetry to a local directory for simulation testing.
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -52,6 +53,58 @@ if HAS_OTEL and not IS_MOCK:
         IS_MOCK = True
 else:
     tracer = None
+
+
+def _span_context(request: Request) -> Any:
+    """Returns the context a manual span should start in.
+
+    FastAPI 0.142+ traces each request itself once a tracer provider is set, so the handler
+    already runs inside a request span that continues the caller's trace. Starting in the
+    current context nests the manual span under it and keeps a single span hierarchy. Older
+    FastAPI versions create no request span, so fall back to the caller's `traceparent` header.
+    """
+    if trace.get_current_span().get_span_context().is_valid:
+        return None
+    return TraceContextTextMapPropagator().extract(carrier=request.headers)
+
+
+# Longer than the database's simulated 10 s connection timeout, so each caller receives its
+# downstream service's error response instead of timing out first.
+DOWNSTREAM_TIMEOUT_S = 15.0
+
+
+def _detail_error(detail: Any) -> str | None:
+    """Returns the error text from an HTTPException detail (a string, or a dict with `error`)."""
+    if isinstance(detail, dict):
+        detail = detail.get("error")
+    return str(detail) if detail else None
+
+
+def _downstream_error(response: httpx.Response) -> str:
+    """Returns the error a downstream service reported, so callers can pass it up the chain."""
+    try:
+        error = _detail_error(response.json().get("detail"))
+    except Exception:
+        error = None
+    return error or f"HTTP {response.status_code} from {response.request.url.path}"
+
+
+def _exception_message(e: Exception) -> str:
+    """Returns `str(e)`, or the exception's type when that is empty (as it is for httpx timeouts)."""
+    return str(e) or type(e).__name__
+
+
+def _mark_span_error(span: Any, error_type: str, message: str) -> None:
+    """Marks a manual span as failed in a way the Cloud Trace v1 API can show.
+
+    The v1 API used by the SRE agent does not return span status, only attributes (as labels),
+    so the error is also recorded as `error.type` / `error.message` attributes.
+    """
+    span.set_status(trace.StatusCode.ERROR, message)
+    span.set_attribute("error.type", error_type)
+    if message:
+        span.set_attribute("error.message", message)
+
 
 # Create FastAPI application
 app = FastAPI(
@@ -229,7 +282,7 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
     if IS_MOCK:
         _log_structured("Routing request to backend service...", "INFO", trace_id, "span-gateway-111")
         # Simulate backend call delay
-        time.sleep(0.05)
+        await asyncio.sleep(0.05)
         # Call mock backend helper directly
         try:
             backend_response = await backend(request, trace_id, trigger_error)
@@ -239,7 +292,8 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
         except HTTPException as e:
             _log_structured(f"Gateway received error from backend: {e.detail}", "ERROR", trace_id, "span-gateway-111")
             _generate_mock_trace(trace_id, trigger_error=True)
-            raise HTTPException(status_code=500, detail={"error": "Internal Server Error", "trace_id": trace_id}) from e
+            error = _detail_error(e.detail) or "Internal Server Error"
+            raise HTTPException(status_code=500, detail={"error": error, "trace_id": trace_id}) from e
 
     # Real OTEL tracing (if active)
     if tracer:
@@ -249,7 +303,7 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
             # Call downstream backend service using httpx (injecting trace context headers)
             # In a real deployed setup, the backend URL is fetched from env
             backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=DOWNSTREAM_TIMEOUT_S) as client:
                 headers = {}
                 # Inject tracing headers
                 headers["traceparent"] = f"00-{otel_trace_id}-{span.get_span_context().span_id:016x}-01"
@@ -258,13 +312,16 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
                         f"{backend_url}/api/backend?trace_id={otel_trace_id}&trigger_error={str(trigger_error).lower()}",
                         headers=headers,
                     )
-                    if response.status_code != 200:
-                        raise HTTPException(status_code=500, detail="Backend failed")
-                    return {"status": "success", "trace_id": otel_trace_id, "data": response.json()}
                 except Exception as e:
                     span.record_exception(e)
-                    span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": otel_trace_id}) from e
+                    error = _exception_message(e)
+                    _mark_span_error(span, type(e).__name__, error)
+                    raise HTTPException(status_code=500, detail={"error": error, "trace_id": otel_trace_id}) from e
+                if response.status_code != 200:
+                    error = _downstream_error(response)
+                    _mark_span_error(span, str(response.status_code), error)
+                    raise HTTPException(status_code=500, detail={"error": error, "trace_id": otel_trace_id})
+                return {"status": "success", "trace_id": otel_trace_id, "data": response.json()}
 
     return {"status": "success", "trace_id": trace_id, "info": "OTEL disabled"}
 
@@ -287,7 +344,7 @@ async def backend(
     _log_structured("Backend service processing business logic", "INFO", trace_id, "span-backend-222")
 
     if IS_MOCK:
-        time.sleep(0.02)
+        await asyncio.sleep(0.02)
         # Delegate to database helper directly
         db_response = await database(request, trace_id, trigger_error)
         _log_structured("Backend service database query completed", "INFO", trace_id, "span-backend-222")
@@ -295,10 +352,9 @@ async def backend(
 
     # Real OTEL tracing (if active)
     if tracer:
-        parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
-        with tracer.start_as_current_span("/api/backend", context=parent_context) as span:
+        with tracer.start_as_current_span("/api/backend", context=_span_context(request)) as span:
             backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=DOWNSTREAM_TIMEOUT_S) as client:
                 headers = {}
                 headers["traceparent"] = f"00-{trace_id}-{span.get_span_context().span_id:016x}-01"
                 try:
@@ -306,26 +362,29 @@ async def backend(
                         f"{backend_url}/api/database?trace_id={trace_id}&trigger_error={str(trigger_error).lower()}",
                         headers=headers,
                     )
-                    if response.status_code != 200:
-                        raise HTTPException(status_code=500, detail="Database failed")
-                    return {"service": "backend", "db": response.json()}
                 except Exception as e:
                     span.record_exception(e)
-                    span.set_status(trace.StatusCode.ERROR, str(e))
-                    raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
+                    error = _exception_message(e)
+                    _mark_span_error(span, type(e).__name__, error)
+                    raise HTTPException(status_code=500, detail={"error": error, "trace_id": trace_id}) from e
+                if response.status_code != 200:
+                    error = _downstream_error(response)
+                    _mark_span_error(span, str(response.status_code), error)
+                    raise HTTPException(status_code=500, detail={"error": error, "trace_id": trace_id})
+                return {"service": "backend", "db": response.json()}
 
     # Real mode without tracer active
     backend_url = os.getenv("BACKEND_SERVICE_URL", "http://localhost:8080")
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=DOWNSTREAM_TIMEOUT_S) as client:
         try:
             response = await client.get(
                 f"{backend_url}/api/database?trace_id={trace_id}&trigger_error={str(trigger_error).lower()}"
             )
-            if response.status_code != 200:
-                raise HTTPException(status_code=500, detail="Database failed")
-            return {"service": "backend", "db": response.json()}
         except Exception as e:
-            raise HTTPException(status_code=500, detail={"error": str(e), "trace_id": trace_id}) from e
+            raise HTTPException(status_code=500, detail={"error": _exception_message(e), "trace_id": trace_id}) from e
+        if response.status_code != 200:
+            raise HTTPException(status_code=500, detail={"error": _downstream_error(response), "trace_id": trace_id})
+        return {"service": "backend", "db": response.json()}
 
 
 @app.get("/api/database")
@@ -348,23 +407,22 @@ async def database(
     )
 
     if tracer and not IS_MOCK:
-        parent_context = TraceContextTextMapPropagator().extract(carrier=request.headers)
-        with tracer.start_as_current_span("/api/database", context=parent_context) as span:
+        with tracer.start_as_current_span("/api/database", context=_span_context(request)) as span:
             if trigger_error:
-                time.sleep(10.0)
+                await asyncio.sleep(10.0)
                 err_msg = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
                 _log_structured(err_msg, "CRITICAL", trace_id, "span-database-333")
                 span.record_exception(Exception(err_msg))
-                span.set_status(trace.StatusCode.ERROR, err_msg)
+                _mark_span_error(span, "ConnectionTimeoutError", err_msg)
                 raise HTTPException(status_code=500, detail=err_msg)
             return {"service": "database", "query": "SELECT * FROM users LIMIT 1", "rows": 1}
     else:
         if trigger_error:
             # Simulate connection timeout latency
             if IS_MOCK:
-                time.sleep(0.1)  # Keep local execution snappy but record 10s duration in trace logs
+                await asyncio.sleep(0.1)  # Keep local execution snappy but record 10s duration in trace logs
             else:
-                time.sleep(10.0)
+                await asyncio.sleep(10.0)
 
             err_msg = "ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms"
             _log_structured(err_msg, "CRITICAL", trace_id, "span-database-333")
@@ -372,5 +430,5 @@ async def database(
 
         # Success scenario
         if IS_MOCK:
-            time.sleep(0.01)
+            await asyncio.sleep(0.01)
         return {"service": "database", "query": "SELECT * FROM users LIMIT 1", "rows": 1}

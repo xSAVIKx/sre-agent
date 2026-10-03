@@ -138,6 +138,47 @@ def _calculate_duration_ms(start_time_str: str, end_time_str: str) -> int:
     return 0
 
 
+def _covered_ms(parent: dict[str, Any], children: list[dict[str, Any]]) -> int:
+    """Returns how many milliseconds of a span its children cover, counting overlapping time once.
+
+    Children that run concurrently overlap, so summing their durations counts the shared
+    time twice and understates the parent's own (exclusive) time.
+
+    Args:
+        parent: Span dictionary with `startTime` and `endTime`.
+        children: The parent's direct child spans.
+
+    Returns:
+        Milliseconds of the parent's interval covered by at least one child.
+    """
+    p_start = _parse_timestamp(parent.get("startTime", ""))
+    p_end = _parse_timestamp(parent.get("endTime", ""))
+    if not p_start or not p_end:
+        return sum(_calculate_duration_ms(c.get("startTime", ""), c.get("endTime", "")) for c in children)
+
+    intervals = []
+    for c in children:
+        c_start = _parse_timestamp(c.get("startTime", ""))
+        c_end = _parse_timestamp(c.get("endTime", ""))
+        if c_start and c_end:
+            start, end = max(c_start, p_start), min(c_end, p_end)
+            if end > start:
+                intervals.append((start, end))
+
+    covered = datetime.timedelta()
+    merged_start = merged_end = None
+    for start, end in sorted(intervals):
+        if merged_end is None or start > merged_end:
+            if merged_end is not None:
+                covered += merged_end - merged_start
+            merged_start, merged_end = start, end
+        else:
+            merged_end = max(merged_end, end)
+    if merged_end is not None:
+        covered += merged_end - merged_start
+    return int(covered.total_seconds() * 1000)
+
+
 def _find_root_span(spans: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Finds the root span from a list of trace spans.
 
@@ -335,17 +376,29 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 
         has_error = _check_trace_error(spans)
 
+        seen_span_ids: set[str] = set()
         for span in spans:
+            # The Trace API can return the same span more than once (Cloud Run's root span, for one).
+            span_id = span.get("span_id", "")
+            if span_id in seen_span_ids:
+                continue
+            seen_span_ids.add(span_id)
+
             span_error = _check_span_error(span)
             labels = span.get("labels", {})
-            error_message = labels.get("/error/message") or labels.get("error_message") or labels.get("/error/name")
+            error_message = (
+                labels.get("/error/message")
+                or labels.get("error.message")
+                or labels.get("error_message")
+                or labels.get("/error/name")
+            )
             p_id = span.get("parent_span_id", "0")
             parent_span_id = None if (p_id == "0" or p_id == "" or p_id is None) else p_id
 
             spans_list.append(
                 {
                     "name": span.get("name", ""),
-                    "spanId": span.get("span_id", ""),
+                    "spanId": span_id,
                     "parentSpanId": parent_span_id,
                     "startTime": span.get("start_time", ""),
                     "endTime": span.get("end_time", ""),
@@ -629,6 +682,7 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
 
     # Build parent-child relationships and calculate inclusive durations
     span_map = {s["spanId"]: s for s in spans}
+    spans = list(span_map.values())  # drop duplicate span IDs
     children_map = {s["spanId"]: [] for s in spans}
 
     for s in spans:
@@ -647,8 +701,8 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
     for s in spans:
         span_id = s["spanId"]
         child_ids = children_map[span_id]
-        child_durations_sum = sum(inclusive_durations[cid] for cid in child_ids)
-        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - child_durations_sum)
+        covered_ms = _covered_ms(s, [span_map[cid] for cid in child_ids])
+        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - covered_ms)
 
     # Find the bottleneck (the span with the highest exclusive duration)
     bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
@@ -735,7 +789,7 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
     if isinstance(logs, list) and logs:
         for log in logs:
             if log.get("severity") in ("ERROR", "CRITICAL"):
-                error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
+                error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
             if log.get("timestamp"):
                 trigger_time = log.get("timestamp")
 

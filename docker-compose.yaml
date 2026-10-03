@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   firestore-emulator:
     image: google/cloud-sdk:emulators
@@ -40,6 +38,8 @@ services:
       - INVENTORY_AGENT_URL=http://inventory-agent:8080
       - GCP_PROJECT=${GCP_PROJECT}
       - MOCK_GCP=true
+    volumes:
+      - mock-telemetry:/workspace/mock_telemetry_data
     depends_on:
       firestore-emulator:
         condition: service_healthy
@@ -75,3 +75,10 @@ services:
     environment:
       - GCP_PROJECT=${GCP_PROJECT}
       - MOCK_GCP=true
+    volumes:
+      - mock-telemetry:/workspace/mock_telemetry_data
+
+volumes:
+  # In mock mode the target app writes its traces and logs here, and the SRE
+  # sub-agent reads them, so both containers must share it.
+  mock-telemetry:

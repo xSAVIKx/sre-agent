@@ -8,6 +8,8 @@ from unittest import mock
 
 from sre_agent.gcp_tools import analyze_trace_cascade, generate_post_mortem, list_metric_descriptors, query_metrics
 
+from sre_agent import gcp_tools
+
 # Checked-in telemetry fixtures. These are what `app/main.py:_generate_mock_trace`
 # and `app/main.py:_log_structured` write into `mock_telemetry_data/` when the
 # chaos-monkey app is driven with `trigger_error=True` - identically, bar the random
@@ -128,6 +130,30 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
             self.assertIn("**Impact Duration**: `10270 ms`", report)
             self.assertIn("**Root Service**: `gateway`", report)
 
+    async def test_generate_post_mortem_tolerates_payloadless_error_log(self) -> None:
+        """Verifies an ERROR entry with neither payload does not crash the post-mortem.
+
+        Cloud Run's own request log for a 500 response carries the trace ID and ERROR
+        severity but no text or JSON payload, so real Cloud Logging returns it with
+        both payload fields set to None.
+        """
+        real_query_logs = gcp_tools.query_logs_by_trace
+
+        async def query_logs_with_payloadless_entry(trace_id: str, project_id: str | None = None) -> str:
+            logs = json.loads(await real_query_logs(trace_id, project_id))
+            logs.append({"severity": "ERROR", "text_payload": None, "json_payload": None})
+            return json.dumps(logs)
+
+        with (
+            mock.patch("sre_agent.gcp_tools.IS_MOCK", True),
+            mock.patch("sre_agent.gcp_tools.MOCK_DATA_DIR", FIXTURE_DIR),
+            mock.patch("sre_agent.gcp_tools.query_logs_by_trace", query_logs_with_payloadless_entry),
+        ):
+            report = await generate_post_mortem(FIXTURE_TRACE_ID)
+            self.assertIn("Incident Post-Mortem", report)
+            # The payload-less entry must not overwrite the error message found before it.
+            self.assertIn("Gateway received error from backend: ConnectionTimeoutError", report)
+
     async def test_analyze_trace_cascade_unknown_trace(self) -> None:
         """Verifies analyze_trace_cascade reports a clean error when the trace is absent."""
         with (
@@ -136,3 +162,45 @@ class TestGcpToolsMetrics(unittest.IsolatedAsyncioTestCase):
         ):
             report = await analyze_trace_cascade("0" * 32)
             self.assertIn("Error retrieving trace cascade", report)
+
+    async def test_analyze_trace_cascade_overlapping_children_and_duplicate_span(self) -> None:
+        """Verifies self time counts overlapping child time once and duplicate spans once.
+
+        Real Cloud Trace data has both: concurrent child spans, and the Trace API returning
+        Cloud Run's root span twice. Summing child durations understated the parent's self
+        time (2000 ms instead of 4000 ms here), and the duplicate rendered the tree twice.
+        """
+
+        def span(name: str, span_id: str, parent: str | None, start_ms: int, end_ms: int) -> dict[str, object]:
+            return {
+                "name": name,
+                "spanId": span_id,
+                "parentSpanId": parent,
+                "startTime": f"2026-10-03T12:00:{start_ms // 1000:02d}.{start_ms % 1000:03d}Z",
+                "endTime": f"2026-10-03T12:00:{end_ms // 1000:02d}.{end_ms % 1000:03d}Z",
+                "status": "OK",
+                "error_message": None,
+            }
+
+        root = span("/api/gateway", "1", None, 0, 10000)
+        trace_details = {
+            "traceId": "a" * 32,
+            "root_span": "/api/gateway",
+            "durationMs": 10000,
+            "error": False,
+            "spans": [
+                root,
+                dict(root),
+                span("/api/backend", "2", "1", 1000, 6000),
+                span("/api/cache", "3", "1", 4000, 7000),
+            ],
+        }
+        with mock.patch(
+            "sre_agent.gcp_tools.get_trace_details", mock.AsyncMock(return_value=json.dumps(trace_details))
+        ):
+            report = await analyze_trace_cascade("a" * 32)
+
+        # The children cover 1000-7000 ms: 6000 ms, not 5000 + 3000 = 8000 ms.
+        self.assertIn("| `/api/gateway` | `1` | `None` | OK | 10000 ms | 4000 ms | 40.0% |", report)
+        self.assertEqual(1, report.count("| `/api/gateway` |"))
+        self.assertIn("**Bottleneck Span**: `/api/backend` (`2`)", report)

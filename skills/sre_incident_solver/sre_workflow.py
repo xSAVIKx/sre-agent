@@ -149,7 +149,9 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         )
         diagnosis = ""
         async for event in runner.run_async(user_id="sre_user", session_id="session_1", new_message=msg):
-            if event.content and event.content.parts:
+            # Only the Log Correlator writes the report. The Trace Analyzer's output is the
+            # bare trace ID, which would otherwise be prepended to it.
+            if event.author == log_correlator.name and event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
                         diagnosis += part.text
@@ -260,7 +262,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
         if isinstance(log_data, list):
             for log in log_data:
                 if log.get("severity") in ("ERROR", "CRITICAL"):
-                    error_msg = log.get("text_payload") or log.get("json_payload", {}).get("message", error_msg)
+                    error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
 
         # Call the new cascade analysis and post-mortem tools
         cascade_report = await analyze_trace_cascade(trace_id, project_id)
