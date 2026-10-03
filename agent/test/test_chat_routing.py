@@ -64,6 +64,32 @@ class TestStreamFromSreAgent(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sink.progress, ["Fetching traces"])
 
 
+class TestStreamFailures(unittest.IsolatedAsyncioTestCase):
+    """A broken stream must surface as an error, and must not re-run the diagnosis."""
+
+    async def _stream(self, handler) -> str:
+        real_client = httpx.AsyncClient
+        transport = httpx.MockTransport(handler)
+        with mock.patch.object(config.httpx, "AsyncClient", lambda **kw: real_client(transport=transport, **kw)):
+            return await config._stream_from_sre_agent("http://sre/v1/agents/sre/messages", {"prompt": "x"})
+
+    async def test_stream_without_done_is_an_error(self) -> None:
+        body = 'data: {"type": "chunk", "text": "partial"}\n\n'
+        with self.assertRaisesRegex(RuntimeError, "without a final report"):
+            await self._stream(lambda request: httpx.Response(200, text=body))
+
+    async def test_error_event_is_not_retried(self) -> None:
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request)
+            return httpx.Response(200, text='data: {"type": "error", "detail": "upstream 503"}\n\n')
+
+        with self.assertRaises(RuntimeError):
+            await self._stream(handler)
+        self.assertEqual(len(calls), 1)
+
+
 class TestChatRouting(unittest.TestCase):
     """Every /chat prompt goes through the Orchestrator agent and its policy."""
 
