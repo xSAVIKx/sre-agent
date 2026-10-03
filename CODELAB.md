@@ -309,23 +309,28 @@ safety_policies = [
 ]
 ```
 
-The single allowed tool reaches the SRE sub-agent over A2A HTTP/SSE — or, in mock mode, runs the
-workflow in-process:
+The single allowed tool reaches the SRE sub-agent over A2A HTTP/SSE — or, in the standalone
+simulation where no sub-agent service is running, runs the workflow in-process:
 
 ```python
 @register_tool
 async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool = False) -> str:
     """Delegates SRE diagnostics, trace correlation, and log analysis to the SRE sub-agent."""
-    if os.getenv("MOCK_GCP", "false").lower() == "true":
+    sre_agent_url = os.getenv("SRE_AGENT_URL")
+    if os.getenv("MOCK_GCP", "false").lower() == "true" and not sre_agent_url:
         from sre_agent.gcp_tools import query_traces
         from sre_agent.sre_workflow import run_sre_diagnostics
 
         traces_json = await query_traces(project_id=project_id, limit=10)
         return await run_sre_diagnostics(traces_json=traces_json, project_id=project_id)
 
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
-    return await _post_to_sre_agent(f"{sre_agent_url}/v1/agents/sre/messages", {...})
+    # Streams the sub-agent's SSE events, forwarding its progress to the chat UI.
+    return await _stream_from_sre_agent(f"{sre_agent_url}/v1/agents/sre/messages", {...})
 ```
+
+Every message typed into the web chat goes through this agent: there is no side door that sends
+"diagnostic-looking" prompts straight to the sub-agent. The model decides to call `diagnose_sre`,
+the policy approves it, and the sub-agent's progress is streamed back while the tool runs.
 
 > [!IMPORTANT]
 > Because the deny-by-default policy is enforced by the runtime, the Orchestrator literally cannot
