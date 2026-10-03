@@ -149,7 +149,9 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
         )
         diagnosis = ""
         async for event in runner.run_async(user_id="sre_user", session_id="session_1", new_message=msg):
-            if event.content and event.content.parts:
+            # Only the Log Correlator writes the report. The Trace Analyzer's output is the
+            # bare trace ID, which would otherwise be prepended to it.
+            if event.author == log_correlator.name and event.content and event.content.parts:
                 for part in event.content.parts:
                     if part.text:
                         diagnosis += part.text
