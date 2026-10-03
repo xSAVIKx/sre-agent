@@ -217,6 +217,11 @@ This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Ar
 
 The split is the point: the app that *generates* chaos can only **write** telemetry; the agent that *investigates* it can only **read**.
 
+> ⚠️ **Demo posture.** All four services are deployed with `--allow-unauthenticated` so the chat
+> and the A2A calls work without extra setup. Anyone with a URL can use the agents (and your
+> Gemini quota). Tear the stack down with `./cleanup.sh` after a demo, or put the services behind
+> IAP / IAM-authenticated invocations before leaving them up.
+
 ---
 
 ## ⚙️ The Antigravity Ecosystem
