@@ -134,8 +134,8 @@ In **mock mode** (`MOCK_GCP=true`, the default) the tiers call each other in-pro
 synthetic trace/log JSON to `mock_telemetry_data/`. In **real mode** each tier propagates W3C
 `traceparent` headers to the next over HTTP and exports spans to Cloud Trace.
 
-The key detail is how a mock span timeline is written — millisecond offsets must land in the *
-*seconds + milliseconds** fields of the timestamp, or the downstream cascade math collapses:
+The key detail is how a mock span timeline is written — millisecond offsets must land in the
+**seconds + milliseconds** fields of the timestamp, or the downstream cascade math collapses:
 
 ```python
 def _ts(ms: int) -> str:
@@ -366,9 +366,7 @@ The frontend ([`agent/src/agent/index.html`](agent/src/agent/index.html)) render
 a styled `.download-pm-btn` that builds the file client-side with the Blob API:
 
 ```javascript
-case
-'download_button'
-:
+case 'download_button':
 const btn = document.createElement('button');
 btn.className = 'download-pm-btn';
 btn.innerHTML = `<span aria-hidden="true">📥</span> ${comp.text || 'Download Post-Mortem'}`;
