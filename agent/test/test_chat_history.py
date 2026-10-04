@@ -3,7 +3,9 @@
 Two regressions this pins (both found on the deployed demo):
 - With the real Antigravity SDK a new conversation has no ID until its first turn
   has run, so the "start" event carried null and every follow-up started a new
-  conversation without memory. The ID now also travels in the "done" event.
+  conversation without memory. The server now picks the ID of a new chat up front
+  (the SDK creates the conversation under it), registers the session before the
+  agent runs, and sends the ID in the very first event.
 - The raw SDK steps of one diagnosis (~90 streamed steps, each with a copy of the
   A2UI payload) exceeded Firestore's 1 MiB document limit and the write failed
   silently. The transcript is now one compact user/model pair per turn.
@@ -74,13 +76,40 @@ class TestChatSessions(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         return _events(resp.text)
 
-    def test_done_carries_an_id_that_was_unknown_at_start(self) -> None:
+    def test_new_chat_gets_its_id_in_the_first_event(self) -> None:
         with mock.patch.object(routes, "Agent", _SdkLikeAgent):
             events = self._chat("hello")
-        self.assertIsNone(events[0]["conversation_id"], "the SDK has no ID yet when the turn starts")
+        conv_id = events[0]["conversation_id"]
+        self.assertEqual(events[0]["type"], "start")
+        self.assertTrue(conv_id, "the browser must learn the ID before the agent runs")
+        self.assertEqual(events[-1]["conversation_id"], conv_id)
+        self.assertEqual(len(config.MOCK_HISTORY_DB[conv_id]), 2, "the turn is saved under that ID")
+
+    def test_session_is_registered_even_if_the_turn_fails(self) -> None:
+        class _FailingAgent(_SdkLikeAgent):
+            async def chat(self, prompt: str):
+                raise RuntimeError("model unavailable")
+
+        with mock.patch.object(routes, "Agent", _FailingAgent):
+            events = self._chat("hello")
+        self.assertEqual(events[-1]["type"], "error")
+        sessions = self.client.get("/sessions").json()
+        self.assertIn(events[0]["conversation_id"], [s["conversation_id"] for s in sessions])
+
+    def test_follow_up_keeps_the_id(self) -> None:
+        with mock.patch.object(routes, "Agent", _SdkLikeAgent):
+            first = self._chat("hello")[0]["conversation_id"]
+            second = self._chat("again", conversation_id=first)
+        self.assertEqual(second[0]["conversation_id"], first)
+        self.assertEqual(len(config.MOCK_HISTORY_DB[first]), 4)
+
+    def test_unresumable_legacy_id_starts_a_new_conversation(self) -> None:
+        with mock.patch.object(routes, "Agent", _SdkLikeAgent):
+            events = self._chat("hello", conversation_id="siXZfOaUivlgIIqTpqSG")
+        new_id = events[0]["conversation_id"]
+        self.assertNotEqual(new_id, "siXZfOaUivlgIIqTpqSG")
+        self.assertGreaterEqual(len(new_id), routes.MIN_CONVERSATION_ID_LENGTH)
         self.assertEqual(events[-1]["type"], "done")
-        self.assertEqual(events[-1]["conversation_id"], "conv-123")
-        self.assertEqual(len(config.MOCK_HISTORY_DB["conv-123"]), 2, "the turn is saved under the late ID")
 
     def test_follow_ups_append_compact_turns(self) -> None:
         report = "# 🚨 Incident Post-Mortem\n\nRoot trace: abc123"

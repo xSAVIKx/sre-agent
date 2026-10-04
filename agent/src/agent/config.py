@@ -467,6 +467,8 @@ def load_firestore_agent_config(
     system_instructions = SYSTEM_INSTRUCTIONS
 
     if HAS_ANTIGRAVITY:
+        from google.antigravity.types import SessionContinuationMode
+
         from agent.firestore_strategy import FirestoreAgentConfig
 
         return FirestoreAgentConfig(
@@ -475,6 +477,9 @@ def load_firestore_agent_config(
             policies=safety_policies,
             hooks=[SreToolErrorHook()],
             conversation_id=conversation_id,
+            # The caller picks the ID of a new conversation (so the chat can be registered
+            # before the first turn runs); the same ID resumes it on every later turn.
+            session_continuation_mode=SessionContinuationMode.CREATE_OR_RESUME,
         )
     else:
         config = LocalAgentConfig(

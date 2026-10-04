@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import os
+import uuid
 from typing import Any
 
 import httpx
@@ -200,6 +201,44 @@ def _turn_entries(
     return user, model
 
 
+# The Antigravity SDK rejects conversation IDs shorter than this.
+MIN_CONVERSATION_ID_LENGTH = 32
+
+
+def _resolve_conversation_id(requested: str | None) -> str:
+    """The conversation ID for this turn: the requested one, or a new one for a new chat.
+
+    Legacy sessions (e.g. Firestore auto-IDs from before the agent persisted its own
+    state) have IDs the SDK cannot resume; they continue as a new conversation.
+    """
+    if requested and len(requested) >= MIN_CONVERSATION_ID_LENGTH:
+        return requested
+    if requested:
+        logger.info(f"Conversation ID {requested!r} cannot be resumed by the agent; starting a new conversation.")
+    return uuid.uuid4().hex
+
+
+async def _register_session(conv_id: str, prompt: str) -> None:
+    """Creates the session record of a new chat before its first turn runs."""
+    try:
+        if not HAS_ANTIGRAVITY:
+            from agent.config import MOCK_HISTORY_DB
+
+            MOCK_HISTORY_DB.setdefault(conv_id, [])
+            return
+        from google.cloud import firestore
+
+        db = firestore.AsyncClient()
+        await (
+            db.collection(SESSIONS_COLLECTION)
+            .document(conv_id)
+            .set({"conversation_id": conv_id, "prompt": prompt, "updated_at": firestore.SERVER_TIMESTAMP}, merge=True)
+        )
+    except Exception:
+        # The chat still works; it just won't be listed until its first turn is saved.
+        logger.exception(f"Failed to register new conversation {conv_id}")
+
+
 async def _save_turn(conv_id: str, prompt: str, user: dict[str, Any], model: dict[str, Any]) -> None:
     """Appends one turn to the conversation's transcript.
 
@@ -338,21 +377,25 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
         sink_token = diagnosis_sink.set(sink)
         response = None
         try:
-            config = load_firestore_agent_config(conversation_id=request.conversation_id)
+            # A new chat gets its ID now, before the agent runs: the browser registers it
+            # (sidebar, URL) from the first event, and it survives a failed or interrupted
+            # turn. The agent creates the conversation under this ID and resumes it later.
+            conv_id = _resolve_conversation_id(request.conversation_id)
+            if conv_id != request.conversation_id:
+                await _register_session(conv_id, request.prompt)
+            yield _sse({"type": "start", "conversation_id": conv_id})
+            # One A2A context per chat conversation, so the SRE agent keeps its session.
+            sink.context_id = conv_id
+
+            config = load_firestore_agent_config(conversation_id=conv_id)
             config.prompt = request.prompt
 
             async with Agent(config) as agent:
-                conv_id = agent.conversation_id or request.conversation_id
-                # One A2A context per chat conversation, so the SRE agent keeps its session.
-                sink.context_id = conv_id or ""
-
                 # No history replay here: the agent's memory of earlier turns is the
                 # Antigravity harness state, which the Firestore strategy restores for a
                 # known conversation_id. The transcript below only feeds the UI.
 
                 response = await agent.chat(request.prompt)
-
-                yield _sse({"type": "start", "conversation_id": conv_id})
 
                 async def pump_chunks() -> None:
                     try:
@@ -425,16 +468,13 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
                         rendered = sink.report
                     response_a2ui = translate_markdown_to_a2ui(rendered)
 
-                    # A new conversation only gets its ID once the first turn has run.
-                    conv_id = agent.conversation_id or conv_id
-                    if conv_id:
-                        user_entry, model_entry = _turn_entries(
-                            request.prompt, accumulated_text, thinking, tool_calls, rendered
-                        )
-                        try:
-                            await _save_turn(conv_id, request.prompt, user_entry, model_entry)
-                        except Exception:
-                            logger.exception(f"Failed to save the transcript of conversation {conv_id}")
+                    user_entry, model_entry = _turn_entries(
+                        request.prompt, accumulated_text, thinking, tool_calls, rendered
+                    )
+                    try:
+                        await _save_turn(conv_id, request.prompt, user_entry, model_entry)
+                    except Exception:
+                        logger.exception(f"Failed to save the transcript of conversation {conv_id}")
 
                     yield _sse(
                         {
