@@ -7,6 +7,7 @@ This module orchestrates two specialized ADK agents:
 2. LogCorrelatorAgent: Correlates the trace ID with logs and diagnoses the root cause.
 """
 
+import json
 import logging
 from typing import Any
 
@@ -78,9 +79,10 @@ except ImportError as e:
 trace_analyzer = AdkAgent(
     name="trace_analyzer",
     instruction=(
-        "You are an SRE trace analyst. Analyze the provided traces list. "
-        "Locate the trace representing the slowest or failing request. "
-        "Extract its traceId and return ONLY the raw 32-character hex traceId. "
+        "You are an SRE trace analyst. You receive the recent requests worth diagnosing, "
+        "ranked best candidate first; each has an `incident` kind (error or slow) and a `service`. "
+        "Pick the request the user is asking about - if nothing narrows it down, the first one. "
+        "Return ONLY its raw 32-character hex traceId. "
         "Do not include any extra text, code block backticks, or explanation."
     ),
     model="gemini-3.8-flash",
@@ -105,15 +107,18 @@ log_correlator = AdkAgent(
 # 2. Orchestrate the diagnostic workflow
 @retry_async(max_retries=3, initial_delay=2.0)
 @otel_trace("_run_adk_diagnostics")
-async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) -> str:
+async def _run_adk_diagnostics(
+    traces_json: str, project_id: str | None = None, incident: dict[str, Any] | None = None
+) -> str:
     """Runs the real multi-agent ADK reasoning workflow.
 
     Uses Trace Analyzer and Log Correlator agents to identify the anomalous
     trace and diagnose the underlying incident.
 
     Args:
-        traces_json: JSON string representing the recent trace summaries.
+        traces_json: The ranked incident candidates the TraceAnalyzer chooses from.
         project_id: Optional GCP project identifier.
+        incident: The best candidate; its cascade and post-mortem are appended.
 
     Returns:
         The markdown diagnosis report from the Log Correlator agent.
@@ -286,30 +291,7 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
                     if part.text:
                         diagnosis += part.text
 
-        # Extract trace_id from traces_json to run the cascade and post-mortem tools
-        trace_id = None
-        try:
-            import json
-
-            traces = json.loads(traces_json)
-            if isinstance(traces, list):
-                for t in traces:
-                    name = t.get("name", "").lower()
-                    if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
-                        continue
-                    if t.get("error") is True or t.get("durationMs", 0) > 5000:
-                        trace_id = t.get("traceId")
-                        break
-                if not trace_id and traces:
-                    for t in traces:
-                        name = t.get("name", "").lower()
-                        if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
-                            trace_id = t.get("traceId")
-                            break
-                    if not trace_id:
-                        trace_id = traces[0].get("traceId")
-        except Exception:
-            pass
+        trace_id = incident.get("traceId") if incident else None
 
         if trace_id:
             logger.info(f"ADK Workflow completed. Appending cascade analysis and post-mortem for trace: {trace_id}")
@@ -324,13 +306,13 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
 
 
 @otel_trace("_run_simulated_diagnostics")
-async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = None) -> str:
+async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str | None = None) -> str:
     """Runs a simulated diagnostics fallback loop.
 
     Locally parses telemetry from mock data files to produce the report.
 
     Args:
-        traces_json: JSON string representing the recent trace summaries.
+        incident: The trace summary to diagnose (from `incidents.find_incident`).
         project_id: Optional GCP project identifier.
 
     Returns:
@@ -339,44 +321,7 @@ async def _run_simulated_diagnostics(traces_json: str, project_id: str | None = 
     import json
 
     try:
-        data = json.loads(traces_json)
-        # Find the first trace with error = True or slow latency (> 5000ms)
-        failing_trace = None
-        if isinstance(data, list):
-            for t in data:
-                name = t.get("name", "").lower()
-                if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
-                    continue
-                if t.get("error") is True or t.get("durationMs", 0) > 5000:
-                    failing_trace = t
-                    break
-            if not failing_trace:
-                # Check if there are mock logs with ERROR/CRITICAL severity in the database
-                from .gcp_tools import _load_mock_file
-
-                mock_logs = _load_mock_file("logs.json") or []
-                has_error_logs = False
-                for log in mock_logs:
-                    if log.get("severity") in ("ERROR", "CRITICAL"):
-                        has_error_logs = True
-                        break
-
-                if not has_error_logs:
-                    return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
-
-                # If there are error logs, fallback to first non-diagnose trace to analyze it
-                if data:
-                    for t in data:
-                        name = t.get("name", "").lower()
-                        if not (any(x in name for x in ("diagnose", "health", "warmup")) or name == "/"):
-                            failing_trace = t
-                            break
-                    if not failing_trace:
-                        failing_trace = data[0]
-
-        if not failing_trace:
-            return "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
-
+        failing_trace = incident
         trace_id = failing_trace.get("traceId", "unknown_trace_id")
         logger.info(f"[Simulation] Identified trace ID: {trace_id}")
 
@@ -494,50 +439,20 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     """
     logger.info("Starting SRE diagnostics workflow...")
 
-    # 1. Parse traces and check if there are any failed or slow traces
-    has_problems = False
-    try:
-        import json
+    # 1. The request worth diagnosing: failures before slowness, never the agents'
+    #    own traffic; error logs point at a trace when no trace looks bad (incidents.py).
+    from .incidents import find_incident
 
-        traces = json.loads(traces_json)
-        if isinstance(traces, list):
-            for t in traces:
-                name = t.get("name", "").lower()
-                # Skip system agent paths
-                if any(x in name for x in ("diagnose", "health", "warmup")) or name == "/":
-                    continue
-                if t.get("error") is True or t.get("durationMs", 0) > 5000:
-                    has_problems = True
-                    break
-    except Exception as e:
-        logger.warning(f"Failed to parse traces in pre-check: {e}")
-
-    # 2. If traces look clean, check recent logs for ERROR/CRITICAL severity
-    if not has_problems:
-        logger.info("No anomalous traces found. Checking logs for recent errors...")
-        try:
-            from .gcp_tools import query_logs
-
-            log_res = await query_logs(query="severity=ERROR OR severity=CRITICAL", project_id=project_id, limit=5)
-            logs = json.loads(log_res)
-            if isinstance(logs, list) and len(logs) > 0:
-                for log in logs:
-                    if log.get("severity") in ("ERROR", "CRITICAL"):
-                        has_problems = True
-                        break
-        except Exception as e:
-            logger.warning(f"Failed to query logs in pre-check: {e}")
-
-    # 3. If everything is healthy, return clean report
-    if not has_problems:
+    incident, candidates = await find_incident(traces_json, project_id)
+    if incident is None:
         logger.info("Diagnostics workflow found no anomalous traces or error logs. All systems healthy.")
         return (
             "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
         )
+    logger.info(f"Diagnosing {incident.get('incident')} trace {incident.get('traceId')} ({incident.get('name')})")
 
     import os
 
     if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
-        return await _run_adk_diagnostics(traces_json, project_id)
-    else:
-        return await _run_simulated_diagnostics(traces_json, project_id)
+        return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident)
+    return await _run_simulated_diagnostics(incident, project_id)

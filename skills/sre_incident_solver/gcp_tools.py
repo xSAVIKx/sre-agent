@@ -11,6 +11,8 @@ import datetime
 import json
 import logging
 import os
+import re
+from dataclasses import dataclass
 from typing import Any
 
 from .registry import register_tool
@@ -235,6 +237,28 @@ def _check_span_error(span: dict[str, Any]) -> bool:
     return any("error" in key.lower() for key in labels)
 
 
+_REVISION_SUFFIX = re.compile(r"-\d{5}-[a-z0-9]{3}$")  # sre-agent-00069-gm7 -> sre-agent
+_HOST_SUFFIX = re.compile(r"-(\d+|[a-z0-9]{10}-[a-z]{2})$")  # sre-agent-2859… / sre-agent-oeglp6ptnq-uc
+
+
+def _service_name(root_span: dict[str, Any] | None) -> str:
+    """The Cloud Run service that served a trace's root request ("" if unknown).
+
+    Cloud Run labels the root span with the serving revision (``cloud.resource_id``)
+    and the host it was called on; either one names the service.
+    """
+    if not root_span:
+        return ""
+    labels = root_span.get("labels") or {}
+    resource = labels.get("cloud.resource_id", "")
+    if "/revisions/" in resource:
+        return _REVISION_SUFFIX.sub("", resource.rsplit("/revisions/", 1)[1])
+    host = labels.get("/http/host") or labels.get("http.server_name") or ""
+    if host.endswith(".run.app"):
+        return _HOST_SUFFIX.sub("", host.split(".", 1)[0])
+    return ""
+
+
 def _check_trace_error(spans: list[dict[str, Any]]) -> bool:
     """Checks if any span in the trace contains an error.
 
@@ -313,6 +337,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
             traces_list.append(
                 {
                     "traceId": t_id,
+                    "service": _service_name(root_span),
                     "name": root_name,
                     "startTime": start_time_str,
                     "durationMs": duration_ms,
@@ -522,6 +547,8 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
                     "text_payload": entry.payload if not is_json else None,
                     "json_payload": entry.payload if is_json else None,
                     "resource": entry.resource.type if entry.resource else None,
+                    "trace": entry.trace,
+                    "service": (entry.resource.labels or {}).get("service_name") if entry.resource else None,
                 }
             )
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
@@ -632,6 +659,7 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
                     "text_payload": msg if not is_json else None,
                     "json_payload": msg if is_json else None,
                     "resource": "cloud_run_revision",
+                    "trace": log.get("traceId"),
                 }
             )
 
@@ -661,6 +689,8 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
                     "text_payload": entry.payload if not is_json else None,
                     "json_payload": entry.payload if is_json else None,
                     "resource": entry.resource.type if entry.resource else None,
+                    "trace": entry.trace,
+                    "service": (entry.resource.labels or {}).get("service_name") if entry.resource else None,
                 }
             )
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
@@ -890,31 +920,27 @@ async def list_metric_descriptors(filter_expression: str | None = None, project_
         return json.dumps({"error": f"GCP Metric Descriptors Error: {e!s}"}, indent=2)
 
 
-@register_tool
-async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
-    """Analyzes a trace to calculate inclusive vs exclusive duration for each span and locate the bottleneck.
+@dataclass
+class Cascade:
+    """Inclusive and exclusive (self) time of every span, and the bottleneck."""
+
+    spans: list[dict[str, Any]]
+    span_map: dict[str, dict[str, Any]]
+    children_map: dict[str, list[str]]
+    inclusive_ms: dict[str, int]
+    exclusive_ms: dict[str, int]
+    bottleneck_id: str
+
+
+def _cascade(spans: list[dict[str, Any]]) -> Cascade:
+    """Computes the cascade of a trace's spans (see `analyze_trace_cascade`).
 
     Args:
-        trace_id: The unique hex string identifying the trace (32 characters).
-        project_id: The GCP Project ID. If None, uses default project.
+        spans: The trace's spans (``spanId``, ``parentSpanId``, ``startTime``, ``endTime``).
 
     Returns:
-        A Markdown report showing trace hierarchy, self-execution time, and the identified bottleneck.
+        The per-span durations and the bottleneck: the span with the most self time.
     """
-    logger.info(f"Analyzing cascade for trace: {trace_id}")
-    details_str = await get_trace_details(trace_id, project_id)
-    try:
-        data = json.loads(details_str)
-    except Exception as e:
-        return f"Error: Failed to parse trace details: {e}"
-
-    if "error" in data and not data.get("spans"):
-        return f"Error retrieving trace cascade: {data.get('error')}"
-
-    spans = data.get("spans", [])
-    if not spans:
-        return "No spans found in trace."
-
     # Build parent-child relationships and calculate inclusive durations
     span_map = {s["spanId"]: s for s in spans}
     spans = list(span_map.values())  # drop duplicate span IDs
@@ -941,6 +967,39 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
 
     # Find the bottleneck (the span with the highest exclusive duration)
     bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
+
+    return Cascade(spans, span_map, children_map, inclusive_durations, exclusive_durations, bottleneck_span_id)
+
+
+@register_tool
+async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
+    """Analyzes a trace to calculate inclusive vs exclusive duration for each span and locate the bottleneck.
+
+    Args:
+        trace_id: The unique hex string identifying the trace (32 characters).
+        project_id: The GCP Project ID. If None, uses default project.
+
+    Returns:
+        A Markdown report showing trace hierarchy, self-execution time, and the identified bottleneck.
+    """
+    logger.info(f"Analyzing cascade for trace: {trace_id}")
+    details_str = await get_trace_details(trace_id, project_id)
+    try:
+        data = json.loads(details_str)
+    except Exception as e:
+        return f"Error: Failed to parse trace details: {e}"
+
+    if "error" in data and not data.get("spans"):
+        return f"Error retrieving trace cascade: {data.get('error')}"
+
+    spans = data.get("spans", [])
+    if not spans:
+        return "No spans found in trace."
+
+    cascade = _cascade(spans)
+    spans, span_map, children_map = cascade.spans, cascade.span_map, cascade.children_map
+    inclusive_durations, exclusive_durations = cascade.inclusive_ms, cascade.exclusive_ms
+    bottleneck_span_id = cascade.bottleneck_id
     bottleneck_span = span_map[bottleneck_span_id]
     bottleneck_exclusive = exclusive_durations[bottleneck_span_id]
     total_duration = data.get("durationMs", 1)
@@ -993,6 +1052,143 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
     return "\n".join(report)
 
 
+def _log_message(log: dict[str, Any]) -> str:
+    """A log entry's message, whichever payload it came in (may be empty)."""
+    payload = log.get("json_payload")
+    if isinstance(payload, dict):
+        return str(payload.get("message") or "")
+    return str(log.get("text_payload") or log.get("message") or "")
+
+
+_TIMEOUT_MARKERS = ("timeout", "timed out", "deadline exceeded")
+_FRACTION = re.compile(r"\.(\d+)")
+
+
+def _event_time(ts: str) -> datetime.datetime:
+    """A UTC sort key for RFC 3339 timestamps ('Z' or '+00:00', 0-9 fractional digits)."""
+    if not ts:
+        return datetime.datetime.max
+    try:
+        normalized = _FRACTION.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), ts.replace("Z", "+00:00"), count=1)
+        parsed = datetime.datetime.fromisoformat(normalized)
+    except ValueError:
+        return datetime.datetime.max
+    if parsed.tzinfo:
+        parsed = parsed.astimezone(datetime.UTC).replace(tzinfo=None)
+    return parsed
+
+
+def _render_post_mortem(trace_id: str, data: dict[str, Any], logs: list[dict[str, Any]]) -> str:
+    """Builds the post-mortem from what the trace and its logs actually show.
+
+    Nothing in it is assumed: the bottleneck and its share of the request come from
+    the cascade, errors from the spans and logs, and the status stays OPEN until a
+    human confirms the fix.
+    """
+    spans = data.get("spans", [])
+    duration_ms = data.get("durationMs", 0) or 0
+    root_name = data.get("root_span", "unknown")
+
+    error_logs = [log for log in logs if log.get("severity") in ("ERROR", "CRITICAL") and _log_message(log)]
+    error_spans = [sp for sp in spans if sp.get("status") == "ERROR" or sp.get("error_message")]
+    failing = bool(error_spans or error_logs)
+
+    bottleneck_line = "n/a (no spans recorded)"
+    bottleneck_name, self_ms, share = None, 0, 0.0
+    bottleneck_error = ""
+    if spans:
+        cascade = _cascade(spans)
+        bottleneck = cascade.span_map[cascade.bottleneck_id]
+        bottleneck_name = bottleneck.get("name", cascade.bottleneck_id)
+        self_ms = cascade.exclusive_ms[cascade.bottleneck_id]
+        share = (self_ms / duration_ms * 100) if duration_ms else 0.0
+        bottleneck_error = bottleneck.get("error_message") or ""
+        bottleneck_line = f"`{bottleneck_name}` - {self_ms} ms of its own ({share:.1f}% of the request)"
+
+    error_msg = (
+        bottleneck_error
+        or next((_log_message(log) for log in error_logs), "")
+        or next((sp["error_message"] for sp in error_spans if sp.get("error_message")), "")
+    )
+    is_timeout = any(m in error_msg.lower() for m in _TIMEOUT_MARKERS)
+
+    ordered = sorted(spans, key=lambda sp: sp.get("startTime", ""))
+    started = ordered[0].get("startTime", "") if ordered else ""
+    ended = max((sp.get("endTime", "") for sp in spans), default="")
+    outcome = (
+        f"Failed - errors in {len(error_spans)} span(s) and {len(error_logs)} log entr{'y' if len(error_logs) == 1 else 'ies'}"
+        if failing
+        else "Completed without errors, but slow"
+    )
+
+    # Timeline: the request, the spans that failed or dominated, the error logs.
+    events: list[tuple[str, str]] = []
+    if ordered:
+        events.append((started, f"`{root_name}` received the request."))
+    for sp in ordered:
+        if sp.get("name") == bottleneck_name or sp.get("error_message") or sp.get("status") == "ERROR":
+            note = f"`{sp.get('name')}` started"
+            if sp.get("name") == bottleneck_name:
+                note += f" (the bottleneck: {self_ms} ms of its own)"
+            events.append((sp.get("startTime", ""), note + "."))
+            if sp.get("error_message"):
+                events.append(
+                    (sp.get("endTime", ""), f"`{sp.get('name')}` failed:\n    ```\n    {sp['error_message']}\n    ```")
+                )
+    for log in error_logs[:5]:
+        events.append(
+            (log.get("timestamp") or "", f"{log.get('severity')} log:\n    ```\n    {_log_message(log)}\n    ```")
+        )
+    if ended:
+        events.append((ended, f"Request finished after {duration_ms} ms{' with an error' if failing else ''}."))
+    # Sort by actual time: span and log timestamps differ in precision and offset style.
+    events.sort(key=lambda e: _event_time(e[0]))
+    timeline = "\n".join(f"{n}.  **{ts or 'unknown time'}** - {text}" for n, (ts, text) in enumerate(events, 1))
+
+    if failing:
+        rca = (
+            f"The request failed. The bottleneck was {bottleneck_line}; the spans above it mostly waited for it.\n\n"
+            f"Error: `{error_msg or 'no message recorded'}`"
+        )
+        if is_timeout:
+            rca += "\n\nThe error is a timeout: a dependency did not answer in time, and every caller waited for it."
+        actions = (
+            [
+                "Check the health and reachability of the dependency named in the error.",
+                "Compare its timeout with the callers' latency budget; fail fast instead of waiting the full timeout.",
+                "Add a circuit breaker so repeated timeouts stop cascading to the callers.",
+            ]
+            if is_timeout
+            else [
+                f"Inspect the logs of `{bottleneck_name}` around the failure for the underlying cause.",
+                "Alert on this error rate so a recurrence is caught before users report it.",
+            ]
+        )
+    else:
+        rca = f"No span reported an error: the request was slow, not failing. The bottleneck was {bottleneck_line}."
+        actions = [
+            f"Profile `{bottleneck_name}`: its own work, not its children, is where the time went.",
+            "Check that service's metrics (CPU, memory, connection pools) during the incident.",
+            "Set a latency objective and alert when this request exceeds it.",
+        ]
+    actions.append("Confirm the fix, then mark this post-mortem RESOLVED.")
+
+    return (
+        f"# 🚨 Incident Post-Mortem\n\n"
+        f"## 📝 Incident Overview\n"
+        f"*   **Incident Date/Time**: `{started or 'unknown'}`\n"
+        f"*   **Root Service**: `{root_name}`\n"
+        f"*   **Trace ID**: `{trace_id}`\n"
+        f"*   **Impact Duration**: `{duration_ms} ms` (Total request execution)\n"
+        f"*   **Outcome**: {outcome}\n"
+        f"*   **Bottleneck**: {bottleneck_line}\n"
+        f"*   **Status**: `OPEN` (generated from telemetry; confirm before closing)\n\n"
+        f"## 🔍 Incident Timeline\n{timeline or 'No span or log events recorded.'}\n\n"
+        f"## 🎯 Root Cause Analysis (RCA)\n{rca}\n\n"
+        f"## 🛠️ Next Steps\n" + "\n".join(f"{n}.  {a}" for n, a in enumerate(actions, 1))
+    )
+
+
 @register_tool
 async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> str:
     """Generates a structured Incident Post-Mortem markdown report for a given trace ID.
@@ -1014,50 +1210,4 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
     except Exception as e:
         return f"Error: Failed to fetch telemetry for post-mortem: {e}"
 
-    spans = data.get("spans", [])
-    duration_ms = data.get("durationMs", 0)
-    root_span = data.get("root_span", "unknown")
-
-    error_msg = "No error logged"
-    trigger_time = "Unknown Time"
-
-    if isinstance(logs, list) and logs:
-        for log in logs:
-            if log.get("severity") in ("ERROR", "CRITICAL"):
-                error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
-            if log.get("timestamp"):
-                trigger_time = log.get("timestamp")
-
-    if error_msg == "No error logged" and spans:
-        for s in spans:
-            if s.get("error_message"):
-                error_msg = s["error_message"]
-            if s.get("startTime") and trigger_time == "Unknown Time":
-                trigger_time = s["startTime"]
-
-    report = (
-        f"# 🚨 Incident Post-Mortem\n\n"
-        f"## 📝 Incident Overview\n"
-        f"*   **Incident Date/Time**: `{trigger_time}`\n"
-        f"*   **Root Service**: `{root_span}`\n"
-        f"*   **Trace ID**: `{trace_id}`\n"
-        f"*   **Impact Duration**: `{duration_ms} ms` (Total request execution)\n"
-        f"*   **Status**: `RESOLVED` (Chaos monkey experiment stopped / system recovered)\n\n"
-        f"## 🔍 Incident Timeline\n"
-        f"1.  **{trigger_time}** - Gateway endpoint `{root_span}` received anomalous client request.\n"
-        f"2.  **{trigger_time}** - Cascading database invocation failed, throwing exception:\n"
-        f"    ```\n    {error_msg}\n    ```\n"
-        f"3.  **{trigger_time}** - SRE diagnostics agent detected latency spikes and database timeout.\n"
-        f"4.  **{trigger_time}** - Automatic mitigation checklist generated and executed.\n\n"
-        f"## 🎯 Root Cause Analysis (RCA)\n"
-        f"A distributed trace scan identified elevated latencies and errors originating from the database client. "
-        f"Specifically, a child span `/api/database` was slow and marked with an error status because of a "
-        f"`ConnectionTimeoutError` when connecting to `db-primary.gcp.internal:5432`.\n\n"
-        f"This was caused by firewall/routing rules blocking ingress traffic on port 5432, or an active "
-        f"chaos injection experiment running under the `sre-chaos-monkey` service.\n\n"
-        f"## 🛠️ Actions Taken & Prevention Plan\n"
-        f"1.  **Immediate Remediation**: Checked active chaos monkey experiments and verified service status.\n"
-        f"2.  **Short-Term Correction**: Audited VPC Access Connector utilization metrics to check for saturation.\n"
-        f"3.  **Long-Term Prevention**: Implement circuit breaker resilience patterns inside microservices to fail-fast during database connection timeouts, preventing thread exhaustion."
-    )
-    return report
+    return _render_post_mortem(trace_id, data, logs if isinstance(logs, list) else [])

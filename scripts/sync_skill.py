@@ -26,6 +26,7 @@ MODULES = (
     "config.py",
     "firestore_strategy.py",
     "gcp_tools.py",
+    "incidents.py",
     "inventory_client.py",
     "itinerary.py",
     "registry.py",
