@@ -20,7 +20,6 @@ import {A2uiLitElement, basicCatalog} from '@a2ui/lit/v0_9';
 import {renderMarkdown} from '@a2ui/markdown-it';
 
 export const SRE_CATALOG_ID = 'https://github.com/xSAVIKx/sre-agent/a2ui/catalogs/sre/v1/catalog.json';
-export const A2UI_VERSION = 'v0.9';
 
 // --- SeverityBadge ----------------------------------------------------------
 
@@ -116,7 +115,10 @@ class SreDownload extends A2uiLitElement {
   render() {
     const props = this.controller?.props;
     if (!props) return nothing;
-    return html`<button @click=${() => this.save()}>📥 ${props.label}</button>`;
+    // The file name tells several "Download" buttons apart for screen readers.
+    return html`<button aria-label="${props.label}: ${props.filename}" @click=${() => this.save()}>
+      <span aria-hidden="true">📥</span> ${props.label}
+    </button>`;
   }
 }
 customElements.define('sre-download', SreDownload);
@@ -143,20 +145,31 @@ SURFACE_SHEET.replaceSync(`
   code { overflow-wrap: anywhere; }
   table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 0.9em; }
   th, td { border: 1px solid var(--a2ui-color-border, #444); padding: 4px 8px; text-align: left; }
+  button:focus-visible { outline: 2px solid var(--sre-focus, #a5b4fc); outline-offset: 2px; }
 `);
+
+/**
+ * Adds the ARIA roles that @a2ui/lit 0.12 does not set: its Tabs are plain buttons and
+ * its List items plain divs. With the roles, a screen reader announces the selected tab,
+ * and each row's buttons ("Diagnose") in the context of their list item.
+ */
+function addAriaRoles(root) {
+  for (const bar of root.querySelectorAll('.a2ui-tab-bar')) {
+    bar.setAttribute('role', 'tablist');
+    for (const tab of bar.querySelectorAll('.a2ui-tab-button')) {
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(tab.classList.contains('active')));
+    }
+  }
+  for (const list of root.querySelectorAll('.a2ui-list')) {
+    list.setAttribute('role', 'list');
+    for (const item of list.children) item.setAttribute('role', 'listitem');
+  }
+}
 
 /** Hosts one surface and provides the Markdown renderer the basic Text component consumes. */
 class SreSurfaceHost extends LitElement {
   static properties = {surface: {attribute: false}};
-
-  async updated() {
-    const element = this.querySelector('a2ui-surface');
-    await element?.updateComplete;
-    const root = element?.shadowRoot;
-    if (root && !root.adoptedStyleSheets.includes(SURFACE_SHEET)) {
-      root.adoptedStyleSheets = [...root.adoptedStyleSheets, SURFACE_SHEET];
-    }
-  }
 
   constructor() {
     super();
@@ -165,7 +178,22 @@ class SreSurfaceHost extends LitElement {
   }
 
   createRenderRoot() {
-    return this;
+    return this; // light DOM: the page's .sre-surface CSS variables apply
+  }
+
+  async updated() {
+    const element = this.querySelector('a2ui-surface');
+    await element?.updateComplete;
+    const root = element?.shadowRoot;
+    if (!root || root.adoptedStyleSheets.includes(SURFACE_SHEET)) return;
+    root.adoptedStyleSheets = [...root.adoptedStyleSheets, SURFACE_SHEET];
+    // Components render after the surface: keep the roles current as they (and tabs) change.
+    addAriaRoles(root);
+    new MutationObserver(() => addAriaRoles(root)).observe(root, {
+      subtree: true,
+      childList: true,
+      attributeFilter: ['class'],
+    });
   }
 
   render() {
@@ -194,7 +222,5 @@ export function renderSurface(container, messages, onAction) {
   return host;
 }
 
-/** What this renderer can display, for the agent's A2UI negotiation. */
-export const clientCapabilities = {[A2UI_VERSION]: {supportedCatalogIds: [SRE_CATALOG_ID, basicCatalog.id]}};
-
-window.SreA2ui = {renderSurface, clientCapabilities, SRE_CATALOG_ID};
+// The chat page is a classic script: it calls window.SreA2ui.renderSurface().
+window.SreA2ui = {renderSurface, SRE_CATALOG_ID};

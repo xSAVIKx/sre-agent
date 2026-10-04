@@ -28,7 +28,7 @@ from sre_agent.gcp_tools import TRACE_SCAN_SIZE, find_bottleneck, generate_post_
 from sre_agent.incidents import find_incident
 from sre_agent.inventory_client import fetch_topology
 from sre_agent.post_mortem_analysis import analysis_enabled, analyze_post_mortem
-from sre_agent.sre_workflow import diagnose
+from sre_agent.sre_workflow import Diagnosis, diagnose
 
 logger = logging.getLogger("sre_agent.diagnosis")
 
@@ -125,14 +125,25 @@ async def run_diagnosis(
         )
         await save_sre_session(conversation_id, history)
 
-    surface = None
-    if ui:
-        bottleneck = await find_bottleneck(diagnosis.trace_id, resolved_project) if diagnosis.trace_id else None
-        surface = a2ui_surfaces.diagnosis_surface(report, diagnosis.trace_id, bottleneck and bottleneck.share)
+    surface = await diagnosis_surface(diagnosis, resolved_project) if ui else None
     yield Report(report, {"kind": "diagnosis", "trace_id": diagnosis.trace_id}, surface)
 
 
-def _incident_row(n: int, incident: dict[str, Any]) -> str:
+async def _bottleneck_share(trace_id: str | None, project_id: str) -> float | None:
+    """The share of the request its bottleneck span owns, for the severity badge."""
+    bottleneck = await find_bottleneck(trace_id, project_id) if trace_id else None
+    return bottleneck.share if bottleneck else None
+
+
+async def diagnosis_surface(diagnosis: Diagnosis, project_id: str) -> list[dict[str, Any]] | None:
+    """The A2UI surface of a diagnosis, or None for a diagnosis that failed (its Markdown says why)."""
+    if diagnosis.failed:
+        return None
+    share = await _bottleneck_share(diagnosis.trace_id, project_id)
+    return a2ui_surfaces.diagnosis_surface(diagnosis.report, diagnosis.trace_id, share)
+
+
+def _incident_table_row(n: int, incident: dict[str, Any]) -> str:
     kind = "❌ failing" if incident.get("incident") == "error" else "🐢 slow"
     duration = f"{incident['durationMs']} ms" if incident.get("durationMs") else "-"
     started = (incident.get("startTime") or "-").replace("T", " ")[:19]
@@ -181,7 +192,7 @@ async def run_list_incidents(
             f"{failing} failing and {len(incidents) - failing} slow request(s), most important first. "
             "Ask to diagnose one, or for its post-mortem, by its trace ID.\n\n"
             "| # | Kind | Service | Request | Duration | Started (UTC) | Trace ID |\n"
-            "|---|---|---|---|---|---|---|\n" + "\n".join(_incident_row(n, i) for n, i in enumerate(incidents, 1))
+            "|---|---|---|---|---|---|---|\n" + "\n".join(_incident_table_row(n, i) for n, i in enumerate(incidents, 1))
         )
     data = {"kind": "incident_list", "project_id": resolved_project, "incidents": incidents}
     surface = a2ui_surfaces.incident_list_surface(resolved_project, incidents) if ui else None
@@ -231,8 +242,8 @@ async def run_post_mortem(
 
     surface = None
     if ui and not report.startswith("Error:"):
-        bottleneck = await find_bottleneck(trace_id, resolved_project)
-        surface = a2ui_surfaces.post_mortem_surface(report, trace_id, bottleneck and bottleneck.share)
+        share = await _bottleneck_share(trace_id, resolved_project)
+        surface = a2ui_surfaces.post_mortem_surface(report, trace_id, share)
     yield Report(
         report,
         {"kind": "post_mortem", "project_id": resolved_project, "trace_id": trace_id, "llm_analysis": bool(analysis)},

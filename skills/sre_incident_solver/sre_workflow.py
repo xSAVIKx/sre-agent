@@ -109,10 +109,17 @@ log_correlator = AdkAgent(
 
 @dataclass(frozen=True)
 class Diagnosis:
-    """A diagnosis report and the trace it diagnosed (None when nothing was wrong)."""
+    """A diagnosis report and the trace it diagnosed (None when nothing was wrong).
+
+    `failed` marks a report that only describes why the diagnosis could not run.
+    """
 
     report: str
     trace_id: str | None = None
+    failed: bool = False
+
+
+SIMULATION_FAILURE = "### Diagnostic Simulation Failure"
 
 
 # 2. Orchestrate the diagnostic workflow
@@ -333,7 +340,9 @@ async def _run_adk_diagnostics(
         return Diagnosis(diagnosis, trace_id)
     except Exception as e:
         logger.error(f"Error during ADK execution: {e}")
-        return Diagnosis(f"### Diagnostic Execution Failure\nAn error occurred while executing the ADK workflow: {e}")
+        return Diagnosis(
+            f"### Diagnostic Execution Failure\nAn error occurred while executing the ADK workflow: {e}", failed=True
+        )
 
 
 @otel_trace("_run_simulated_diagnostics")
@@ -451,7 +460,7 @@ async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str |
         )
         return report
     except Exception as e:
-        return f"### Diagnostic Simulation Failure\nFailed to parse telemetry during simulation: {e}"
+        return f"{SIMULATION_FAILURE}\nFailed to parse telemetry during simulation: {e}"
 
 
 async def run_sre_diagnostics(
@@ -504,4 +513,5 @@ async def diagnose(
 
     if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
         return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)
-    return Diagnosis(await _run_simulated_diagnostics(incident, project_id), incident.get("traceId"))
+    report = await _run_simulated_diagnostics(incident, project_id)
+    return Diagnosis(report, incident.get("traceId"), failed=report.startswith(SIMULATION_FAILURE))

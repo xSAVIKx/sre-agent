@@ -439,18 +439,14 @@ async def _run_in_process(
     """
     resolved_project = project_id or os.environ.get("GCP_PROJECT") or SIMULATION_PROJECT
     if skill == "diagnose_incident":
-        from sre_agent.gcp_tools import TRACE_SCAN_SIZE, find_bottleneck, query_traces
+        from sre_agent.diagnosis import diagnosis_surface
+        from sre_agent.gcp_tools import TRACE_SCAN_SIZE, query_traces
         from sre_agent.sre_workflow import diagnose
-
-        from sre_agent import a2ui_surfaces
 
         traces_json = await query_traces(project_id=resolved_project, limit=TRACE_SCAN_SIZE)
         diagnosis = await diagnose(traces_json, resolved_project, question=prompt, trace_id=trace_id)
-        if not ui:
-            return diagnosis.report, []
-        bottleneck = await find_bottleneck(diagnosis.trace_id, resolved_project) if diagnosis.trace_id else None
-        surface = a2ui_surfaces.diagnosis_surface(diagnosis.report, diagnosis.trace_id, bottleneck and bottleneck.share)
-        return diagnosis.report, surface
+        surface = await diagnosis_surface(diagnosis, resolved_project) if ui else None
+        return diagnosis.report, surface or []
 
     from sre_agent.diagnosis import Progress, run_list_incidents, run_post_mortem
 

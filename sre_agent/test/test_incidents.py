@@ -5,6 +5,7 @@ own 44 s chat request - the slowest trace in the project, which had not failed -
 and wrote a post-mortem about a database timeout that never happened.
 """
 
+import asyncio
 import json
 import unittest
 from typing import ClassVar
@@ -107,6 +108,15 @@ class TestPostMortem(unittest.TestCase):
         for claim in ("database", "ConnectionTimeoutError", "RESOLVED` (", "chaos"):
             self.assertNotIn(claim, report)
         self.assertIn("**Status**: `OPEN`", report)
+
+    def test_missing_trace_is_an_error_not_an_empty_post_mortem(self) -> None:
+        missing = json.dumps({"error": "Trace ID t not found in mock data."})
+        with (
+            mock.patch.object(gcp_tools, "get_trace_details", mock.AsyncMock(return_value=missing)),
+            mock.patch.object(gcp_tools, "query_logs_by_trace", mock.AsyncMock(return_value="[]")),
+        ):
+            report = asyncio.run(gcp_tools.generate_post_mortem("t"))
+        self.assertEqual(report, "Error: No spans found for trace t: Trace ID t not found in mock data.")
 
     def test_timeline_follows_real_time_across_timestamp_formats(self) -> None:
         logs = [{"severity": "ERROR", "text_payload": "late", "timestamp": "2026-10-04T16:37:20+02:00"}]

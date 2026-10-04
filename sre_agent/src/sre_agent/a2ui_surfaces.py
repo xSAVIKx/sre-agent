@@ -9,7 +9,7 @@ this module knows about HTML.
 * **Catalog.** Surfaces use the SRE catalog: A2UI's basic catalog (Card, Column,
   Row, List, Tabs, Text, Button, ...) plus two components of our own,
   `SeverityBadge` and `Download`. Their schemas are below; the browser
-  implements them (``agent/web/src/sre-catalog.js``).
+  implements them (``agent/web/src/sre-a2ui.js``).
 * **Negotiation.** A caller that can render A2UI says so in the request metadata,
   as A2UI's client capabilities (`client_capabilities`). Without them the agent
   answers in Markdown only.
@@ -18,6 +18,7 @@ this module knows about HTML.
 """
 
 import functools
+import re
 import uuid
 from typing import Any, Literal
 
@@ -119,6 +120,15 @@ def _text(component_id: str, text: str | dict[str, str], variant: str = "body") 
     return {"id": component_id, "component": "Text", "text": text, "variant": variant}
 
 
+_HEADING = re.compile(r"(?m)^(#{1,4}) ")
+
+
+def _report_text(component_id: str, markdown: str) -> dict[str, Any]:
+    """A report section as Markdown text, its headings two levels down (# -> ###):
+    on the page they sit under the card's h2 title, inside the chat's h1."""
+    return _text(component_id, _HEADING.sub(lambda m: "##" + m.group(1) + " ", markdown))
+
+
 def _button(component_id: str, label: str, action: str, trace_id: str | dict[str, str]) -> list[dict[str, Any]]:
     """A button that sends `action` with the trace ID back to the agent, and its label."""
     return [
@@ -145,11 +155,51 @@ def _badge(bottleneck_share: float | None) -> list[dict[str, Any]]:
 
 
 def _card(children: list[str], components: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """A Card holding `children` (component IDs) in a Column, with all the components."""
     return [
         {"id": "root", "component": "Card", "child": "body"},
         {"id": "body", "component": "Column", "children": children},
         *components,
     ]
+
+
+def _message_card(title: str, text: str) -> list[dict[str, Any]]:
+    """A surface with a title and one line of text (e.g. "nothing found")."""
+    return _messages(_card(["title", "detail"], [_text("title", title, "h2"), _text("detail", text)]))
+
+
+def _tabs(tabs: list[tuple[str, str]]) -> list[dict[str, Any]]:
+    """A Tabs component ("sections") with one Markdown Text component per (title, Markdown) tab."""
+    return [
+        {
+            "id": "sections",
+            "component": "Tabs",
+            "tabs": [{"title": title, "child": f"tab-{n}"} for n, (title, _) in enumerate(tabs)],
+        },
+        *(_report_text(f"tab-{n}", markdown) for n, (_, markdown) in enumerate(tabs)),
+    ]
+
+
+def _download(filename: str, content: str) -> dict[str, Any]:
+    """A Download component ("download") that saves `content` as `filename`."""
+    return {"id": "download", "component": "Download", "label": "Download", "filename": filename, "content": content}
+
+
+def _incident_row(incident: dict[str, Any]) -> dict[str, str]:
+    """One incident as an item of the list's data model."""
+    kind = "❌ **failing**" if incident.get("incident") == "error" else "🐢 **slow**"
+    trace_id = incident.get("traceId", "")
+    details = []
+    if incident.get("durationMs"):
+        details.append(f"{incident['durationMs']} ms")
+    if incident.get("startTime"):
+        details.append(incident["startTime"].replace("T", " ")[:19] + " UTC")
+    details.append(f"trace {trace_id}")
+    return {
+        "traceId": trace_id,
+        "summary": f"{kind} `{incident.get('name') or '-'}` on `{incident.get('service') or 'unknown service'}`",
+        "details": " · ".join(details),
+    }
 
 
 def incident_list_surface(project_id: str, incidents: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -159,38 +209,13 @@ def incident_list_surface(project_id: str, incidents: list[dict[str, Any]]) -> l
     components describe one row, and the renderer repeats it for every item.
     """
     if not incidents:
-        return _messages(
-            _card(
-                ["title", "detail"],
-                [
-                    _text("title", "✅ No recent incidents", "h3"),
-                    _text("detail", f"No failing or slow requests, or error logs pointing at one, in `{project_id}`."),
-                ],
-            )
+        return _message_card(
+            "✅ No recent incidents", f"No failing or slow requests, or error logs pointing at one, in `{project_id}`."
         )
 
     failing = sum(1 for i in incidents if i.get("incident") == "error")
-    rows = [
-        {
-            "traceId": i.get("traceId", ""),
-            "summary": (
-                f"{'❌ **failing**' if i.get('incident') == 'error' else '🐢 **slow**'} "
-                f"`{i.get('name') or '-'}` on `{i.get('service') or 'unknown service'}`"
-            ),
-            "details": " · ".join(
-                part
-                for part in (
-                    f"{i['durationMs']} ms" if i.get("durationMs") else "",
-                    (i.get("startTime") or "").replace("T", " ")[:19] + " UTC" if i.get("startTime") else "",
-                    f"trace {i.get('traceId', '')}",
-                )
-                if part
-            ),
-        }
-        for i in incidents
-    ]
     components = [
-        _text("title", f"📋 Recent incidents in {project_id}", "h3"),
+        _text("title", f"📋 Recent incidents in {project_id}", "h2"),
         _text("detail", f"{failing} failing and {len(incidents) - failing} slow request(s), most important first."),
         {"id": "incidents", "component": "List", "children": {"componentId": "row", "path": "/incidents"}},
         # Text above, buttons below: side by side, a row does not fit a phone screen.
@@ -202,6 +227,7 @@ def incident_list_surface(project_id: str, incidents: list[dict[str, Any]]) -> l
         *_button("diagnose", "Diagnose", "diagnose_incident", {"path": "traceId"}),
         *_button("post-mortem", "Post-mortem", "write_post_mortem", {"path": "traceId"}),
     ]
+    rows = [_incident_row(i) for i in incidents]
     return _messages(_card(["title", "detail", "incidents"], components), {"incidents": rows})
 
 
@@ -226,29 +252,17 @@ def _split_report(report: str) -> list[tuple[str, str]]:
 def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float | None) -> list[dict[str, Any]]:
     """A diagnosis: severity, the report in tabs, and buttons for the next step."""
     if not trace_id:
-        return _messages(_card(["title", "detail"], [_text("title", "✅ All clear", "h3"), _text("detail", report)]))
+        return _message_card("✅ All clear", report)
 
-    tabs = _split_report(report)
     badge = _badge(bottleneck_share)
     components = [
         *badge,
-        _text("title", "🔬 Incident diagnosis", "h3"),
+        _text("title", "🔬 Incident diagnosis", "h2"),
         _text("trace", f"Trace {trace_id}", "caption"),
-        {
-            "id": "sections",
-            "component": "Tabs",
-            "tabs": [{"title": title, "child": f"tab-{n}"} for n, (title, _) in enumerate(tabs)],
-        },
-        *(_text(f"tab-{n}", markdown) for n, (_, markdown) in enumerate(tabs)),
+        *_tabs(_split_report(report)),
         {"id": "actions", "component": "Row", "children": ["post-mortem", "download"]},
         *_button("post-mortem", "Post-mortem", "write_post_mortem", trace_id),
-        {
-            "id": "download",
-            "component": "Download",
-            "label": "Download",
-            "filename": f"diagnosis-{trace_id[:8]}.md",
-            "content": report,
-        },
+        _download(f"diagnosis-{trace_id[:8]}.md", report),
     ]
     children = [*(c["id"] for c in badge), "title", "trace", "sections", "actions"]
     return _messages(_card(children, components))
@@ -257,31 +271,20 @@ def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float
 def post_mortem_surface(report: str, trace_id: str | None, bottleneck_share: float | None) -> list[dict[str, Any]]:
     """A post-mortem: severity, the document (and AI analyst notes in their own tab), and a download."""
     if not trace_id:
-        return _messages(
-            _card(["title", "detail"], [_text("title", "✅ Nothing to write up", "h3"), _text("detail", report)])
-        )
+        return _message_card("✅ Nothing to write up", report)
 
+    # The card title replaces the document's H1; the AI notes get a tab of their own.
     document, _, notes = report.partition(ANALYSIS_HEADING)
-    document = document.replace(_POST_MORTEM_HEADING, "", 1).strip()
-    tabs = [("Post-mortem", document)] + ([("Analyst notes (AI)", notes.strip())] if notes.strip() else [])
+    tabs = [("Post-mortem", document.replace(_POST_MORTEM_HEADING, "", 1).strip())]
+    if notes.strip():
+        tabs.append(("Analyst notes (AI)", notes.strip()))
     badge = _badge(bottleneck_share)
     components = [
         *badge,
-        _text("title", "🚨 Incident post-mortem", "h3"),
+        _text("title", "🚨 Incident post-mortem", "h2"),
         _text("trace", f"Trace {trace_id} · status OPEN until a fix is confirmed", "caption"),
-        {
-            "id": "sections",
-            "component": "Tabs",
-            "tabs": [{"title": title, "child": f"tab-{n}"} for n, (title, _) in enumerate(tabs)],
-        },
-        *(_text(f"tab-{n}", markdown) for n, (_, markdown) in enumerate(tabs)),
-        {
-            "id": "download",
-            "component": "Download",
-            "label": "Download",
-            "filename": f"post-mortem-{trace_id[:8]}.md",
-            "content": report,
-        },
+        *_tabs(tabs),
+        _download(f"post-mortem-{trace_id[:8]}.md", report),
     ]
     children = [*(c["id"] for c in badge), "title", "trace", "sections", "download"]
     return _messages(_card(children, components))

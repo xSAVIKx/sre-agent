@@ -87,7 +87,9 @@ class TestDiagnosis(unittest.TestCase):
         self.assertEqual(
             [t["title"] for t in components["sections"]["tabs"]], ["Analysis", "Bottleneck", "Post-mortem"]
         )
-        self.assertTrue(components["tab-1"]["text"].startswith("## ⛓️ Multi-Service Cascade"))
+        # Report headings sit two levels under the card's h2 title.
+        self.assertTrue(components["tab-1"]["text"].startswith("#### ⛓️ Multi-Service Cascade"))
+        self.assertTrue(components["tab-0"]["text"].startswith("##### Root cause"))
         self.assertEqual(components["download"]["content"], DIAGNOSIS)
         self.assertEqual(components["post-mortem"]["action"]["event"]["context"], {"traceId": TRACE})
 

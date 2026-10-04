@@ -1277,5 +1277,8 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
         logs = json.loads(logs_str)
     except Exception as e:
         return f"Error: Failed to fetch telemetry for post-mortem: {e}"
+    if not data.get("spans"):
+        # No trace, no evidence: say so instead of writing a post-mortem full of "unknown".
+        return f"Error: No spans found for trace {trace_id}: {data.get('error', 'the trace is empty')}"
 
     return _render_post_mortem(trace_id, data, logs if isinstance(logs, list) else [])
