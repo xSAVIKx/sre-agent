@@ -13,6 +13,7 @@ setup_logging(service_name="orchestrator-agent")
 
 
 from fastapi import FastAPI  # noqa: E402
+from sre_common.tracing import setup_tracing  # noqa: E402
 
 from agent.routes import router  # noqa: E402
 
@@ -27,3 +28,6 @@ app.add_middleware(TraceContextMiddleware)
 
 # Include SRE agent APIRouter endpoints
 app.include_router(router)
+
+# Spans for each request and each outgoing call (A2A, Gemini), exported to Cloud Trace.
+setup_tracing(app, service_name="orchestrator-agent")

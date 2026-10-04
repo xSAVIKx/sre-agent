@@ -507,8 +507,8 @@ flowchart TB
 | Service account       | Used by         | Roles                                                                                    |
 |:----------------------|:----------------|:-----------------------------------------------------------------------------------------|
 | `sre-chaos-monkey-sa` | target app      | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)*                         |
-| `sre-agent-sa`        | SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`              |
+| `sre-agent-sa`        | SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(own spans)* |
+| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`, `cloudtrace.agent` |
 | `sre-build-sa`        | Cloud Build     | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter`             |
 
 ---

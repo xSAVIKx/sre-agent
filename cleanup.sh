@@ -136,8 +136,8 @@ delete_sa() {
 }
 
 delete_sa sre-chaos-monkey-sa roles/cloudtrace.agent roles/logging.logWriter
-delete_sa sre-agent-sa roles/cloudtrace.user roles/logging.viewer roles/monitoring.viewer roles/datastore.user
-delete_sa inventory-agent-sa roles/datastore.user roles/run.developer roles/logging.logWriter roles/cloudasset.viewer
+delete_sa sre-agent-sa roles/cloudtrace.user roles/cloudtrace.agent roles/logging.viewer roles/monitoring.viewer roles/datastore.user
+delete_sa inventory-agent-sa roles/datastore.user roles/run.developer roles/logging.logWriter roles/cloudasset.viewer roles/cloudtrace.agent
 delete_sa sre-build-sa roles/logging.logWriter roles/storage.admin roles/run.admin roles/artifactregistry.writer
 
 # 5. Optional: Firestore and local files

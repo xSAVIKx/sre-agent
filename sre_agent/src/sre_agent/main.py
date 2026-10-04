@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager  # noqa: E402
 
 from fastapi import FastAPI  # noqa: E402
 from sre_common.middleware import TraceContextMiddleware  # noqa: E402
+from sre_common.tracing import setup_tracing  # noqa: E402
 
 from sre_agent.a2a_agent import build_a2a_app  # noqa: E402
 from sre_agent.config import A2A_PUBLIC_URL  # noqa: E402
@@ -44,3 +45,7 @@ app.add_middleware(TraceContextMiddleware)
 # REST endpoints (/health, /trace) first, so the root mount below doesn't shadow them.
 app.include_router(router)
 app.mount("/", a2a_app)
+
+# Spans for each request and each outgoing call (A2A, Gemini), exported to Cloud Trace,
+# plus ADK's own agent / model / tool spans.
+setup_tracing(app, service_name="sre-sub-agent")

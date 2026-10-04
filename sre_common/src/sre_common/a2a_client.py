@@ -5,6 +5,8 @@ metadata, streams the task, and returns its artifact. It works with any A2A
 agent; nothing here is specific to this repository's agents.
 """
 
+import os
+import time
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -41,6 +43,29 @@ class A2AResult:
 
 def _message_text(message: T.Message) -> str:
     return "".join(get_text_parts(list(message.parts)))
+
+
+# Agent cards rarely change, so each one is fetched once per TTL instead of before every
+# call (a round trip per hop). A transport failure drops the entry, so a redeployed agent
+# is re-discovered on the next call.
+CARD_TTL_SECONDS = float(os.getenv("A2A_CARD_TTL_SECONDS", "300"))
+_card_cache: dict[str, tuple[float, T.AgentCard]] = {}
+
+
+def clear_card_cache() -> None:
+    """Forgets every cached agent card."""
+    _card_cache.clear()
+
+
+async def _get_card(http: httpx.AsyncClient, base_url: str, retry_connect: bool) -> T.AgentCard:
+    cached = _card_cache.get(base_url)
+    if cached and time.monotonic() - cached[0] < CARD_TTL_SECONDS:
+        return cached[1]
+    card = (
+        await _resolve_card(http, base_url) if retry_connect else await A2ACardResolver(http, base_url).get_agent_card()
+    )
+    _card_cache[base_url] = (time.monotonic(), card)
+    return card
 
 
 @retry_async(max_retries=3, initial_delay=1.0)
@@ -85,11 +110,7 @@ async def call_agent(
     own_client = http is None
     http = http or httpx.AsyncClient(timeout=httpx.Timeout(10.0, read=timeout))
     try:
-        card = (
-            await _resolve_card(http, base_url)
-            if retry_connect
-            else await A2ACardResolver(http, base_url).get_agent_card()
-        )
+        card = await _get_card(http, base_url, retry_connect)
         client = ClientFactory(ClientConfig(httpx_client=http, streaming=True)).create(card)
 
         message = T.Message(
@@ -144,6 +165,11 @@ async def call_agent(
         if not artifact_seen:
             raise A2ATaskError("Agent finished without producing an artifact")
         return result
+    except A2ATaskError:
+        raise  # the agent answered; its card is fine
+    except Exception:
+        _card_cache.pop(base_url, None)
+        raise
     finally:
         if own_client:
             await http.aclose()

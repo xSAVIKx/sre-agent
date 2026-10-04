@@ -72,6 +72,9 @@ class TestDiagnoseSreOverA2A(unittest.IsolatedAsyncioTestCase):
         http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=self.BASE_URL, timeout=30)
         self.addAsyncCleanup(http.aclose)
 
+        from sre_common.a2a_client import clear_card_cache
+
+        clear_card_cache()
         # Route the Orchestrator's A2A client to the in-process server.
         call_agent = functools.partial(config.call_agent, http=http)
         for patch in (

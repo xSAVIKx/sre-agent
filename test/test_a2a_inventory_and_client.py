@@ -21,7 +21,7 @@ from a2a.server.agent_execution import AgentExecutor  # noqa: E402
 from a2a.server.request_handlers import DefaultRequestHandler  # noqa: E402
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes  # noqa: E402
 from a2a.server.tasks import InMemoryTaskStore, TaskUpdater  # noqa: E402
-from sre_common.a2a_client import A2ATaskError, call_agent  # noqa: E402
+from sre_common.a2a_client import A2ATaskError, call_agent, clear_card_cache  # noqa: E402
 from starlette.applications import Starlette  # noqa: E402
 
 from inventory_agent import a2a_server  # noqa: E402
@@ -34,6 +34,9 @@ def _client_for(routes) -> httpx.AsyncClient:
 
 
 class TestInventoryA2A(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        clear_card_cache()  # each test serves a different agent at the same URL
+
     async def test_topology_comes_back_as_a_data_artifact(self) -> None:
         cached = {"project_id": "demo", "status": "ACTIVE", "discovered_resources": {"services": [{"name": "app"}]}}
         lookup = mock.AsyncMock(return_value=cached)
@@ -98,6 +101,9 @@ def _scripted_routes(executor: AgentExecutor):
 
 
 class TestCallAgent(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        clear_card_cache()
+
     async def test_progress_excludes_the_repeated_result(self) -> None:
         progress: list[str] = []
         async with _client_for(_scripted_routes(_ScriptedExecutor())) as http:

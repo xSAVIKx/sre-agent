@@ -221,8 +221,8 @@ This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Ar
 | Service account | Used by | Roles |
 | :--- | :--- | :--- |
 | `sre-chaos-monkey-sa` | target app (`sre-chaos-monkey`) | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)* |
-| `sre-agent-sa` | SRE diagnostics (`sre-sub-agent`) | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)* |
+| `sre-agent-sa` | Orchestrator + SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(write only its own spans)* |
+| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)*, `cloudtrace.agent` *(its own spans)* |
 | `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter` |
 
 The split is the point: the app that *generates* chaos can only **write** telemetry; the agent that *investigates* it can only **read**.
