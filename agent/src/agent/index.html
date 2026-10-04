@@ -953,6 +953,10 @@
             // If we are currently processing a request, click acts as a Stop action
             if (currentAbortController) {
                 currentAbortController.abort();
+                // The turn runs on the server even without this connection: stop it there too.
+                if (activeConversationId) {
+                    fetch(`/sessions/${activeConversationId}/cancel`, { method: 'POST' }).catch(() => {});
+                }
                 return;
             }
 
@@ -1114,7 +1118,13 @@
                 const isAborted = err.name === 'AbortError';
                 if (isAborted) {
                     errTextDiv.style.color = 'var(--text-muted)';
-                    errTextDiv.innerText = '🛑 Diagnostic processing forcefully cancelled by user.';
+                    errTextDiv.innerText = '🛑 Stopped.';
+                } else if (activeConversationId) {
+                    // The connection dropped (e.g. a phone switched apps), but the turn keeps
+                    // running on the server: wait for its saved answer.
+                    errTextDiv.style.color = 'var(--text-muted)';
+                    errTextDiv.innerText = '⏳ Connection lost. The agent is still working on this answer…';
+                    waitForRunningTurn(activeConversationId);
                 } else {
                     errTextDiv.style.color = 'var(--danger)';
                     errTextDiv.innerText = `Error contacting agent: ${err.message}`;
@@ -1378,6 +1388,42 @@
             }
         }
 
+        // Polls a conversation whose last turn is still running, and shows the answer once
+        // it is saved. Checks at once when the page becomes visible again (back from
+        // another app), and every few seconds otherwise.
+        let waitingFor = null;
+        async function waitForRunningTurn(conversationId) {
+            if (waitingFor === conversationId) return;
+            waitingFor = conversationId;
+            const deadline = Date.now() + 10 * 60 * 1000;
+            const visible = () => new Promise(resolve => {
+                const done = () => { document.removeEventListener('visibilitychange', done); resolve(); };
+                document.addEventListener('visibilitychange', done);
+                setTimeout(done, 3000);
+            });
+            try {
+                while (Date.now() < deadline && activeConversationId === conversationId) {
+                    await visible();
+                    if (document.hidden) continue;
+                    try {
+                        const res = await fetch(`/sessions/${conversationId}/history`);
+                        const history = (await res.json()).history || [];
+                        const last = history[history.length - 1];
+                        if (last && !last.pending) {
+                            if (activeConversationId === conversationId && !currentAbortController) {
+                                await selectSession(conversationId, false);
+                            }
+                            return;
+                        }
+                    } catch (err) {
+                        // Still offline: try again on the next round.
+                    }
+                }
+            } finally {
+                if (waitingFor === conversationId) waitingFor = null;
+            }
+        }
+
         async function selectSession(conversationId, updateHistory = true) {
             activeConversationId = conversationId;
             
@@ -1483,10 +1529,16 @@
                         }
 
                         currentTextStreamBox.innerHTML = '';
-                        currentTextStreamBox.appendChild(
-                            renderTurn({ response: step.content, a2ui: step.a2ui, rendered: step.rendered }));
+                        if (step.pending) {
+                            currentTextStreamBox.innerText = '⏳ The agent is still working on this answer…';
+                        } else {
+                            currentTextStreamBox.appendChild(
+                                renderTurn({ response: step.content, a2ui: step.a2ui, rendered: step.rendered }));
+                        }
                     }
                 });
+                const last = data.history[data.history.length - 1];
+                if (last && last.pending) waitForRunningTurn(conversationId);
 
                 chatHistory.scrollTop = chatHistory.scrollHeight;
             } catch (err) {
