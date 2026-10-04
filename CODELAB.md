@@ -498,7 +498,7 @@ flowchart TB
 |:----------------------|:----------------|:-----------------------------------------------------------------------------------------|
 | `sre-chaos-monkey-sa` | target app      | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)*                         |
 | `sre-agent-sa`        | SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`                                   |
+| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`              |
 | `sre-build-sa`        | Cloud Build     | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter`             |
 
 ---

@@ -74,7 +74,9 @@ flowchart LR
 ├── pyproject.toml          # Root uv workspace (5 members)
 ├── uv.lock
 ├── docker-compose.yaml     # Full local multi-service stack + Firestore emulator
-├── cloudbuild.yaml         # Root Cloud Build config
+├── cloudbuild.yaml         # Parallel build + deploy of all four services
+├── docker/base.Dockerfile  # Shared dependency image every service builds on
+├── scripts/base-image.sh   # Content-addressed tag of that image
 ├── bootstrap.sh            # Interactive GCP project setup (writes .env)
 ├── deploy.sh               # Least-privilege Cloud Run deploy
 ├── cleanup.sh              # GCP resource teardown
@@ -82,7 +84,7 @@ flowchart LR
 │
 ├── app/                    # 🐒 Target FastAPI app (OpenTelemetry-instrumented)
 │   ├── main.py             # Gateway → Backend → Database incident generator
-│   ├── Dockerfile · cloudbuild.yaml · pyproject.toml
+│   ├── Dockerfile · pyproject.toml
 │
 ├── agent/                  # 🛡️ Orchestrator service (user-facing + web UI)
 │   ├── src/agent/
@@ -93,7 +95,7 @@ flowchart LR
 │   │   ├── firestore_strategy.py
 │   │   └── index.html          # Premium web chat interface
 │   ├── test/
-│   └── Dockerfile · cloudbuild.yaml · pyproject.toml
+│   └── Dockerfile · pyproject.toml
 │
 ├── sre_agent/              # 🔬 SRE diagnostics engine
 │   ├── src/sre_agent/
@@ -103,11 +105,11 @@ flowchart LR
 │   │   ├── registry.py      # @register_tool decorator
 │   │   ├── itinerary.py · config.py · firestore_strategy.py · main.py
 │   ├── test/
-│   └── Dockerfile · cloudbuild.yaml · pyproject.toml
+│   └── Dockerfile · pyproject.toml
 │
 ├── inventory_agent/        # 📚 Infrastructure topology discovery
 │   ├── src/inventory_agent/{main,routes,discovery,config,firestore_strategy}.py
-│   └── Dockerfile · cloudbuild.yaml · pyproject.toml
+│   └── Dockerfile · pyproject.toml
 │
 ├── sre_common/             # 🧰 Shared library
 │   └── src/sre_common/{otel,retry,logging,middleware}.py
@@ -205,16 +207,21 @@ Deploy to Cloud Run following least-privilege best practices — each service ge
 ```bash
 ./deploy.sh
 ```
-This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Artifact Registry, Firestore, Secret Manager), provisions the service accounts, grants least-privilege roles, then builds and deploys four Cloud Run services:
+This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Artifact Registry, Firestore, Secret Manager, Cloud Asset), provisions the service accounts, grants least-privilege roles, then builds and deploys four Cloud Run services:
 
 | Service account | Used by | Roles |
 | :--- | :--- | :--- |
 | `sre-chaos-monkey-sa` | target app (`sre-chaos-monkey`) | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)* |
 | `sre-agent-sa` | SRE diagnostics (`sre-sub-agent`) | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter` |
+| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)* |
 | `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter` |
 
 The split is the point: the app that *generates* chaos can only **write** telemetry; the agent that *investigates* it can only **read**.
+
+> ⚠️ **Demo posture.** All four services are deployed with `--allow-unauthenticated` so the chat
+> and the A2A calls work without extra setup. Anyone with a URL can use the agents (and your
+> Gemini quota). Tear the stack down with `./cleanup.sh` after a demo, or put the services behind
+> IAP / IAM-authenticated invocations before leaving them up.
 
 ---
 

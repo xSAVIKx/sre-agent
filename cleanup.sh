@@ -2,8 +2,21 @@
 #
 # cleanup.sh - Graceful tear-down script to delete the demo deployment resources from GCP
 #
+# Removes everything deploy.sh creates: the four Cloud Run services, the inventory
+# scanner job, the Artifact Registry repository, the GEMINI_API_KEY secret, and the
+# four service accounts with their project-level role bindings. Optionally deletes the
+# Firestore (default) database and the local .env / mock telemetry.
+#
+# Pass --yes (or -y) to answer "yes" to the optional prompts (non-interactive runs).
 
 set -euo pipefail
+
+ASSUME_YES=false
+for arg in "$@"; do
+    case $arg in
+        --yes|-y) ASSUME_YES=true ;;
+    esac
+done
 
 # Add default Windows Google Cloud SDK path to PATH if present (Git Bash or WSL)
 if [ -d "/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin" ]; then
@@ -19,6 +32,16 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
+confirm() {
+    # confirm "<question>" -> returns 0 for yes
+    if [ "$ASSUME_YES" = "true" ]; then
+        return 0
+    fi
+    local answer
+    read -r -p "$1 (y/n): " answer
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
 echo -e "${BLUE}===============================================${NC}"
 echo -e "${BLUE}    GCP SRE Agent Codelab Resource Cleanup     ${NC}"
 echo -e "${BLUE}===============================================${NC}"
@@ -26,11 +49,14 @@ echo -e "${BLUE}===============================================${NC}"
 # 1. Load configuration from .env if available
 if [ -f .env ]; then
     echo "Loading configuration from .env..."
-    export $(grep -v '^#' .env | xargs)
+    set -a
+    # shellcheck disable=SC1091
+    . ./.env
+    set +a
 else
     echo -e "${YELLOW}Warning: .env file not found.${NC}"
-    read -p "Enter GCP Project ID: " GCP_PROJECT
-    read -p "Enter GCP Region [default: us-central1]: " GCP_REGION
+    read -r -p "Enter GCP Project ID: " GCP_PROJECT
+    read -r -p "Enter GCP Region [default: us-central1]: " GCP_REGION
     GCP_REGION=${GCP_REGION:-us-central1}
 fi
 
@@ -45,24 +71,29 @@ echo ""
 # Set project context
 gcloud config set project "$GCP_PROJECT"
 
-# 2. Delete Cloud Run Services
-echo -e "${BLUE}[1/3] Deleting Cloud Run services...${NC}"
+# 2. Delete Cloud Run services and the scanner job
+echo -e "${BLUE}[1/4] Deleting Cloud Run services and jobs...${NC}"
 
-if gcloud run services describe sre-agent --region "$GCP_REGION" &>/dev/null; then
-    gcloud run services delete sre-agent --region "$GCP_REGION" --quiet
-    echo -e "${GREEN}✓ Deleted Cloud Run service: sre-agent${NC}"
+for SERVICE in sre-agent sre-sub-agent inventory-agent sre-chaos-monkey; do
+    if gcloud run services describe "$SERVICE" --region "$GCP_REGION" &>/dev/null; then
+        gcloud run services delete "$SERVICE" --region "$GCP_REGION" --quiet
+        echo -e "${GREEN}✓ Deleted Cloud Run service: $SERVICE${NC}"
+    else
+        echo "• Service '$SERVICE' does not exist."
+    fi
+done
+
+JOB_NAME="inventory-scanner-job"
+if gcloud run jobs describe "$JOB_NAME" --region "$GCP_REGION" &>/dev/null; then
+    gcloud run jobs delete "$JOB_NAME" --region "$GCP_REGION" --quiet
+    echo -e "${GREEN}✓ Deleted Cloud Run job: $JOB_NAME${NC}"
 else
-    echo "• Service 'sre-agent' does not exist."
+    echo "• Job '$JOB_NAME' does not exist."
 fi
 
-if gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" &>/dev/null; then
-    gcloud run services delete sre-chaos-monkey --region "$GCP_REGION" --quiet
-    echo -e "${GREEN}✓ Deleted Cloud Run service: sre-chaos-monkey${NC}"
-else
-    echo "• Service 'sre-chaos-monkey' does not exist."
-fi
+# 3. Delete the image repository and the API key secret
+echo -e "\n${BLUE}[2/4] Deleting Artifact Registry repository and secrets...${NC}"
 
-# Delete Artifact Registry repository
 REPO_NAME="sre-repo"
 if gcloud artifacts repositories describe "$REPO_NAME" --location="$GCP_REGION" &>/dev/null; then
     gcloud artifacts repositories delete "$REPO_NAME" --location="$GCP_REGION" --quiet
@@ -71,7 +102,7 @@ else
     echo "• Artifact Registry repository '$REPO_NAME' does not exist."
 fi
 
-# Delete Secret Manager secret
+# Deleting the secret also removes its secretAccessor bindings.
 if gcloud secrets describe GEMINI_API_KEY &>/dev/null; then
     gcloud secrets delete GEMINI_API_KEY --quiet
     echo -e "${GREEN}✓ Deleted secret: GEMINI_API_KEY${NC}"
@@ -79,74 +110,49 @@ else
     echo "• Secret 'GEMINI_API_KEY' does not exist."
 fi
 
-# 3. Remove IAM Role Bindings & Service Accounts
-echo -e "\n${BLUE}[2/3] Cleaning up IAM policies and Service Accounts...${NC}"
+# 4. Remove IAM role bindings & service accounts
+echo -e "\n${BLUE}[3/4] Cleaning up IAM policies and Service Accounts...${NC}"
 
-APP_SA_EMAIL="sre-chaos-monkey-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
-AGENT_SA_EMAIL="sre-agent-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
+# delete_sa <name> <role>... : drops the project-level bindings deploy.sh granted, then the SA.
+# Bindings are removed first because deleting an SA leaves "deleted:serviceAccount:..."
+# members behind in the project policy.
+delete_sa() {
+    local sa_name="$1"
+    shift
+    local sa_email="${sa_name}@${GCP_PROJECT}.iam.gserviceaccount.com"
+    if ! gcloud iam service-accounts describe "$sa_email" &>/dev/null; then
+        echo "• Service account '$sa_email' does not exist."
+        return
+    fi
+    echo "Removing IAM policy bindings for $sa_name..."
+    local role
+    for role in "$@"; do
+        gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
+            --member="serviceAccount:${sa_email}" \
+            --role="$role" &>/dev/null || true
+    done
+    gcloud iam service-accounts delete "$sa_email" --quiet
+    echo -e "${GREEN}✓ Deleted service account: $sa_email${NC}"
+}
 
-# Target App SA Cleanup
-if gcloud iam service-accounts describe "$APP_SA_EMAIL" &>/dev/null; then
-    echo "Removing IAM policy bindings for SRE Chaos Monkey service account..."
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${APP_SA_EMAIL}" \
-        --role="roles/cloudtrace.agent" &>/dev/null || true
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${APP_SA_EMAIL}" \
-        --role="roles/logging.logWriter" &>/dev/null || true
+delete_sa sre-chaos-monkey-sa roles/cloudtrace.agent roles/logging.logWriter
+delete_sa sre-agent-sa roles/cloudtrace.user roles/logging.viewer roles/monitoring.viewer roles/datastore.user
+delete_sa inventory-agent-sa roles/datastore.user roles/run.developer roles/logging.logWriter roles/cloudasset.viewer
+delete_sa sre-build-sa roles/logging.logWriter roles/storage.admin roles/run.admin roles/artifactregistry.writer
 
-    gcloud iam service-accounts delete "$APP_SA_EMAIL" --quiet
-    echo -e "${GREEN}✓ Deleted service account: $APP_SA_EMAIL${NC}"
-else
-    echo "• Service account '$APP_SA_EMAIL' does not exist."
+# 5. Optional: Firestore and local files
+echo -e "\n${BLUE}[4/4] Optional cleanup...${NC}"
+
+if gcloud firestore databases describe --database="(default)" &>/dev/null; then
+    if confirm "Delete the Firestore (default) database (sessions, inventory cache, templates)?"; then
+        gcloud firestore databases delete --database="(default)" --quiet
+        echo -e "${GREEN}✓ Deleted Firestore (default) database.${NC}"
+    else
+        echo "• Kept the Firestore (default) database."
+    fi
 fi
 
-# SRE Agent SA Cleanup
-if gcloud iam service-accounts describe "$AGENT_SA_EMAIL" &>/dev/null; then
-    echo "Removing IAM policy bindings for SRE agent service account..."
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/cloudtrace.user" &>/dev/null || true
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/logging.viewer" &>/dev/null || true
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/datastore.user" &>/dev/null || true
-
-    gcloud iam service-accounts delete "$AGENT_SA_EMAIL" --quiet
-    echo -e "${GREEN}✓ Deleted service account: $AGENT_SA_EMAIL${NC}"
-else
-    echo "• Service account '$AGENT_SA_EMAIL' does not exist."
-fi
-
-# SRE Build SA Cleanup
-BUILD_SA_EMAIL="sre-build-sa@${GCP_PROJECT}.iam.gserviceaccount.com"
-if gcloud iam service-accounts describe "$BUILD_SA_EMAIL" &>/dev/null; then
-    echo "Removing IAM policy bindings for SRE Build service account..."
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/logging.logWriter" &>/dev/null || true
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/storage.admin" &>/dev/null || true
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/run.admin" &>/dev/null || true
-    gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
-        --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/artifactregistry.writer" &>/dev/null || true
-
-    gcloud iam service-accounts delete "$BUILD_SA_EMAIL" --quiet
-    echo -e "${GREEN}✓ Deleted service account: $BUILD_SA_EMAIL${NC}"
-else
-    echo "• Service account '$BUILD_SA_EMAIL' does not exist."
-fi
-
-# 4. Optional local cleanup
-echo -e "\n${BLUE}[3/3] Local cleanup...${NC}"
-read -p "Would you like to delete the local .env and mock telemetry directories? (y/n): " CLEAN_LOCAL
-if [[ "$CLEAN_LOCAL" =~ ^[Yy]$ ]]; then
+if confirm "Delete the local .env and mock telemetry directories?"; then
     rm -f .env
     rm -rf mock_telemetry_data/
     echo -e "${GREEN}✓ Deleted local .env file and mock_telemetry_data/ folder.${NC}"
@@ -157,3 +163,5 @@ fi
 echo -e "\n${GREEN}===============================================${NC}"
 echo -e "${GREEN}      Demo Stack Resources Torn Down!          ${NC}"
 echo -e "${GREEN}===============================================${NC}"
+echo "Enabled APIs and Cloud Build source buckets are left in place."
+echo "To remove everything at once, delete the project: gcloud projects delete $GCP_PROJECT"

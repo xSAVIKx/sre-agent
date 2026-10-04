@@ -42,8 +42,11 @@ if [ ! -f .env ]; then
     exit 1
 fi
 
-# Export env vars
-export $(grep -v '^#' .env | xargs)
+# Export env vars (sourcing handles blank lines, comments and quoted values)
+set -a
+# shellcheck disable=SC1091
+. ./.env
+set +a
 
 echo "Configuration loaded:"
 echo "GCP Project: $GCP_PROJECT"
@@ -79,7 +82,8 @@ if [ "$SKIP_INFRA" = "false" ]; then
         monitoring.googleapis.com \
         artifactregistry.googleapis.com \
         firestore.googleapis.com \
-        secretmanager.googleapis.com
+        secretmanager.googleapis.com \
+        cloudasset.googleapis.com
 
     # Create GEMINI_API_KEY secret if it doesn't exist
     echo "Checking GEMINI_API_KEY secret in Secret Manager..."
@@ -208,7 +212,11 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
         --role="roles/logging.logWriter" >/dev/null
-    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer & roles/logging.logWriter to Inventory Agent SA${NC}"
+    # Read-only search of the project's databases (Firestore, Spanner, Cloud SQL).
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/cloudasset.viewer" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer, roles/logging.logWriter & roles/cloudasset.viewer to Inventory Agent SA${NC}"
 
     # Allow SRE Build SA to act as the SRE application service accounts
     echo "Allowing SRE Build SA to act as application and agent service accounts..."
@@ -275,55 +283,38 @@ if [ "$SKIP_INFRA" = "false" ]; then
         --field-config=field-path=embedding,vector-config='{"dimension":"768","flat":{}}' --async || true
 fi
 
-# 5. Build and Deploy Target Application (SRE Chaos Monkey) - SKIPPED FOR FAST REDEPLOY
-# echo -e "\n${BLUE}[4/5] Building and deploying SRE Chaos Monkey FastAPI App...${NC}"
-# gcloud builds submit --config=app/cloudbuild.yaml \
-#     --region="$GCP_REGION" \
-#     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-#     --substitutions=_GCP_REGION="$GCP_REGION" .
+# 5. Resolve the shared dependency image (docker/base.Dockerfile)
+echo -e "\n${BLUE}[4/5] Resolving the shared dependency image...${NC}"
+BASE_TAG=$(scripts/base-image.sh tag)
+CACHED_BASE="${GCP_REGION}-docker.pkg.dev/${GCP_PROJECT}/sre-repo/sre-agent-base:${BASE_TAG}"
+BUILD_BASE=false
+if scripts/base-image.sh published; then
+    BASE_IMAGE=$(scripts/base-image.sh ref)
+    echo -e "${GREEN}✓ Using the published image: $BASE_IMAGE${NC}"
+elif gcloud artifacts docker images describe "$CACHED_BASE" &>/dev/null; then
+    BASE_IMAGE="$CACHED_BASE"
+    echo -e "${GREEN}✓ Using the copy cached in Artifact Registry: $BASE_IMAGE${NC}"
+else
+    BASE_IMAGE="$CACHED_BASE"
+    BUILD_BASE=true
+    echo -e "${YELLOW}No published image for ${BASE_TAG} yet; building it in the pipeline (adds a few minutes).${NC}"
+fi
 
-TARGET_APP_URL=$(gcloud run services describe sre-chaos-monkey --region "$GCP_REGION" --format="value(status.url)")
-TARGET_APP_URL=$(echo "$TARGET_APP_URL" | sed 's/.*http/http/')
-echo -e "${GREEN}✓ SRE Chaos Monkey URL: $TARGET_APP_URL${NC}"
+# Cloud Run URLs are deterministic (https://<service>-<project number>.<region>.run.app),
+# so every service can be wired to the others before any of them is deployed.
+PROJECT_NUMBER=$(gcloud projects describe "$GCP_PROJECT" --format="value(projectNumber)")
+run_url() { echo "https://$1-${PROJECT_NUMBER}.${GCP_REGION}.run.app"; }
+TARGET_APP_URL=$(run_url sre-chaos-monkey)
+INVENTORY_AGENT_URL=$(run_url inventory-agent)
+SRE_SUB_AGENT_URL=$(run_url sre-sub-agent)
+AGENT_URL=$(run_url sre-agent)
 
-# 6. Build and Deploy Inventory Sub-Agent
-echo -e "\n${BLUE}[5/7] Building and deploying Inventory Sub-Agent...${NC}"
-gcloud builds submit --config=inventory_agent/cloudbuild.yaml \
+# 6. Build and deploy all four services in parallel (see cloudbuild.yaml)
+echo -e "\n${BLUE}[5/5] Building and deploying all services in parallel...${NC}"
+gcloud builds submit --config=cloudbuild.yaml \
     --region="$GCP_REGION" \
     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-    --substitutions=_GCP_REGION="$GCP_REGION" .
-
-INVENTORY_AGENT_URL=$(gcloud run services describe inventory-agent --region "$GCP_REGION" --format="value(status.url)")
-INVENTORY_AGENT_URL=$(echo "$INVENTORY_AGENT_URL" | sed 's/.*http/http/')
-echo -e "${GREEN}✓ Deployed Inventory Sub-Agent to: $INVENTORY_AGENT_URL${NC}"
-
-# Update Inventory Agent to set its own URL for callback injection
-echo "Updating Inventory Agent environment variables with self URL..."
-gcloud run services update inventory-agent \
-    --region="$GCP_REGION" \
-    --update-env-vars=INVENTORY_AGENT_URL="$INVENTORY_AGENT_URL" >/dev/null
-
-# 7. Build and Deploy SRE Diagnostics Sub-Agent
-echo -e "\n${BLUE}[6/7] Building and deploying SRE Diagnostics Sub-Agent...${NC}"
-gcloud builds submit --config=sre_agent/cloudbuild.yaml \
-    --region="$GCP_REGION" \
-    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-    --substitutions=_GCP_REGION="$GCP_REGION",_INVENTORY_AGENT_URL="$INVENTORY_AGENT_URL" .
-
-SRE_SUB_AGENT_URL=$(gcloud run services describe sre-sub-agent --region "$GCP_REGION" --format="value(status.url)")
-SRE_SUB_AGENT_URL=$(echo "$SRE_SUB_AGENT_URL" | sed 's/.*http/http/')
-echo -e "${GREEN}✓ Deployed SRE Diagnostics Sub-Agent to: $SRE_SUB_AGENT_URL${NC}"
-
-# 8. Build and Deploy SRE Orchestrator Agent
-echo -e "\n${BLUE}[7/7] Building and deploying SRE Orchestrator Agent...${NC}"
-gcloud builds submit --config=agent/cloudbuild.yaml \
-    --region="$GCP_REGION" \
-    --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-    --substitutions=_GCP_REGION="$GCP_REGION",_TARGET_APP_URL="$TARGET_APP_URL",_SRE_AGENT_URL="$SRE_SUB_AGENT_URL" .
-
-AGENT_URL=$(gcloud run services describe sre-agent --region "$GCP_REGION" --format="value(status.url)")
-AGENT_URL=$(echo "$AGENT_URL" | sed 's/.*http/http/')
-echo -e "${GREEN}✓ Deployed SRE Orchestrator Agent to: $AGENT_URL${NC}"
+    --substitutions=_GCP_REGION="$GCP_REGION",_PROJECT_NUMBER="$PROJECT_NUMBER",_BASE_IMAGE="$BASE_IMAGE",_BUILD_BASE="$BUILD_BASE" .
 
 echo -e "\n${GREEN}===============================================${NC}"
 echo -e "${GREEN}           Deployment Completed Successfully!  ${NC}"
@@ -331,9 +322,10 @@ echo -e "${GREEN}===============================================${NC}"
 echo "Target App URL:      $TARGET_APP_URL"
 echo "Inventory Agent URL: $INVENTORY_AGENT_URL"
 echo "SRE Sub-Agent URL:   $SRE_SUB_AGENT_URL"
-echo "SRE Orchestrator:    $AGENT_URL"
+echo "SRE Orchestrator:    $AGENT_URL (chat UI: $AGENT_URL/chat)"
 echo ""
 echo "Try running this command to trigger an error and start SRE diagnostics:"
 echo -e "curl \"${TARGET_APP_URL}/api/gateway?trigger_error=true\""
 echo -e "curl -X POST \"${AGENT_URL}/diagnose\" -H \"Content-Type: application/json\" -d '{\"prompt\": \"Gateway service is throwing errors. Find the root cause.\", \"project_id\": \"'\"$GCP_PROJECT\"'\"}'"
+echo "(Cloud Trace takes a minute or two to show new traces.)"
 echo -e "${GREEN}===============================================${NC}"

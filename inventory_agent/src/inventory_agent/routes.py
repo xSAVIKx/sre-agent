@@ -1,6 +1,7 @@
 """API Route definitions for the Inventory Agent."""
 
 import asyncio
+import datetime
 import logging
 import os
 from typing import Any
@@ -85,7 +86,8 @@ async def _run_scanner_job_gcp(job_path: str, overrides: dict[str, Any]) -> str:
     from google.cloud import run_v2
 
     client = run_v2.JobsClient()
-    operation = await asyncio.to_thread(client.run_job, name=job_path, overrides=overrides)
+    # `overrides` is not a flattened keyword argument of run_job; it must go in the request.
+    operation = await asyncio.to_thread(client.run_job, request={"name": job_path, "overrides": overrides})
     return operation.metadata.name if hasattr(operation, "metadata") else "unknown"
 
 
@@ -128,10 +130,28 @@ async def trigger_scanner_job(target_project_id: str) -> None:
         op_name = await _run_scanner_job_gcp(job_path, overrides)
         logger.info(f"Cloud Run scanner job triggered successfully. Operation Name: {op_name}")
     except Exception as e:
+        # Never cache mock topology for a real project: it would be served as truth.
+        # A FAILED status is retried on the next request (see _needs_rescan).
         logger.error(f"Failed to trigger Cloud Run scanner job after retries: {e}")
-        # Graceful fallback: run local simulation if API call fails
-        logger.warning("Falling back to local simulation due to GCP API failure.")
-        _spawn_background(run_discovery_mock(target_project_id))
+        await set_project_status(target_project_id, "FAILED")
+
+
+# A scan that has been DISCOVERING this long lost its callback (job crashed or timed out).
+STALE_DISCOVERY = datetime.timedelta(minutes=10)
+
+
+def _needs_rescan(cache: dict[str, Any]) -> bool:
+    """True when a cached entry records a failed scan or a scan that never reported back."""
+    status = cache.get("status")
+    if status == "FAILED":
+        return True
+    if status == "DISCOVERING":
+        updated = cache.get("last_update_time")
+        if isinstance(updated, datetime.datetime):
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=datetime.UTC)
+            return datetime.datetime.now(datetime.UTC) - updated > STALE_DISCOVERY
+    return False
 
 
 @router.get("/v1/agents/inventory")
@@ -145,6 +165,10 @@ async def get_inventory(project_id: str, refresh: bool = False, background_tasks
     logger.info(f"Received inventory request for project={project_id} (refresh={refresh})")
 
     cache = await get_project_inventory(project_id)
+
+    if cache and _needs_rescan(cache):
+        logger.info(f"Cached scan for {project_id} is {cache.get('status')} and needs a rescan.")
+        cache = None
 
     if refresh or not cache:
         if not cache:
