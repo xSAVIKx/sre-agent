@@ -102,16 +102,6 @@ log_correlator = AdkAgent(
 )
 
 
-@retry_async(max_retries=3, initial_delay=1.0)
-async def _fetch_topology_with_retry(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
-    import httpx
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(inv_url, params=params, timeout=15.0)
-        resp.raise_for_status()
-        return resp.json()
-
-
 # 2. Orchestrate the diagnostic workflow
 @retry_async(max_retries=3, initial_delay=2.0)
 @otel_trace("_run_adk_diagnostics")
@@ -155,20 +145,12 @@ async def _run_adk_diagnostics(traces_json: str, project_id: str | None = None) 
 
         # Fetch topology from Inventory Agent
         topology = {}
+        from .config import IS_MOCK
+
         try:
-            from .config import INVENTORY_AGENT_URL, IS_MOCK
+            from .inventory_client import fetch_topology
 
-            inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
-            params = {"project_id": proj_id or "mock-project"}
-            if IS_MOCK:
-                import httpx
-
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(inv_url, params=params, timeout=2.0)
-                    if resp.status_code == 200:
-                        topology = resp.json()
-            else:
-                topology = await _fetch_topology_with_retry(inv_url, params)
+            topology = await fetch_topology(proj_id or "mock-project", fail_fast=IS_MOCK)
         except Exception as e:
             if IS_MOCK:
                 # Expected in the standalone simulation: no Inventory Agent is running.

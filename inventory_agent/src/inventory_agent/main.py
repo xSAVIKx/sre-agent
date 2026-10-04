@@ -13,6 +13,8 @@ setup_logging(service_name="inventory-agent")
 from fastapi import FastAPI  # noqa: E402
 from sre_common.middleware import TraceContextMiddleware  # noqa: E402
 
+from inventory_agent.a2a_server import build_a2a_routes  # noqa: E402
+from inventory_agent.config import A2A_PUBLIC_URL  # noqa: E402
 from inventory_agent.routes import router  # noqa: E402
 
 # Initialize FastAPI application
@@ -24,5 +26,8 @@ app = FastAPI(
 
 app.add_middleware(TraceContextMiddleware)
 
-# Include SRE agent APIRouter endpoints
+# REST: /health, plus /v1/agents/inventory/{refresh,callback} for the scanner job.
 app.include_router(router)
+
+# The agent itself, over A2A: JSON-RPC at "/", card at /.well-known/agent-card.json.
+app.router.routes.extend(build_a2a_routes(A2A_PUBLIC_URL))

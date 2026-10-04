@@ -5,6 +5,8 @@ description = "Shared common utilities for SRE multi-agent workspace"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.141.1",
+    # sre_common.a2a_client: the Agent2Agent protocol client the agents share.
+    "a2a-sdk>=1.2.1,<2",
     "uvicorn>=0.52.4",
     # A floor, not a pin: this library declares no google-adk dependency. The
     # <=1.42.1 ceiling belongs to adk and arrives transitively, in the two members

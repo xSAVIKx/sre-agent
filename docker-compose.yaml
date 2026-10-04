@@ -31,6 +31,8 @@ services:
       - "8083:8080"
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
+      # Advertised in the A2A agent card at /.well-known/agent-card.json.
+      - A2A_PUBLIC_URL=http://inventory-agent:8080
       - GCP_PROJECT=${GCP_PROJECT:-local-dev}
       - MOCK_GCP=true
     depends_on:

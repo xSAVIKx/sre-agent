@@ -32,6 +32,7 @@ extend-exclude = [
     "skills/sre_incident_solver/config.py",
     "skills/sre_incident_solver/firestore_strategy.py",
     "skills/sre_incident_solver/gcp_tools.py",
+    "skills/sre_incident_solver/inventory_client.py",
     "skills/sre_incident_solver/itinerary.py",
     "skills/sre_incident_solver/registry.py",
     "skills/sre_incident_solver/sre_workflow.py",

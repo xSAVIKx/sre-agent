@@ -154,41 +154,35 @@ def _needs_rescan(cache: dict[str, Any]) -> bool:
     return False
 
 
-@router.get("/v1/agents/inventory")
-@otel_trace("inventory_agent.get_inventory")
-async def get_inventory(project_id: str, refresh: bool = False, background_tasks: BackgroundTasks = BackgroundTasks()):
-    """Retrieves the infrastructure inventory for a project, caching results statefully.
+@otel_trace("inventory_agent.lookup_inventory")
+async def lookup_inventory(project_id: str, refresh: bool = False) -> dict[str, Any]:
+    """Returns a project's cached topology, scheduling a scan when it is missing or stale.
 
-    On a cache hit, returns instantly. On a cache miss or explicit refresh,
-    it triggers an asynchronous scanner job and updates status.
+    On a cache hit this returns instantly. On a miss, a FAILED/stale scan, or an explicit
+    refresh, it triggers the scanner job in the background; a first scan returns a
+    DISCOVERING placeholder, a refresh returns the current (stale) cache meanwhile.
     """
-    logger.info(f"Received inventory request for project={project_id} (refresh={refresh})")
-
+    logger.info(f"Inventory lookup for project={project_id} (refresh={refresh})")
     cache = await get_project_inventory(project_id)
 
     if cache and _needs_rescan(cache):
         logger.info(f"Cached scan for {project_id} is {cache.get('status')} and needs a rescan.")
         cache = None
 
-    if refresh or not cache:
-        if not cache:
-            # First scan scenario: set status to DISCOVERING and trigger job
-            logger.info(f"No cache found for {project_id}. Triggering initial scan...")
-            await set_project_status(project_id, "DISCOVERING")
-            background_tasks.add_task(trigger_scanner_job, project_id)
-            return {
-                "project_id": project_id,
-                "status": "DISCOVERING",
-                "discovered_resources": {},
-                "aggregated_metadata": {},
-            }
-        else:
-            # Refresh requested on existing cache: return stale cache instantly, trigger refresh in bg
-            logger.info(f"Cache hit for {project_id}, but refresh=true. Triggering background rescan...")
-            background_tasks.add_task(trigger_scanner_job, project_id)
-            return cache
+    if not cache:
+        logger.info(f"No usable cache for {project_id}. Triggering a scan...")
+        await set_project_status(project_id, "DISCOVERING")
+        _spawn_background(trigger_scanner_job(project_id))
+        return {
+            "project_id": project_id,
+            "status": "DISCOVERING",
+            "discovered_resources": {},
+            "aggregated_metadata": {},
+        }
 
-    # Normal cache hit
+    if refresh:
+        logger.info(f"Cache hit for {project_id}, but refresh=true. Triggering a background rescan...")
+        _spawn_background(trigger_scanner_job(project_id))
     return cache
 
 

@@ -83,7 +83,7 @@ steps:
       - --region=${_GCP_REGION}
       - --service-account=inventory-agent-sa@${PROJECT_ID}.iam.gserviceaccount.com
       - --port=8080
-      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},SCANNER_JOB_NAME=${_JOB_NAME},SCANNER_JOB_REGION=${_GCP_REGION},INVENTORY_AGENT_URL=${_URL_INVENTORY}
+      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},SCANNER_JOB_NAME=${_JOB_NAME},SCANNER_JOB_REGION=${_GCP_REGION},INVENTORY_AGENT_URL=${_URL_INVENTORY},A2A_PUBLIC_URL=${_URL_INVENTORY}
       - --allow-unauthenticated
       - --labels=demo=sre-agent-codelab
 

@@ -11,14 +11,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
 from sre_common.middleware import target_project_contextvar
 
-from sre_agent.config import INVENTORY_AGENT_URL, PROJECT_ID
+from sre_agent.config import PROJECT_ID
 from sre_agent.firestore_strategy import get_sre_session, save_sre_session
 from sre_agent.gcp_tools import query_traces
+from sre_agent.inventory_client import fetch_topology
 from sre_agent.sre_workflow import run_sre_diagnostics
-from sre_common import retry_async
 
 logger = logging.getLogger("sre_agent.diagnosis")
 
@@ -39,15 +38,6 @@ class Report:
 
 class DiagnosisError(RuntimeError):
     """Raised when the diagnosis cannot run at all (e.g. the Trace API is unreachable)."""
-
-
-@retry_async(max_retries=3, initial_delay=1.0)
-async def _fetch_topology(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Queries the Inventory Agent's topology cache with retries."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(inv_url, params=params, timeout=15.0)
-        resp.raise_for_status()
-        return resp.json()
 
 
 async def run_diagnosis(
@@ -74,8 +64,7 @@ async def run_diagnosis(
     yield Progress(f"🔧 Contacting Inventory Agent to fetch topology for project `{resolved_project}`...")
     topology: dict[str, Any] = {}
     try:
-        params = {"project_id": resolved_project, "refresh": refresh}
-        topology = await _fetch_topology(f"{INVENTORY_AGENT_URL}/v1/agents/inventory", params)
+        topology = await fetch_topology(resolved_project, refresh=refresh)
         if topology.get("status") == "DISCOVERING":
             yield Progress(
                 "⚠️ Target project infrastructure discovery in progress. "
@@ -85,7 +74,7 @@ async def run_diagnosis(
             services = topology.get("discovered_resources", {}).get("services", [])
             yield Progress(f"✅ Topology cached successfully. Resolved {len(services)} active compute services.")
     except Exception as e:
-        logger.error(f"Failed to query Inventory Agent after retries: {e}")
+        logger.error(f"Failed to query the Inventory Agent: {e}")
         yield Progress("⚠️ Inventory Agent query failed. Proceeding with default service topology parameters.")
 
     # 2. Recent traces
