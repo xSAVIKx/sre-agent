@@ -2,9 +2,11 @@
 #
 # base-image.sh - Name and locate the shared dependency image (docker/base.Dockerfile).
 #
-# The image is tagged by a hash of everything that decides its contents (uv.lock,
-# every pyproject.toml and the base Dockerfile), so a tag can never hold stale
-# dependencies: change the lock and you get a new tag.
+# The image is tagged by a hash of everything that decides its contents - uv.lock
+# and the base Dockerfile - so a tag can never hold stale dependencies: change the
+# lock and you get a new tag. The pyproject.toml files are deliberately left out:
+# the image is built with `uv sync --frozen`, which installs exactly what the lock
+# says, and hashing them would mint a new tag for every ruff-config tweak.
 #
 #   scripts/base-image.sh tag             -> lock-<hash>
 #   scripts/base-image.sh ref             -> ghcr.io/xsavikx/sre-agent-base:lock-<hash>
@@ -20,8 +22,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 hash_inputs() {
     (
         cd "$ROOT"
-        cat uv.lock pyproject.toml app/pyproject.toml agent/pyproject.toml sre_agent/pyproject.toml \
-            inventory_agent/pyproject.toml sre_common/pyproject.toml docker/base.Dockerfile
+        cat uv.lock docker/base.Dockerfile
     )
 }
 
@@ -40,7 +41,7 @@ published() {
     token=$(curl -fsS "https://ghcr.io/token?scope=repository:${repo}:pull" 2>/dev/null \
         | sed -n 's/.*"token":"\([^"]*\)".*/\1/p') || return 1
     [ -n "$token" ] || return 1
-    curl -fsS -o /dev/null -I \
+    curl -fs -o /dev/null -I \
         -H "Authorization: Bearer ${token}" \
         -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json" \
         "https://ghcr.io/v2/${repo}/manifests/$(tag)"
