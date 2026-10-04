@@ -590,19 +590,47 @@
             color: var(--text-muted);
         }
 
-        .session-item:hover .edit-title-btn,
-        .session-item:hover .delete-session-btn,
-        .edit-title-btn:focus-visible,
-        .delete-session-btn:focus-visible,
-        .edit-title-btn:focus,
-        .delete-session-btn:focus {
-            opacity: 1 !important;
+        .session-actions {
+            display: flex;
+            gap: 6px;
+            align-items: center;
         }
+
+        .session-action {
+            background: none;
+            border: none;
+            border-radius: 6px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 12px;
+            padding: 2px;
+            opacity: 0;
+            transition: opacity 0.2s, color 0.2s;
+        }
+
+        /* With a mouse: show the actions on hover, on keyboard focus, and for the open chat. */
+        .session-item:hover .session-action,
+        .session-item.active .session-action,
+        .session-action:focus-visible {
+            opacity: 1;
+        }
+
+        /* Touch screens have no hover: always show the actions, as finger-sized targets. */
+        @media (hover: none) {
+            .session-action {
+                opacity: 1;
+                min-width: 36px;
+                min-height: 36px;
+                font-size: 16px;
+            }
+        }
+
         .edit-title-btn:hover {
-            color: var(--primary) !important;
+            color: var(--primary);
         }
+
         .delete-session-btn:hover {
-            color: var(--danger) !important;
+            color: var(--danger);
         }
 
         .main-chat-area {
@@ -1145,38 +1173,19 @@
 
             const actionContainer = document.createElement('div');
             actionContainer.className = 'session-actions';
-            actionContainer.style.display = 'flex';
-            actionContainer.style.gap = '6px';
-            actionContainer.style.alignItems = 'center';
 
             const editBtn = document.createElement('button');
-            editBtn.className = 'edit-title-btn';
+            editBtn.className = 'session-action edit-title-btn';
             editBtn.innerHTML = '✏️';
             editBtn.setAttribute('aria-label', 'Edit session title');
             editBtn.title = 'Edit session title';
-            editBtn.style.background = 'none';
-            editBtn.style.border = 'none';
-            editBtn.style.color = 'var(--text-muted)';
-            editBtn.style.cursor = 'pointer';
-            editBtn.style.fontSize = '12px';
-            editBtn.style.opacity = '0';
-            editBtn.style.transition = 'opacity 0.2s, color 0.2s';
-            editBtn.style.padding = '2px';
             actionContainer.appendChild(editBtn);
 
             const deleteBtn = document.createElement('button');
-            deleteBtn.className = 'delete-session-btn';
+            deleteBtn.className = 'session-action delete-session-btn';
             deleteBtn.innerHTML = '🗑️';
             deleteBtn.setAttribute('aria-label', 'Delete session');
             deleteBtn.title = 'Delete session';
-            deleteBtn.style.background = 'none';
-            deleteBtn.style.border = 'none';
-            deleteBtn.style.color = 'var(--text-muted)';
-            deleteBtn.style.cursor = 'pointer';
-            deleteBtn.style.fontSize = '12px';
-            deleteBtn.style.opacity = '0';
-            deleteBtn.style.transition = 'opacity 0.2s, color 0.2s';
-            deleteBtn.style.padding = '2px';
             actionContainer.appendChild(deleteBtn);
 
             header.appendChild(actionContainer);
