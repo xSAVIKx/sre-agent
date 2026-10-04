@@ -1,6 +1,6 @@
 --- a/sre_agent/src/sre_agent/a2ui_surfaces.py
 +++ b/sre_agent/src/sre_agent/a2ui_surfaces.py
-@@ -98,9 +98,7 @@
+@@ -99,9 +99,7 @@
      Returns:
          "SEV1", "SEV2" or "SEV3".
      """
@@ -11,7 +11,7 @@
  
  
  def _messages(components: list[dict[str, Any]], data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-@@ -140,10 +138,10 @@
+@@ -150,10 +148,10 @@
      A component is a JSON object: its ``id``, the catalog ``component`` it instantiates,
      and that component's properties - here `SeverityBadge.level` and `.contribution`.
      """
