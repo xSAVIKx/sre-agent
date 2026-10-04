@@ -1,54 +1,66 @@
 # Step 0 · Setup and tour (10 min)
 
-**Goal:** everything installed, and a first look at the system you're about to finish.
+**Goal:** Install all tools. Look at the system that you complete in this workshop.
 
 ## 1. Check your setup
 
-```bash
-git switch -c my-work step-00   # if you haven't already
-uv sync --all-packages
-uv run workshop/check.py 0
-```
+1. Do these commands:
 
-All imports should say `ok`. `GEMINI_API_KEY: not set` is fine.
+   ```bash
+   git switch -c my-work step-00   # if you haven't already
+   uv sync --all-packages
+   uv run workshop/check.py 0
+   ```
+
+2. Make sure that each import line shows `ok`.
+
+`GEMINI_API_KEY: not set` is not an error.
 
 ## 2. Run the incident
 
-```bash
-uv run simulate_incident.py
-```
+1. Do this command:
 
-The target app (`app/main.py`) simulates a `Gateway → Backend → Database` request where the
-database times out after 10 s, and writes traces and logs to `mock_telemetry_data/`. Then the
-**Orchestrator** agent is asked to find the root cause.
+   ```bash
+   uv run simulate_incident.py
+   ```
 
-Look at the end of the output:
+2. Read the last lines of the output. You see this line:
 
-```text
-The `diagnose_sre` tool call was blocked by the safety policy (decision: deny).
-```
+   ```text
+   The `diagnose_sre` tool call was blocked by the safety policy (decision: deny).
+   ```
 
-That's on purpose: the Orchestrator currently denies *everything*. You'll fix it in step 4. Until
-then, talk to the SRE engine directly:
+3. Send the request directly to the SRE agent:
 
-```bash
-uv run simulate_incident.py --engine-only
-```
+   ```bash
+   uv run simulate_incident.py --engine-only
+   ```
 
-Read the report and spot what's wrong:
+4. Read the report. Find the two errors:
 
-* **Identified Bottleneck** names `/api/gateway` with `0 ms` (step 1).
-* **Observability Metrics** says `No CPU utilization data available.` (step 2).
+   * **Identified Bottleneck** shows `/api/gateway` with `0 ms`. Step 1 fixes this.
+   * **Observability Metrics** shows `No CPU utilization data available.` Step 2 fixes this.
 
-## 3. Tour (5 minutes, read along with the facilitator)
+The command does these tasks:
 
-| Layer | Where | What it does |
+* The target app (`app/main.py`) simulates a `Gateway → Backend → Database` request.
+* The database times out after 10 s.
+* The target app writes traces and logs to `mock_telemetry_data/`.
+* The **Orchestrator** agent gets a request to find the root cause.
+
+The safety policy blocks the tool call on purpose. At this time, the Orchestrator denies *all*
+tool calls. You fix this in step 4. Until then, use `--engine-only`.
+
+## 3. Tour (5 minutes, with the facilitator)
+
+| Layer | Location | Function |
 |:--|:--|:--|
-| Target app | `app/main.py` | Generates the incident: traces, logs (and soon metrics). |
-| Tools | `sre_agent/src/sre_agent/gcp_tools.py` | Plain async Python functions the agents call. Type hints + docstrings become the LLM tool schema. Each has an `if IS_MOCK:` branch that reads local files. |
-| SRE engine | `sre_agent/src/sre_agent/sre_workflow.py` | ADK multi-agent graph: `trace_analyzer → fetch_telemetry → log_correlator`, plus a deterministic tier for when there's no API key. |
-| Orchestrator | `agent/src/agent/config.py` | The user-facing Antigravity agent. Its only powers are three tools, one per SRE agent skill (`list_incidents`, `diagnose_sre`, `write_post_mortem`), each granted by policy. |
-| A2UI surfaces | `sre_agent/src/sre_agent/a2ui_surfaces.py` | Each result as an A2UI v0.9 surface: catalog components, never HTML. |
-| Chat UI | `agent/src/agent/routes.py`, `index.html`, `static/sre-a2ui.js` | Streams the agent over SSE; renders replies and A2UI surfaces with `@a2ui/lit`. |
+| Target app | `app/main.py` | Makes the incident: traces and logs. After step 2, it also makes metrics. |
+| Tools | `sre_agent/src/sre_agent/gcp_tools.py` | Async Python functions that the agents call. The type hints and docstrings become the LLM tool schema. Each tool has an `if IS_MOCK:` branch that reads local files. |
+| SRE agent | `sre_agent/src/sre_agent/sre_workflow.py` | ADK multi-agent graph: `trace_analyzer → fetch_telemetry → log_correlator`. It also has a deterministic simulation for use without an API key. |
+| Orchestrator | `agent/src/agent/config.py` | The Antigravity agent that users talk to. It has only three tools, one for each SRE agent skill: `list_incidents`, `diagnose_sre` and `write_post_mortem`. The policy must allow each tool. |
+| A2UI surfaces | `sre_agent/src/sre_agent/a2ui_surfaces.py` | Makes an A2UI v0.9 surface for each result. A surface contains catalog components, not HTML. |
+| Chat UI | `agent/src/agent/routes.py`, `index.html`, `static/sre-a2ui.js` | Streams the agent output over SSE. Shows the replies and the A2UI surfaces with `@a2ui/lit`. |
 
-✅ **Done when** `uv run workshop/check.py 0` is all `ok` and you've seen both reports.
+✅ **Done when:** `uv run workshop/check.py 0` shows `ok` for all lines, and you read the two
+reports.

@@ -1,7 +1,9 @@
 # Step 6 · Wrap-up: production and next steps (10 min)
 
-You've built the whole loop: **instrumented app → tools → ADK multi-agent engine → policy-gated
-Orchestrator → rich chat UI**. Here's how it goes to production, and where to take it next.
+**Goal:** Learn how the system goes to production, and what you can do next.
+
+You built the full loop: **instrumented app → tools → ADK multi-agent SRE agent → Orchestrator
+with a policy → chat UI with A2UI surfaces**.
 
 ## Production on Cloud Run (facilitator demo)
 
@@ -11,30 +13,41 @@ Orchestrator → rich chat UI**. Here's how it goes to production, and where to 
 ./cleanup.sh     # delete everything again
 ```
 
-The interesting part is the IAM split:
+The important part is the IAM split:
 
 | Service account       | Can                                   | Cannot                  |
 |:----------------------|:--------------------------------------|:------------------------|
-| `sre-chaos-monkey-sa` | **write** traces and logs             | read any telemetry      |
-| `sre-agent-sa`        | **read** traces, logs, metrics (+ write its own spans) | change telemetry or infrastructure |
+| `sre-chaos-monkey-sa` (target app) | **Write** traces and logs | Read telemetry |
+| `sre-agent-sa` (SRE agent and Orchestrator) | **Read** traces, logs and metrics. Write its own trace spans. Use Firestore. Read the `GEMINI_API_KEY` secret. | Change telemetry or infrastructure |
 
-The app that *creates* incidents can't read telemetry, and the agent that *investigates* them
-can't change anything; it only adds its own trace spans, so it can diagnose itself too. Least
-privilege at the IAM layer, plus the policy layer from step 4.
+The target app *makes* incidents, but it cannot read telemetry. The SRE agent *investigates*
+incidents, but it cannot change telemetry or infrastructure. It only writes its own trace spans.
+Thus, the SRE agent can also diagnose its own requests.
 
-> ⚠️ The demo deploys the services with `--allow-unauthenticated` so the chat is easy to reach.
-> Tear it down after the session (`./cleanup.sh`) or put it behind IAP before sharing the URL.
+This is least privilege at the IAM layer. The policy from step 4 adds least privilege at the agent
+layer.
 
-## Take it home: the Antigravity skill
+> ⚠️ The demo deploys the services with `--allow-unauthenticated`. This makes the chat easy to
+> open. After the session, delete the deployment (`./cleanup.sh`). Alternatively, put the
+> services behind IAP before you share the URL.
 
-`skills/sre_incident_solver/` packages the same SRE engine as an **Antigravity Agent Skill**
-(`SKILL.md` + code). It's generated from `sre_agent/` by `scripts/sync_skill.py`, so it never
-drifts from what you just built. Load it in your own Antigravity agent with the SDK's
-`skills_paths` option.
+## Use the Antigravity skill
 
-## Keep going
+`skills/sre_incident_solver/` contains the same SRE agent as an **Antigravity Agent Skill**
+(`SKILL.md` + code).
 
-[`EXERCISES.md`](../../../EXERCISES.md) has graded follow-ups: log-pattern clustering, an SLO /
-error-budget section, a Mitigation Planner agent, multi-trace correlation, human-in-the-loop
-remediation, Slack notifications, RAG over runbooks, an eval harness, and the fully autonomous
-alert → diagnosis → post-mortem capstone.
+`scripts/sync_skill.py` generates the skill from `sre_agent/`. Thus, the skill always agrees with
+the code that you built.
+
+To load the skill in your own Antigravity agent, use the `skills_paths` option of the SDK.
+
+## Next steps
+
+[`EXERCISES.md`](../../../EXERCISES.md) contains follow-up exercises in three levels:
+
+| Level | Exercises |
+|:--|:--|
+| 1: Tools and reports | Make the metrics show the truth, log-pattern clustering tool, SLO and error-budget section, severity in the post-mortem |
+| 2: Workflow and agents | Mitigation Planner agent, multi-trace incident correlation, human-in-the-loop remediation tool, notification to Slack or a webhook |
+| 3: Architecture and production | RAG over runbooks, live on real GCP, evaluation harness |
+| Capstone | The fully autonomous loop: alert → diagnosis → post-mortem |
