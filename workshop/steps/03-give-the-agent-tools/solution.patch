@@ -1,8 +1,8 @@
 --- a/skills/sre_incident_solver/sre_workflow.py
 +++ b/skills/sre_incident_solver/sre_workflow.py
-@@ -102,10 +102,7 @@
-         "Call each tool at most once per trace: the system appends the full cascade table and "
-         "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
+@@ -105,10 +105,7 @@
+         "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
+         "in the telemetry and what to check; do not infer one from service names."
      ),
 -    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
 -    #   on their type hints and docstrings. They are already imported at the top of this file:
@@ -14,9 +14,9 @@
  
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -100,10 +100,7 @@
-         "Call each tool at most once per trace: the system appends the full cascade table and "
-         "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
+@@ -103,10 +103,7 @@
+         "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
+         "in the telemetry and what to check; do not infer one from service names."
      ),
 -    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
 -    #   on their type hints and docstrings. They are already imported at the top of this file:
