@@ -1,6 +1,6 @@
 --- a/skills/sre_incident_solver/gcp_tools.py
 +++ b/skills/sre_incident_solver/gcp_tools.py
-@@ -931,14 +931,16 @@
+@@ -957,14 +957,16 @@
          inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
          inclusive_durations[s["spanId"]] = inc_dur
  
@@ -22,12 +22,12 @@
 +
 +    # Find the bottleneck (the span with the highest exclusive duration)
 +    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
-     bottleneck_span = span_map[bottleneck_span_id]
-     bottleneck_exclusive = exclusive_durations[bottleneck_span_id]
-     total_duration = data.get("durationMs", 1)
+ 
+     return Cascade(spans, span_map, children_map, inclusive_durations, exclusive_durations, bottleneck_span_id)
+ 
 --- a/sre_agent/src/sre_agent/gcp_tools.py
 +++ b/sre_agent/src/sre_agent/gcp_tools.py
-@@ -929,14 +929,16 @@
+@@ -955,14 +955,16 @@
          inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
          inclusive_durations[s["spanId"]] = inc_dur
  
@@ -49,6 +49,6 @@
 +
 +    # Find the bottleneck (the span with the highest exclusive duration)
 +    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
-     bottleneck_span = span_map[bottleneck_span_id]
-     bottleneck_exclusive = exclusive_durations[bottleneck_span_id]
-     total_duration = data.get("durationMs", 1)
+ 
+     return Cascade(spans, span_map, children_map, inclusive_durations, exclusive_durations, bottleneck_span_id)
+ 

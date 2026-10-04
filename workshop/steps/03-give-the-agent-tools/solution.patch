@@ -1,6 +1,6 @@
 --- a/skills/sre_incident_solver/sre_workflow.py
 +++ b/skills/sre_incident_solver/sre_workflow.py
-@@ -97,10 +97,7 @@
+@@ -99,10 +99,7 @@
          "as well as trace cascade bottleneck analysis and incident post-mortem generation "
          "if you need more context or need to build a post-mortem report."
      ),
@@ -14,7 +14,7 @@
  
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -95,10 +95,7 @@
+@@ -97,10 +97,7 @@
          "as well as trace cascade bottleneck analysis and incident post-mortem generation "
          "if you need more context or need to build a post-mortem report."
      ),
