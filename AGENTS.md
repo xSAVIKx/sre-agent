@@ -104,8 +104,8 @@ All four services run on one shared dependency image, `docker/base.Dockerfile`:
 * **Service images** (`<service>/Dockerfile`) are `FROM ${BASE_IMAGE}` and only copy source code.
   Never install dependencies in a service Dockerfile: add them to the package's `pyproject.toml`
   and `uv.lock`, which changes the base image's tag.
-* **Tags** are content-addressed: `scripts/base-image.sh tag` hashes `uv.lock`, every
-  `pyproject.toml` and the base Dockerfile. `.github/workflows/base-image.yml` publishes
+* **Tags** are content-addressed: `scripts/base-image.sh tag` hashes `uv.lock` and the base
+  Dockerfile. `.github/workflows/base-image.yml` publishes
   `ghcr.io/xsavikx/sre-agent-base:lock-<hash>` (amd64 + arm64). `deploy.sh` uses the published
   image when it exists and builds it in the pipeline when it doesn't, so a lock change never ships
   stale dependencies.

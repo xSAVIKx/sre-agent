@@ -4,7 +4,8 @@
 # The service images are `FROM` this one and only add their source code, so a
 # deploy no longer re-resolves and re-installs the same ~300 MB of wheels four
 # times. Published to ghcr.io/xsavikx/sre-agent-base:lock-<hash> by
-# .github/workflows/base-image.yml; scripts/base-image.sh computes the hash.
+# .github/workflows/base-image.yml; scripts/base-image.sh computes the hash
+# (of uv.lock and this file).
 
 # Stage 1: resolve and install the dependencies with uv
 FROM python:3.14-slim AS builder
