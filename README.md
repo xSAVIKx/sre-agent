@@ -201,13 +201,13 @@ Deploy to Cloud Run following least-privilege best practices — each service ge
 ```bash
 ./deploy.sh
 ```
-This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Artifact Registry, Firestore, Secret Manager), provisions the service accounts, grants least-privilege roles, then builds and deploys four Cloud Run services:
+This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Artifact Registry, Firestore, Secret Manager, Cloud Asset), provisions the service accounts, grants least-privilege roles, then builds and deploys four Cloud Run services:
 
 | Service account | Used by | Roles |
 | :--- | :--- | :--- |
 | `sre-chaos-monkey-sa` | target app (`sre-chaos-monkey`) | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)* |
 | `sre-agent-sa` | SRE diagnostics (`sre-sub-agent`) | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter` |
+| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)* |
 | `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter` |
 
 The split is the point: the app that *generates* chaos can only **write** telemetry; the agent that *investigates* it can only **read**.
