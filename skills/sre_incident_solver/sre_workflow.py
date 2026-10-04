@@ -100,7 +100,10 @@ log_correlator = AdkAgent(
         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
         "if you need more context or need to build a post-mortem report. "
         "Call each tool at most once per trace: the system appends the full cascade table and "
-        "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
+        "post-mortem to your answer, so do not repeat them - write the root cause and mitigation. "
+        "Base every claim on the spans, logs and metrics you were given. If they do not show why "
+        "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
+        "in the telemetry and what to check; do not infer one from service names."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
     model="gemini-3.8-flash",
