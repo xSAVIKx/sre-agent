@@ -92,7 +92,7 @@ class TestDiagnosis(unittest.TestCase):
         self.assertTrue(components["tab-0"]["text"].startswith("### Root cause"))
         self.assertIn("\n#### 📝 Incident Overview", components["tab-2"]["text"])
         self.assertEqual(components["download"]["content"], DIAGNOSIS)
-        self.assertEqual(components["post-mortem"]["action"]["event"]["context"], {"traceId": TRACE})
+        self.assertNotIn("post-mortem", components, "the post-mortem is a tab, not a second button")
 
 
 class TestPostMortem(unittest.TestCase):

@@ -468,7 +468,7 @@ function for each type of result:
 | Function | Result |
 |:---------|:-------|
 | `incident_list_surface` | The list of incidents, with Diagnose and Post-mortem buttons on each row. |
-| `diagnosis_surface` | A diagnosis: severity, the report in tabs, a Post-mortem button and a Download button. |
+| `diagnosis_surface` | A diagnosis: severity, the report in tabs (the post-mortem is the last tab) and a Download button. |
 | `post_mortem_surface` | A post-mortem: severity, the document in tabs and a Download button. |
 
 These are the components of a post-mortem surface. This excerpt shows the values as they are after
@@ -551,16 +551,16 @@ AGENT DIAGNOSIS REPORT
 ==================================================
 # 🚨 SRE Incident Diagnosis Report
 
-**Anomalous Trace ID**: `1f765c576bee4066a7ea8cbb146a3ded`
-**Root Service**: `gateway`
+- **Anomalous Trace ID**: `1f765c576bee4066a7ea8cbb146a3ded`
+- **Root Service**: `gateway`
 ...
 ## 📊 Observability Metrics
 - **CPU Utilization (sre-chaos-monkey)**: `24.0% (Healthy)`
 - **Database Connections (db-primary)**: `100 connections (Warning: Max capacity reached)`
 ...
 ## ⛓️ Multi-Service Cascade Latency & Bottleneck Analysis
-**Trace ID**: `1f765c576bee4066a7ea8cbb146a3ded`
-**Total Trace Duration**: `10270 ms`
+- **Trace ID**: `1f765c576bee4066a7ea8cbb146a3ded`
+- **Total Trace Duration**: `10270 ms`
 
 ### 🔍 Span Latency Breakdown
 | Service / Span Name | Span ID | Parent ID | Status | Inclusive Time | Exclusive (Self) Time | Contribution |

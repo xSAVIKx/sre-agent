@@ -882,23 +882,31 @@ In order to be iterable, non-array objects must have a [Symbol.iterator]() metho
   `;render(){let e=this.controller?.props;if(!e)return C;let r=String(e.level??""),n=Number(e.contribution??0).toFixed(1);return w`<span class="badge ${r.toLowerCase()}">${r} · bottleneck owns ${n}% of the request</span>`}};customElements.define("sre-severity-badge",Lc);var rh={name:"Download",schema:c.object({label:Dn.DynamicString.describe("The button label."),filename:Dn.DynamicString.describe("The file name to save as."),content:Dn.DynamicString.describe("The file content.")}).strict()},Pc=class extends Xe{api=rh;static styles=j`
     button {
       font: inherit;
-      padding: 8px 16px;
-      border-radius: var(--a2ui-border-radius, 0.25rem);
-      border: 1px solid var(--a2ui-color-border, #444);
-      background: var(--a2ui-color-secondary, #333);
-      color: var(--a2ui-color-on-secondary, #eee);
+      padding: var(--a2ui-button-padding, var(--a2ui-spacing-m, 0.5rem) var(--a2ui-spacing-l, 1rem));
+      border-radius: var(--a2ui-button-border-radius, var(--a2ui-spacing-s, 0.25rem));
+      border: var(--a2ui-button-border, var(--a2ui-border-width, 1px) solid var(--a2ui-color-border, #ccc));
+      margin: var(--a2ui-button-margin, var(--a2ui-spacing-m, 0.5rem));
+      background: var(--a2ui-button-background, var(--a2ui-color-surface, #fff));
+      color: var(--a2ui-color-on-secondary, #333);
       cursor: pointer;
     }
     button:hover {
-      background: var(--a2ui-color-secondary-hover, #444);
+      background-color: var(--a2ui-color-secondary-hover, #ddd);
     }
-  `;save(){let{filename:e,content:r}=this.controller.props,n=URL.createObjectURL(new Blob([String(r??"")],{type:"text/markdown"}));Object.assign(document.createElement("a"),{href:n,download:String(e||"report.md")}).click(),URL.revokeObjectURL(n)}render(){let e=this.controller?.props;return e?w`<button aria-label="${e.label}: ${e.filename}" @click=${()=>this.save()}>
+  `;save(){let{filename:e,content:r}=this.controller.props,n=new Blob(["\uFEFF",String(r??"")],{type:"text/markdown;charset=utf-8"}),i=URL.createObjectURL(n);Object.assign(document.createElement("a"),{href:i,download:String(e||"report.md")}).click(),URL.revokeObjectURL(i)}render(){let e=this.controller?.props;return e?w`<button aria-label="${e.label}: ${e.filename}" @click=${()=>this.save()}>
       <span aria-hidden="true">📥</span> ${e.label}
     </button>`:C}};customElements.define("sre-download",Pc);var Dx=new Ue(eh,"0.9",[...Eu.components.values(),{...th,tagName:"sre-severity-badge"},{...rh,tagName:"sre-download"}],us),jc=new CSSStyleSheet;jc.replaceSync(`
   pre { white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
   code { overflow-wrap: anywhere; }
+  /* Wide tables scroll sideways instead of squeezing every cell to a few characters. */
   table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 0.9em; }
-  th, td { border: 1px solid var(--a2ui-color-border, #444); padding: 4px 8px; text-align: left; }
+  th, td { border: 1px solid var(--a2ui-color-border, #444); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  td code { overflow-wrap: normal; }
+  /* Report headings and lists: compact enough for a phone screen. */
+  h3 { font-size: 1.15em; margin: 0.8em 0 0.3em; }
+  h4 { font-size: 1.05em; margin: 0.7em 0 0.3em; }
+  h5, h6 { font-size: 1em; margin: 0.6em 0 0.2em; }
+  ul, ol { padding-left: 1.25em; }
   button:focus-visible { outline: 2px solid var(--sre-focus, #a5b4fc); outline-offset: 2px; }
 `);function Q0(t){for(let e of t.querySelectorAll(".a2ui-tab-bar")){e.setAttribute("role","tablist");for(let r of e.querySelectorAll(".a2ui-tab-button"))r.setAttribute("role","tab"),r.setAttribute("aria-selected",String(r.classList.contains("active")))}for(let e of t.querySelectorAll(".a2ui-list")){e.setAttribute("role","list");for(let r of e.children)r.setAttribute("role","listitem")}}var Uc=class extends Ne{static properties={surface:{attribute:!1}};constructor(){super(),new cn(this,{context:ki.markdown,initialValue:J0})}createRenderRoot(){return this}async updated(){let e=this.querySelector("a2ui-surface");await e?.updateComplete;let r=e?.shadowRoot;!r||r.adoptedStyleSheets.includes(jc)||(r.adoptedStyleSheets=[...r.adoptedStyleSheets,jc],Q0(r),new MutationObserver(()=>Q0(r)).observe(r,{subtree:!0,childList:!0,attributeFilter:["class"]}))}render(){return this.surface?w`<a2ui-surface .surface=${this.surface}></a2ui-surface>`:C}};customElements.define("sre-surface-host",Uc);function Ix(t,e,r){let n=new Mo([Dx],o=>r?.(o)),i=document.createElement("sre-surface-host");return n.onSurfaceCreated(o=>{i.surface=o}),n.processMessages(e),t.appendChild(i),i}window.SreA2ui={renderSurface:Ix,SRE_CATALOG_ID:eh};export{eh as SRE_CATALOG_ID,Ix as renderSurface,Dx as sreCatalog};
 /*! Bundled license information:

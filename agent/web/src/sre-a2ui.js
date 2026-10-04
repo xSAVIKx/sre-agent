@@ -89,24 +89,29 @@ const DownloadApi = {
 class SreDownload extends A2uiLitElement {
   api = DownloadApi;
 
+  // The same look, size and margin as the basic catalog's Button, so they line up.
   static styles = css`
     button {
       font: inherit;
-      padding: 8px 16px;
-      border-radius: var(--a2ui-border-radius, 0.25rem);
-      border: 1px solid var(--a2ui-color-border, #444);
-      background: var(--a2ui-color-secondary, #333);
-      color: var(--a2ui-color-on-secondary, #eee);
+      padding: var(--a2ui-button-padding, var(--a2ui-spacing-m, 0.5rem) var(--a2ui-spacing-l, 1rem));
+      border-radius: var(--a2ui-button-border-radius, var(--a2ui-spacing-s, 0.25rem));
+      border: var(--a2ui-button-border, var(--a2ui-border-width, 1px) solid var(--a2ui-color-border, #ccc));
+      margin: var(--a2ui-button-margin, var(--a2ui-spacing-m, 0.5rem));
+      background: var(--a2ui-button-background, var(--a2ui-color-surface, #fff));
+      color: var(--a2ui-color-on-secondary, #333);
       cursor: pointer;
     }
     button:hover {
-      background: var(--a2ui-color-secondary-hover, #444);
+      background-color: var(--a2ui-color-secondary-hover, #ddd);
     }
   `;
 
   save() {
     const {filename, content} = this.controller.props;
-    const url = URL.createObjectURL(new Blob([String(content ?? '')], {type: 'text/markdown'}));
+    // UTF-8 with a byte order mark: without it, some viewers (e.g. on Android) guess
+    // another encoding and garble the emoji in the report.
+    const file = new Blob(['\ufeff', String(content ?? '')], {type: 'text/markdown;charset=utf-8'});
+    const url = URL.createObjectURL(file);
     const link = Object.assign(document.createElement('a'), {href: url, download: String(filename || 'report.md')});
     link.click();
     URL.revokeObjectURL(url);
@@ -143,8 +148,15 @@ const SURFACE_SHEET = new CSSStyleSheet();
 SURFACE_SHEET.replaceSync(`
   pre { white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
   code { overflow-wrap: anywhere; }
+  /* Wide tables scroll sideways instead of squeezing every cell to a few characters. */
   table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 0.9em; }
-  th, td { border: 1px solid var(--a2ui-color-border, #444); padding: 4px 8px; text-align: left; }
+  th, td { border: 1px solid var(--a2ui-color-border, #444); padding: 4px 8px; text-align: left; white-space: nowrap; }
+  td code { overflow-wrap: normal; }
+  /* Report headings and lists: compact enough for a phone screen. */
+  h3 { font-size: 1.15em; margin: 0.8em 0 0.3em; }
+  h4 { font-size: 1.05em; margin: 0.7em 0 0.3em; }
+  h5, h6 { font-size: 1em; margin: 0.6em 0 0.2em; }
+  ul, ol { padding-left: 1.25em; }
   button:focus-visible { outline: 2px solid var(--sre-focus, #a5b4fc); outline-offset: 2px; }
 `);
 

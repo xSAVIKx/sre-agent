@@ -58,7 +58,7 @@ prebuilt bundle [`sre-a2ui.js`](agent/src/agent/static/sre-a2ui.js).
 | Surface | Content |
 | :--- | :--- |
 | Incident list | One row for each recent incident, with **Diagnose** and **Post-mortem** buttons. |
-| Diagnosis | A severity badge, tabs for the analysis, the bottleneck and the post-mortem, a **Post-mortem** button and a **Download** button. |
+| Diagnosis | A severity badge, tabs for the analysis, the bottleneck and the post-mortem, and a **Download** button. |
 | Post-mortem | A severity badge, the post-mortem in tabs, and a **Download** button. |
 
 The **Download** button saves the report as a Markdown file (for example `post-mortem-<trace>.md`).

@@ -230,6 +230,7 @@ class TestChatRouting(unittest.TestCase):
         resp = self.client.get("/static/sre-a2ui.js")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("text/javascript", resp.headers["content-type"])
+        self.assertEqual(resp.headers["cache-control"], "no-cache", "a deploy must reach browsers at once")
         self.assertIn(config.SRE_CATALOG_ID, resp.text, "the bundle implements the catalog the agent requests")
 
     def test_general_prompt_does_not_call_diagnose_sre(self) -> None:

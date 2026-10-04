@@ -255,7 +255,7 @@ def _split_report(report: str) -> list[tuple[str, str]]:
 
 
 def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float | None) -> list[dict[str, Any]]:
-    """A diagnosis: severity, the report in tabs, and buttons for the next step."""
+    """A diagnosis: severity, the report in tabs (its post-mortem is the last tab), and a download."""
     if not trace_id:
         return _message_card("✅ All clear", report)
 
@@ -265,11 +265,9 @@ def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float
         _text("title", "🔬 Incident diagnosis", "h2"),
         _text("trace", f"Trace {trace_id}", "caption"),
         *_tabs(_split_report(report)),
-        {"id": "actions", "component": "Row", "children": ["post-mortem", "download"]},
-        *_button("post-mortem", "Post-mortem", "write_post_mortem", trace_id),
         _download(f"diagnosis-{trace_id[:8]}.md", report),
     ]
-    children = [*(c["id"] for c in badge), "title", "trace", "sections", "actions"]
+    children = [*(c["id"] for c in badge), "title", "trace", "sections", "download"]
     return _messages(_card(children, components))
 
 

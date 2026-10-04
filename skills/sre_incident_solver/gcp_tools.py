@@ -1078,8 +1078,9 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
     # Format results into markdown
     report = [
         "## ⛓️ Multi-Service Cascade Latency & Bottleneck Analysis",
-        f"**Trace ID**: `{trace_id}`",
-        f"**Total Trace Duration**: `{total_duration} ms`",
+        # List items: consecutive plain lines would render as one Markdown paragraph.
+        f"- **Trace ID**: `{trace_id}`",
+        f"- **Total Trace Duration**: `{total_duration} ms`",
         "",
         "### 🔍 Span Latency Breakdown",
         "| Service / Span Name | Span ID | Parent ID | Status | Inclusive Time | Exclusive (Self) Time | Contribution |",

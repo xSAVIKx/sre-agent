@@ -374,8 +374,14 @@ STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 @router.get("/static/sre-a2ui.js", include_in_schema=False)
 async def a2ui_renderer() -> FileResponse:
-    """The chat UI's A2UI renderer bundle (built from agent/web)."""
-    return FileResponse(os.path.join(STATIC_DIR, "sre-a2ui.js"), media_type="text/javascript")
+    """The chat UI's A2UI renderer bundle (built from agent/web).
+
+    no-cache: browsers revalidate it on every load (a cheap 304 when unchanged), so a
+    deploy reaches them at once instead of after a stale cached copy expires.
+    """
+    return FileResponse(
+        os.path.join(STATIC_DIR, "sre-a2ui.js"), media_type="text/javascript", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @router.post("/chat")

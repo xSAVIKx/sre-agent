@@ -437,8 +437,8 @@ async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str |
 
         report = (
             f"# 🚨 SRE Incident Diagnosis Report\n\n"
-            f"**Anomalous Trace ID**: `{trace_id}`\n"
-            f"**Root Service**: `{trace_data.get('root_span', 'gateway')}`\n\n"
+            f"- **Anomalous Trace ID**: `{trace_id}`\n"
+            f"- **Root Service**: `{trace_data.get('root_span', 'gateway')}`\n\n"
             f"## 🔍 Root Cause Analysis\n"
             f"A distributed trace scan identified elevated latencies in trace `{trace_id}`. "
             f"Further investigation into the span hierarchy reveals the child span "
