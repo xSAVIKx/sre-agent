@@ -1011,6 +1011,32 @@ def _cascade(spans: list[dict[str, Any]]) -> Cascade:
     return Cascade(spans, span_map, children_map, inclusive_durations, exclusive_durations, bottleneck_span_id)
 
 
+@dataclass(frozen=True)
+class Bottleneck:
+    """The span that owns most of a request's time."""
+
+    span: str
+    self_ms: int
+    share: float  # percent of the whole request
+    error: bool
+
+
+async def find_bottleneck(trace_id: str, project_id: str | None = None) -> Bottleneck | None:
+    """The bottleneck of a trace, or None when the trace has no spans (reads the cached trace)."""
+    try:
+        data = json.loads(await get_trace_details(trace_id, project_id))
+    except Exception:
+        return None
+    spans = data.get("spans") if isinstance(data, dict) else None
+    if not spans:
+        return None
+    cascade = _cascade(spans)
+    span = cascade.span_map[cascade.bottleneck_id]
+    self_ms = cascade.exclusive_ms[cascade.bottleneck_id]
+    share = self_ms / (data.get("durationMs") or 1) * 100
+    return Bottleneck(span["name"], self_ms, round(min(share, 100.0), 1), span.get("status") == "ERROR")
+
+
 @register_tool
 async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
     """Analyzes a trace to calculate inclusive vs exclusive duration for each span and locate the bottleneck.

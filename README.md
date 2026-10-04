@@ -97,9 +97,10 @@ flowchart LR
 │   │   ├── config.py           # Antigravity safety policies & runtime loader
 │   │   ├── routes.py           # FastAPI endpoints (/chat UI + SSE, /diagnose)
 │   │   ├── main.py             # FastAPI app wiring
-│   │   ├── a2ui_translator.py  # Markdown → rich A2UI schema (download button)
 │   │   ├── firestore_strategy.py
-│   │   └── index.html          # Premium web chat interface
+│   │   ├── static/sre-a2ui.js  # A2UI renderer bundle (@a2ui/lit + SRE catalog), prebuilt
+│   │   └── index.html          # Web chat: model replies + A2UI surfaces
+│   ├── web/                    # Sources of the renderer bundle (npm ci && npm run build)
 │   ├── test/
 │   └── Dockerfile · pyproject.toml
 │

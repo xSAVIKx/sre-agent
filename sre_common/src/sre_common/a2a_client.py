@@ -16,7 +16,8 @@ import a2a.types as T
 import httpx
 from a2a.client import ClientConfig, ClientFactory
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.helpers import get_data_parts, get_text_parts
+from a2a.helpers import get_text_parts
+from google.protobuf.json_format import MessageToDict
 
 from sre_common.retry import retry_async
 
@@ -31,18 +32,33 @@ class A2ATaskError(RuntimeError):
     """The remote agent failed the task, or finished without producing an artifact."""
 
 
+# Data parts carrying A2UI messages are marked with one of these media types.
+A2UI_MIME_TYPES = frozenset({"application/json+a2ui", "application/a2ui+json"})
+
+
 @dataclass
 class A2AResult:
-    """What a remote agent produced: the artifact's text and structured data parts."""
+    """What a remote agent produced: the artifact's text, its structured data parts,
+    and its A2UI messages (data parts marked with an A2UI media type)."""
 
     text: str = ""
     data: list[Any] = field(default_factory=list)
+    a2ui: list[dict[str, Any]] = field(default_factory=list)
     task_id: str = ""
     context_id: str = ""
 
 
 def _message_text(message: T.Message) -> str:
     return "".join(get_text_parts(list(message.parts)))
+
+
+def _add_data_parts(result: A2AResult, parts: list[T.Part]) -> None:
+    for part in parts:
+        if not part.HasField("data"):
+            continue
+        mime_type = part.metadata.fields.get("mimeType")
+        is_a2ui = mime_type is not None and mime_type.string_value in A2UI_MIME_TYPES
+        (result.a2ui if is_a2ui else result.data).append(MessageToDict(part.data))
 
 
 # Agent cards rarely change, so each one is fetched once per TTL instead of before every
@@ -82,6 +98,7 @@ async def call_agent(
     *,
     context_id: str = "",
     on_progress: Callable[[str], None] | None = None,
+    extensions: list[str] | None = None,
     timeout: float = 300.0,
     retry_connect: bool = True,
     http: httpx.AsyncClient | None = None,
@@ -99,6 +116,7 @@ async def call_agent(
         metadata: Request metadata (e.g. {"project_id": "..."}), as the agent's card documents.
         context_id: Continue an existing conversation with the agent.
         on_progress: Called with each progress message.
+        extensions: URIs of the A2A extensions this call uses (e.g. A2UI), declared on the message.
         timeout: Read timeout for the stream, in seconds.
         retry_connect: Retry fetching the agent card on transient errors. Turn it off
             to fail fast when the agent is optional (e.g. absent in a local simulation).
@@ -118,6 +136,7 @@ async def call_agent(
             parts=[T.Part(text=text)],
             message_id=uuid.uuid4().hex,
             context_id=context_id,
+            extensions=extensions or [],
         )
         request = T.SendMessageRequest(message=message)
         if metadata:
@@ -154,7 +173,7 @@ async def call_agent(
                     held = None  # the result itself, not progress
                 flush_held()
                 result.text += artifact_text
-                result.data.extend(get_data_parts(list(artifact.parts)))
+                _add_data_parts(result, list(artifact.parts))
                 artifact_seen = True
             elif event.HasField("message"):
                 # A direct (task-less) reply.

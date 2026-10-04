@@ -157,19 +157,25 @@ STEPS: tuple[Step, ...] = (
         "Show the severity",
         (
             Edit(
-                "agent/src/agent/a2ui_translator.py",
-                solution="""    match = re.search(r"\\(([\\d.]+)% of total trace\\)", text)
-    if not match:
-        return None
-    contribution = float(match.group(1))
-    level = next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
-    return {"type": "severity_badge", "level": level, "contribution": contribution}
+                "sre_agent/src/sre_agent/a2ui_surfaces.py",
+                solution="""    return next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
 """,
-                starter="""    # TODO(step-5): Find the "(NN.N% of total trace)" figure in `text` with `re.search`, turn it
-    #   into a float, pick the first level in SEVERITY_THRESHOLDS whose threshold it reaches, and
-    #   return {"type": "severity_badge", "level": <level>, "contribution": <the float>}.
-    #   Return None when the report has no such figure.
-    return None
+                starter="""    # TODO(step-5): Return the first level in SEVERITY_THRESHOLDS whose threshold `contribution`
+    #   reaches. The thresholds go from the highest down.
+    return "SEV3"
+""",
+            ),
+            Edit(
+                "sre_agent/src/sre_agent/a2ui_surfaces.py",
+                solution="""    if bottleneck_share is None:
+        return []
+    level = classify_severity(bottleneck_share)
+    return [{"id": "severity", "component": "SeverityBadge", "level": level, "contribution": bottleneck_share}]
+""",
+                starter="""    # TODO(step-5): Without a bottleneck there is no badge: return []. Otherwise return one
+    #   component: {"id": "severity", "component": "SeverityBadge", "level": <classify_severity>,
+    #   "contribution": <the share>}. The cards list it first, and the browser draws it.
+    return []
 """,
             ),
         ),

@@ -8,6 +8,9 @@ task updates: progress becomes WORKING status messages, the report the artifact.
 * `run_diagnosis` - root cause of one incident: the ADK TraceAnalyzer + LogCorrelator.
 * `run_post_mortem` - the post-mortem of one incident, plus a model-written
   analysis when a Gemini key is configured.
+
+With ``ui=True`` (the caller renders A2UI) the Report also carries the result as
+an A2UI surface (`sre_agent.a2ui_surfaces`).
 """
 
 import datetime
@@ -18,13 +21,14 @@ from typing import Any
 
 from sre_common.middleware import target_project_contextvar
 
+from sre_agent import a2ui_surfaces
 from sre_agent.config import PROJECT_ID
 from sre_agent.firestore_strategy import get_sre_session, save_sre_session
-from sre_agent.gcp_tools import TRACE_SCAN_SIZE, generate_post_mortem, query_traces
+from sre_agent.gcp_tools import TRACE_SCAN_SIZE, find_bottleneck, generate_post_mortem, query_traces
 from sre_agent.incidents import find_incident
 from sre_agent.inventory_client import fetch_topology
 from sre_agent.post_mortem_analysis import analysis_enabled, analyze_post_mortem
-from sre_agent.sre_workflow import run_sre_diagnostics
+from sre_agent.sre_workflow import diagnose
 
 logger = logging.getLogger("sre_agent.diagnosis")
 
@@ -38,10 +42,12 @@ class Progress:
 
 @dataclass(frozen=True)
 class Report:
-    """A skill's result: Markdown for people, and optionally structured data for programs."""
+    """A skill's result: Markdown for people and models, optionally structured data for
+    programs, and an A2UI surface (a list of A2UI messages) for clients that render one."""
 
     text: str
     data: dict[str, Any] | None = None
+    a2ui: list[dict[str, Any]] | None = None
 
 
 class DiagnosisError(RuntimeError):
@@ -54,6 +60,7 @@ async def run_diagnosis(
     refresh: bool = False,
     conversation_id: str | None = None,
     trace_id: str | None = None,
+    ui: bool = False,
 ) -> AsyncIterator[Progress | Report]:
     """Diagnoses the target project and yields progress, then exactly one Report.
 
@@ -64,6 +71,7 @@ async def run_diagnosis(
         refresh: Force the Inventory Agent to rescan the project's topology.
         conversation_id: When set, the run is appended to that session's history.
         trace_id: Diagnose this trace instead of picking the incident.
+        ui: Also return the result as an A2UI surface.
 
     Raises:
         DiagnosisError: If recent traces cannot be retrieved.
@@ -98,9 +106,8 @@ async def run_diagnosis(
 
     # 3. The ADK multi-agent workflow (or its deterministic tier without a key)
     yield Progress("🧠 Running multi-agent ADK correlation workflow (TraceAnalyzer + LogCorrelator)...")
-    report = await run_sre_diagnostics(
-        traces_json=traces_json, project_id=resolved_project, question=prompt, trace_id=trace_id
-    )
+    diagnosis = await diagnose(traces_json=traces_json, project_id=resolved_project, question=prompt, trace_id=trace_id)
+    report = diagnosis.report
     yield Progress("✅ Diagnostics complete. Generating Markdown report...")
 
     # 4. Private session history
@@ -118,7 +125,11 @@ async def run_diagnosis(
         )
         await save_sre_session(conversation_id, history)
 
-    yield Report(report)
+    surface = None
+    if ui:
+        bottleneck = await find_bottleneck(diagnosis.trace_id, resolved_project) if diagnosis.trace_id else None
+        surface = a2ui_surfaces.diagnosis_surface(report, diagnosis.trace_id, bottleneck and bottleneck.share)
+    yield Report(report, {"kind": "diagnosis", "trace_id": diagnosis.trace_id}, surface)
 
 
 def _incident_row(n: int, incident: dict[str, Any]) -> str:
@@ -132,12 +143,15 @@ def _incident_row(n: int, incident: dict[str, Any]) -> str:
     )
 
 
-async def run_list_incidents(project_id: str | None = None, limit: int = 10) -> AsyncIterator[Progress | Report]:
+async def run_list_incidents(
+    project_id: str | None = None, limit: int = 10, ui: bool = False
+) -> AsyncIterator[Progress | Report]:
     """Lists the recent requests worth diagnosing, best candidate first. No model calls.
 
     Args:
         project_id: The GCP project to scan. Defaults to the service's project.
         limit: The most incidents to list.
+        ui: Also return the result as an A2UI surface.
 
     Raises:
         DiagnosisError: If recent traces cannot be retrieved.
@@ -170,11 +184,12 @@ async def run_list_incidents(project_id: str | None = None, limit: int = 10) -> 
             "|---|---|---|---|---|---|---|\n" + "\n".join(_incident_row(n, i) for n, i in enumerate(incidents, 1))
         )
     data = {"kind": "incident_list", "project_id": resolved_project, "incidents": incidents}
-    yield Report(text, data)
+    surface = a2ui_surfaces.incident_list_surface(resolved_project, incidents) if ui else None
+    yield Report(text, data, surface)
 
 
 async def run_post_mortem(
-    prompt: str = "", project_id: str | None = None, trace_id: str | None = None
+    prompt: str = "", project_id: str | None = None, trace_id: str | None = None, ui: bool = False
 ) -> AsyncIterator[Progress | Report]:
     """Writes the post-mortem of one incident: the trace's evidence, rendered from a template.
 
@@ -185,6 +200,7 @@ async def run_post_mortem(
         prompt: The user's request, given to the model as context.
         project_id: The GCP project. Defaults to the service's project.
         trace_id: The incident's trace. Defaults to the most important recent incident.
+        ui: Also return the result as an A2UI surface.
     """
     resolved_project = project_id or PROJECT_ID
     target_project_contextvar.set(resolved_project)
@@ -194,9 +210,11 @@ async def run_post_mortem(
         traces_json = await query_traces(project_id=resolved_project, limit=TRACE_SCAN_SIZE)
         incident, _ = await find_incident(traces_json, resolved_project)
         if incident is None:
+            text = "No recent failing or slow requests, and no error logs that point at one."
             yield Report(
-                "## ✅ Nothing to write up\n\nNo recent failing or slow requests, and no error logs that point at one.",
+                f"## ✅ Nothing to write up\n\n{text}",
                 {"kind": "post_mortem", "project_id": resolved_project, "trace_id": None},
+                a2ui_surfaces.post_mortem_surface(text, None, None) if ui else None,
             )
             return
         trace_id = incident["traceId"]
@@ -210,7 +228,13 @@ async def run_post_mortem(
         analysis = await analyze_post_mortem(report, prompt)
     if analysis:
         report = f"{report}\n\n{analysis}"
+
+    surface = None
+    if ui and not report.startswith("Error:"):
+        bottleneck = await find_bottleneck(trace_id, resolved_project)
+        surface = a2ui_surfaces.post_mortem_surface(report, trace_id, bottleneck and bottleneck.share)
     yield Report(
         report,
         {"kind": "post_mortem", "project_id": resolved_project, "trace_id": trace_id, "llm_analysis": bool(analysis)},
+        surface,
     )

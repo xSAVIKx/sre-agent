@@ -100,7 +100,7 @@ class TestDiagnosisInputs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((incident["traceId"], incident["durationMs"]), ("slow", 9000))
 
     async def test_question_and_candidates_reach_the_adk_workflow(self) -> None:
-        adk = mock.AsyncMock(return_value="report")
+        adk = mock.AsyncMock(return_value=sre_workflow.Diagnosis("report", "err"))
         with (
             mock.patch.object(sre_workflow, "_run_adk_diagnostics", adk),
             mock.patch.object(sre_workflow, "HAS_ADK", True),

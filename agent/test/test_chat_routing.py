@@ -55,18 +55,20 @@ class TestDiagnoseSreOverA2A(unittest.IsolatedAsyncioTestCase):
         self.calls: list[dict] = []
         self.fail = False
 
-        async def fake_run_diagnosis(prompt, project_id=None, refresh=False, conversation_id=None, trace_id=None):
+        async def fake_run_diagnosis(
+            prompt, project_id=None, refresh=False, conversation_id=None, trace_id=None, ui=False
+        ):
             self.calls.append({"project_id": project_id, "refresh": refresh, "conversation_id": conversation_id})
             yield Progress("Fetching traces")
             if self.fail:
                 raise RuntimeError("Trace API query failed: 503")
             yield Report(POST_MORTEM)
 
-        async def fake_list_incidents(project_id=None):
+        async def fake_list_incidents(project_id=None, ui=False):
             self.calls.append({"skill": "list_incidents", "project_id": project_id})
             yield Report("| incident table |", {"kind": "incident_list", "incidents": []})
 
-        async def fake_post_mortem(prompt="", project_id=None, trace_id=None):
+        async def fake_post_mortem(prompt="", project_id=None, trace_id=None, ui=False):
             self.calls.append({"skill": "write_post_mortem", "project_id": project_id, "trace_id": trace_id})
             yield Report(POST_MORTEM)
 
@@ -171,8 +173,7 @@ class TestChatRouting(unittest.TestCase):
         thoughts = [e["text"] for e in events if e["type"] == "thought"]
         self.assertIn("🔧 Calling tool `diagnose_sre`...", thoughts)
         self.assertIn("sub-agent progress", thoughts)
-        components = [c["type"] for c in events[-1]["response_a2ui"]["components"]]
-        self.assertIn("download_button", components)
+        self.assertEqual(events[-1]["rendered"], POST_MORTEM, "without a surface, the report's Markdown")
 
     def test_blocked_policy_never_reaches_the_sub_agent(self) -> None:
         called = mock.AsyncMock(return_value=POST_MORTEM)
@@ -188,8 +189,11 @@ class TestChatRouting(unittest.TestCase):
     def test_failure_question_lists_incidents_and_replies_with_summary_and_card(self) -> None:
         table = "## 📋 Recent incidents\n\n1 failing request.\n\n| # | Trace ID |\n|---|---|\n| 1 | `abc` |"
 
+        surface = [{"version": "v0.9", "createSurface": {"surfaceId": "s", "catalogId": config.SRE_CATALOG_ID}}]
+
         async def fake_list(project_id: str | None = None) -> str:
-            config.diagnosis_sink.get().report = table
+            sink = config.diagnosis_sink.get()
+            sink.report, sink.a2ui = table, surface
             return table
 
         with mock.patch.object(config, "list_incidents", fake_list):
@@ -199,9 +203,34 @@ class TestChatRouting(unittest.TestCase):
         self.assertIn("🔧 Calling tool `list_incidents`...", thoughts)
         done = events[-1]
         self.assertEqual(done["response"], "1 failing request. The full result is below.")
-        summary, card = done["response_a2ui"]["components"]
-        self.assertEqual(summary, {"type": "text", "content": done["response"]})
-        self.assertEqual(card["content"], table)
+        self.assertEqual(done["a2ui"], surface)
+        self.assertEqual(done["rendered"], "")
+
+    def test_surface_actions_become_chat_turns(self) -> None:
+        called = mock.AsyncMock(return_value=POST_MORTEM)
+        trace = "1c65bf87e4be434ea6d6d7edc1ef8c97"
+        action = {"name": "write_post_mortem", "context": {"traceId": trace}, "surfaceId": "sre-1"}
+        with mock.patch.object(config, "write_post_mortem", called):
+            resp = self.client.post("/chat", json={"action": action})
+        events = _sse_events(resp.text)
+        self.assertEqual(events[0]["prompt"], f"Write the post-mortem for trace {trace}.")
+        called.assert_awaited_once()
+        self.assertEqual(called.await_args.kwargs.get("trace_id"), trace)
+
+    def test_unknown_or_malformed_actions_are_rejected(self) -> None:
+        for action in (
+            {"name": "restart_service", "context": {"traceId": "a" * 32}},
+            {"name": "diagnose_incident", "context": {"traceId": "x; rm -rf /"}},
+        ):
+            with self.subTest(action=action["name"]):
+                self.assertEqual(self.client.post("/chat", json={"action": action}).status_code, 422)
+        self.assertEqual(self.client.post("/chat", json={"prompt": " "}).status_code, 422)
+
+    def test_the_renderer_bundle_is_served(self) -> None:
+        resp = self.client.get("/static/sre-a2ui.js")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("text/javascript", resp.headers["content-type"])
+        self.assertIn(config.SRE_CATALOG_ID, resp.text, "the bundle implements the catalog the agent requests")
 
     def test_general_prompt_does_not_call_diagnose_sre(self) -> None:
         called = mock.AsyncMock(return_value=POST_MORTEM)
@@ -248,3 +277,58 @@ class TestDiagnoseSreModeSelection(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestA2uiClient(unittest.IsolatedAsyncioTestCase):
+    """The Orchestrator asks for (and keeps) the A2UI surfaces its chat UI renders."""
+
+    def test_capabilities_name_the_catalog_the_sre_agent_builds(self) -> None:
+        from sre_agent import a2ui_surfaces
+
+        self.assertEqual(config.A2UI_CLIENT_CAPABILITIES, a2ui_surfaces.client_capabilities())
+        self.assertEqual(config.A2UI_EXTENSION_URI, a2ui_surfaces.A2UI_EXTENSION_URI)
+
+    async def test_chat_calls_request_surfaces_and_keep_them(self) -> None:
+        surface = [{"version": "v0.9", "createSurface": {"surfaceId": "s", "catalogId": config.SRE_CATALOG_ID}}]
+        call = mock.AsyncMock(return_value=mock.Mock(text="| table |", a2ui=surface))
+        sink = config.DiagnosisSink()
+        token = config.diagnosis_sink.set(sink)
+        try:
+            with (
+                mock.patch.dict(os.environ, {"SRE_AGENT_URL": "http://sre-agent:8080"}),
+                mock.patch.object(config, "call_agent", call),
+            ):
+                await config.list_incidents()
+        finally:
+            config.diagnosis_sink.reset(token)
+        metadata = call.await_args.args[2]
+        self.assertEqual(metadata["a2uiClientCapabilities"], config.A2UI_CLIENT_CAPABILITIES)
+        self.assertEqual(call.await_args.kwargs["extensions"], [config.A2UI_EXTENSION_URI])
+        self.assertEqual(sink.a2ui, surface)
+
+    async def test_non_chat_calls_do_not_ask_for_ui(self) -> None:
+        call = mock.AsyncMock(return_value=mock.Mock(text="report", a2ui=[]))
+        with (
+            mock.patch.dict(os.environ, {"SRE_AGENT_URL": "http://sre-agent:8080"}),
+            mock.patch.object(config, "call_agent", call),
+        ):
+            await config.diagnose_sre("diagnose")
+        self.assertNotIn("a2uiClientCapabilities", call.await_args.args[2])
+
+    async def test_in_process_runs_build_the_same_surfaces(self) -> None:
+        import json
+
+        from sre_agent import diagnosis
+
+        traces = [{"traceId": "a" * 32, "service": "app", "name": "/api", "error": True, "startTime": "t"}]
+        sink = config.DiagnosisSink()
+        token = config.diagnosis_sink.set(sink)
+        try:
+            with (
+                mock.patch.dict(os.environ, {"MOCK_GCP": "true", "SRE_AGENT_URL": ""}),
+                mock.patch.object(diagnosis, "query_traces", mock.AsyncMock(return_value=json.dumps(traces))),
+            ):
+                await config.list_incidents()
+        finally:
+            config.diagnosis_sink.reset(token)
+        self.assertEqual(sink.a2ui[0]["createSurface"]["catalogId"], config.SRE_CATALOG_ID)

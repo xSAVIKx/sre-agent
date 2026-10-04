@@ -17,7 +17,7 @@ from google.adk.a2a.converters import request_converter
 from sre_agent.diagnosis import Progress, Report
 from sre_common.a2a_client import call_agent
 
-from sre_agent import a2a_agent
+from sre_agent import a2a_agent, a2ui_surfaces
 
 BASE_URL = "http://sre-agent.test"
 
@@ -40,7 +40,9 @@ class TestA2AFlow(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.calls: list[dict] = []
 
-        async def fake_run_diagnosis(prompt, project_id=None, refresh=False, conversation_id=None, trace_id=None):
+        async def fake_run_diagnosis(
+            prompt, project_id=None, refresh=False, conversation_id=None, trace_id=None, ui=False
+        ):
             self.calls.append(
                 {
                     "skill": "diagnose_incident",
@@ -55,12 +57,13 @@ class TestA2AFlow(unittest.IsolatedAsyncioTestCase):
             yield Progress("step 2")
             yield Report("# 🚨 Incident Post-Mortem\nreport body")
 
-        async def fake_list_incidents(project_id=None):
-            self.calls.append({"skill": "list_incidents", "project_id": project_id})
+        async def fake_list_incidents(project_id=None, ui=False):
+            self.calls.append({"skill": "list_incidents", "project_id": project_id, "ui": ui})
             yield Progress("scanning")
-            yield Report("| incidents |", {"kind": "incident_list", "incidents": [{"traceId": "a" * 32}]})
+            surface = a2ui_surfaces.incident_list_surface("demo", []) if ui else None
+            yield Report("| incidents |", {"kind": "incident_list", "incidents": [{"traceId": "a" * 32}]}, surface)
 
-        async def fake_post_mortem(prompt="", project_id=None, trace_id=None):
+        async def fake_post_mortem(prompt="", project_id=None, trace_id=None, ui=False):
             self.calls.append({"skill": "write_post_mortem", "project_id": project_id, "trace_id": trace_id})
             yield Report("# 🚨 Incident Post-Mortem", {"kind": "post_mortem", "trace_id": trace_id})
 
@@ -123,6 +126,29 @@ class TestA2AFlow(unittest.IsolatedAsyncioTestCase):
         result = await call_agent(BASE_URL, "latest failures?", {"skill": "list_incidents"}, http=self.http)
         self.assertEqual(result.text, "| incidents |")
         self.assertEqual(result.data, [{"kind": "incident_list", "incidents": [{"traceId": "a" * 32}]}])
+
+    async def test_a2ui_clients_get_the_surface_as_marked_data_parts(self) -> None:
+        metadata = {
+            "skill": "list_incidents",
+            a2ui_surfaces.CLIENT_CAPABILITIES_KEY: a2ui_surfaces.client_capabilities(),
+        }
+        result = await call_agent(
+            BASE_URL, "latest failures?", metadata, extensions=[a2ui_surfaces.A2UI_EXTENSION_URI], http=self.http
+        )
+        self.assertTrue(self.calls[-1]["ui"])
+        self.assertEqual([next(iter(set(m) - {"version"})) for m in result.a2ui], ["createSurface", "updateComponents"])
+        self.assertEqual(result.data, [{"kind": "incident_list", "incidents": [{"traceId": "a" * 32}]}])
+
+    async def test_plain_clients_get_no_surface(self) -> None:
+        result = await call_agent(BASE_URL, "latest failures?", {"skill": "list_incidents"}, http=self.http)
+        self.assertFalse(self.calls[-1]["ui"])
+        self.assertEqual(result.a2ui, [])
+
+    def test_card_advertises_the_a2ui_extension(self) -> None:
+        card = a2a_agent.build_agent_card(BASE_URL)
+        (extension,) = card.capabilities.extensions
+        self.assertEqual(extension.uri, "https://a2ui.org/a2a-extension/a2ui/v0.9")
+        self.assertEqual(list(extension.params["supportedCatalogIds"]), [a2ui_surfaces.SRE_CATALOG_ID])
 
     async def test_unknown_skill_fails_the_task(self) -> None:
         events = await self._send("hi", {"skill": "restart_everything"})

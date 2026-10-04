@@ -44,7 +44,7 @@ STEP_TESTS: dict[int, tuple[str, list[tuple[list[str], str, list[str]]]]] = {
             )
         ],
     ),
-    5: ("Show the severity", [(["agent/src"], "agent/test", ["test_severity_badge"])]),
+    5: ("Show the severity", [(["sre_agent/src"], "sre_agent/test", ["test_severity_badge"])]),
 }
 
 GREEN, RED, YELLOW, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[0m"

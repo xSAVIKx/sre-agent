@@ -9,15 +9,15 @@ import datetime
 import json
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from pydantic import BaseModel, model_validator
 
-from agent.a2ui_translator import compose_reply_a2ui
 from agent.config import (
     HAS_ANTIGRAVITY,
     Agent,
@@ -47,22 +47,48 @@ class DiagnoseResponse(BaseModel):
     result: str
 
 
-class ChatRequest(BaseModel):
-    """Pydantic model representing a stateful chat request."""
+class SurfaceAction(BaseModel):
+    """An A2UI action the user triggered on a surface (e.g. a button), as the renderer reports it."""
 
-    prompt: str
+    name: str
+    context: dict[str, Any] = {}
+    surfaceId: str = ""  # the A2UI field name
+
+
+# What each A2UI action the SRE agent's surfaces can send asks the Orchestrator. The
+# action becomes an ordinary chat turn, so it goes through the agent and its policy.
+ACTION_PROMPTS = {
+    "diagnose_incident": "Diagnose trace {traceId}.",
+    "write_post_mortem": "Write the post-mortem for trace {traceId}.",
+}
+_TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def action_prompt(action: SurfaceAction) -> str:
+    """The chat prompt for a surface action. Rejects unknown actions and malformed trace IDs."""
+    template = ACTION_PROMPTS.get(action.name)
+    trace_id = str(action.context.get("traceId", ""))
+    if template is None or not _TRACE_ID.match(trace_id):
+        raise ValueError(f"Unsupported surface action {action.name!r}")
+    return template.format(traceId=trace_id)
+
+
+class ChatRequest(BaseModel):
+    """Pydantic model representing a stateful chat request: a prompt, or a surface action."""
+
+    prompt: str = ""
+    action: SurfaceAction | None = None
     conversation_id: str | None = None
     project_id: str | None = None
     refresh: bool = False
 
-
-class ChatResponse(BaseModel):
-    """Pydantic model representing a stateful chat response with A2UI."""
-
-    status: str
-    response: str
-    response_a2ui: dict[str, Any] | None = None
-    conversation_id: str | None = None
+    @model_validator(mode="after")
+    def _prompt_from_action(self) -> "ChatRequest":
+        if self.action is not None:
+            self.prompt = action_prompt(self.action)
+        if not self.prompt.strip():
+            raise ValueError("Either a prompt or an action is required")
+        return self
 
 
 @router.get("/health")
@@ -181,14 +207,19 @@ TURNS_COLLECTION = "turns"
 
 
 def _turn_entries(
-    prompt: str, reply: str, thinking: list[str], tool_calls: list[str], rendered: str
+    prompt: str,
+    reply: str,
+    thinking: list[str],
+    tool_calls: list[str],
+    rendered: str,
+    a2ui: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The compact user/model pair one chat turn adds to the transcript.
 
-    Only what the UI replays is kept. The raw SDK steps are far too large to store
-    (one diagnosis is ~90 streamed steps), and the A2UI payload is rebuilt on read.
-    `rendered` is the SRE skill's full result, shown as a card under the reply; it is
-    stored only when it differs from the reply.
+    Only what the UI replays is kept; the raw SDK steps are far too large to store
+    (one diagnosis is ~90 streamed steps). Under the reply the UI shows the SRE
+    skill's result: its A2UI surface (`a2ui`), or else its Markdown (`rendered`,
+    stored only when it differs from the reply).
     """
     user = {"source": "USER", "content": prompt}
     model: dict[str, Any] = {"source": "MODEL", "content": reply}
@@ -196,7 +227,9 @@ def _turn_entries(
         model["thinking"] = "\n".join(thinking)
     if tool_calls:
         model["tool_calls"] = [{"name": name} for name in tool_calls]
-    if rendered and rendered != reply:
+    if a2ui:
+        model["a2ui"] = a2ui
+    elif rendered and rendered != reply:
         model["rendered"] = rendered
     return user, model
 
@@ -266,18 +299,6 @@ async def _save_turn(conv_id: str, prompt: str, user: dict[str, Any], model: dic
     await session.set(update, merge=True)
 
 
-def _with_a2ui(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Copies of the entries, with the A2UI payload rebuilt for model entries lacking one."""
-    result = []
-    for entry in entries:
-        entry = dict(entry)
-        has_text = entry.get("content") or entry.get("rendered")
-        if entry.get("source") == "MODEL" and has_text and not entry.get("response_a2ui"):
-            entry["response_a2ui"] = compose_reply_a2ui(entry.get("content") or "", entry.get("rendered"))
-        result.append(entry)
-    return result
-
-
 @router.get("/sessions/{conversation_id}/history")
 async def get_session_history(conversation_id: str):
     """Retrieve the conversation transcript for a specific session."""
@@ -295,14 +316,14 @@ async def get_session_history(conversation_id: str):
             # Sessions saved before transcripts moved to a subcollection keep them inline.
             doc = await session.get()
             history = (doc.to_dict() or {}).get("history", []) if doc.exists else []
-        return {"conversation_id": conversation_id, "history": _with_a2ui(history)}
+        return {"conversation_id": conversation_id, "history": history}
     except Exception as e:
         logger.warning(f"Using mock database history fallback: {e}")
         from agent.config import MOCK_HISTORY_DB
 
         return {
             "conversation_id": conversation_id,
-            "history": _with_a2ui(MOCK_HISTORY_DB.get(conversation_id, [])),
+            "history": MOCK_HISTORY_DB.get(conversation_id, []),
         }
 
 
@@ -348,6 +369,15 @@ async def get_chat_ui() -> HTMLResponse:
         raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {e!s}") from e
 
 
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+@router.get("/static/sre-a2ui.js", include_in_schema=False)
+async def a2ui_renderer() -> FileResponse:
+    """The chat UI's A2UI renderer bundle (built from agent/web)."""
+    return FileResponse(os.path.join(STATIC_DIR, "sre-a2ui.js"), media_type="text/javascript")
+
+
 @router.post("/chat")
 @otel_trace("routes.chat")
 async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
@@ -382,7 +412,7 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
             conv_id = _resolve_conversation_id(request.conversation_id)
             if conv_id != request.conversation_id:
                 await _register_session(conv_id, request.prompt)
-            yield _sse({"type": "start", "conversation_id": conv_id})
+            yield _sse({"type": "start", "conversation_id": conv_id, "prompt": request.prompt})
             # One A2A context per chat conversation, so the SRE agent keeps its session.
             sink.context_id = conv_id
 
@@ -460,15 +490,13 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
 
                 # Stream complete
                 if not disconnected and not await fastapi_request.is_disconnected():
-                    # The model replies with a short summary; the SRE skill's full
-                    # result is rendered as a card under it.
-                    rendered = accumulated_text
+                    # The model replies with a short summary; under it the UI renders the
+                    # SRE skill's result - its A2UI surface, or its Markdown without one.
+                    rendered = ""
                     if sink.report and not sink.report.startswith("Error:"):
                         rendered = sink.report
-                    response_a2ui = compose_reply_a2ui(accumulated_text, rendered)
-
                     user_entry, model_entry = _turn_entries(
-                        request.prompt, accumulated_text, thinking, tool_calls, rendered
+                        request.prompt, accumulated_text, thinking, tool_calls, rendered, sink.a2ui
                     )
                     try:
                         await _save_turn(conv_id, request.prompt, user_entry, model_entry)
@@ -480,7 +508,8 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
                             "type": "done",
                             "conversation_id": conv_id,
                             "response": accumulated_text,
-                            "response_a2ui": response_a2ui,
+                            "a2ui": model_entry.get("a2ui", []),
+                            "rendered": model_entry.get("rendered", ""),
                         }
                     )
 

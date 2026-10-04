@@ -33,7 +33,7 @@ Optional: `export GEMINI_API_KEY=...` ([get a key](https://aistudio.google.com/a
 | 0:32      | [2 · Feed the metrics](steps/02-feed-the-metrics/README.md)    | `app/main.py`                             |
 | 0:44      | [3 · Give the agent its tools](steps/03-give-the-agent-tools/README.md) | `sre_agent/.../sre_workflow.py`  |
 | 0:54      | [4 · Lock the Orchestrator down](steps/04-lock-it-down/README.md) | `agent/.../config.py`                  |
-| 1:06      | [5 · Show the severity](steps/05-show-the-severity/README.md)  | `agent/.../a2ui_translator.py`            |
+| 1:06      | [5 · Show the severity](steps/05-show-the-severity/README.md)  | `sre_agent/.../a2ui_surfaces.py`          |
 | 1:20      | [6 · Wrap-up: production and next steps](steps/06-wrap-up/README.md) | –                                   |
 
 Every step has a `# TODO(step-N)` in the code. Find yours with:

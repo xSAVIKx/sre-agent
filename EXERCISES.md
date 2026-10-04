@@ -111,8 +111,8 @@ configurable latency SLO (say 1000 ms), compute how badly the request blew the b
 SLO Impact"** block.
 
 **Start here.** [`generate_post_mortem`](sre_agent/src/sre_agent/gcp_tools.py). Keep the exact
-`# 🚨 Incident Post-Mortem` heading — the [`a2ui_translator`](agent/src/agent/a2ui_translator.py) and
-`test_a2ui_translator.py` depend on it.
+`# 🚨 Incident Post-Mortem` heading — the post-mortem surface in
+[`a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py) and its tests depend on it.
 
 **Done when.** The generated post-mortem includes a quantified SLO-breach line (e.g. *"10270 ms vs.
 1000 ms SLO → 927% over budget"*) and existing tests still pass.
@@ -122,12 +122,11 @@ SLO Impact"** block.
 ### Exercise 4 · Carry severity into the post-mortem 🟢
 
 **Goal.** Workshop step 5 renders a SEV1/2/3 badge in the chat, but the downloaded
-`post_mortem.md` doesn't mention severity. Put it in the document itself, and color the chat's
-"Incident Detected" alert by severity too.
+`post_mortem.md` doesn't mention severity. Put it in the document itself.
 
-**Start here.** `classify_severity` in [`a2ui_translator.py`](agent/src/agent/a2ui_translator.py)
+**Start here.** `classify_severity` in [`a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py)
 and `generate_post_mortem` in [`gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py). Keep the exact
-`# 🚨 Incident Post-Mortem` heading: the translator depends on it.
+`# 🚨 Incident Post-Mortem` heading: the post-mortem surface depends on it.
 
 **Done when.** The downloaded post-mortem has a `Severity` line in its overview, and a test covers
 it.

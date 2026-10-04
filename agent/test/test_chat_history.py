@@ -25,6 +25,9 @@ def _events(body: str) -> list[dict]:
     return [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
 
 
+SURFACE = [{"version": "v0.9", "createSurface": {"surfaceId": "sre-1", "catalogId": config.SRE_CATALOG_ID}}]
+
+
 class _Chunk:
     def __init__(self, cls_name: str, **fields) -> None:
         self.__class__ = type(cls_name, (), {})
@@ -115,7 +118,8 @@ class TestChatSessions(unittest.TestCase):
         report = "# 🚨 Incident Post-Mortem\n\nRoot trace: abc123"
 
         async def fake_diagnose(prompt, project_id=None, refresh=False):
-            config.diagnosis_sink.get().report = report
+            sink = config.diagnosis_sink.get()
+            sink.report, sink.a2ui = report, SURFACE
             return report
 
         with mock.patch.object(config, "diagnose_sre", fake_diagnose):
@@ -127,10 +131,9 @@ class TestChatSessions(unittest.TestCase):
         self.assertEqual([e["source"] for e in history], ["USER", "MODEL", "USER", "MODEL"])
         self.assertEqual(history[0]["content"], "Diagnose the latency spike")
         self.assertEqual(history[1]["tool_calls"], [{"name": "diagnose_sre"}])
-        # The A2UI payload is rebuilt on read, not stored.
-        stored = config.MOCK_HISTORY_DB[conv_id][1]
-        self.assertNotIn("response_a2ui", stored)
-        self.assertIn("download_button", [c["type"] for c in history[1]["response_a2ui"]["components"]])
+        # The SRE agent's A2UI surface is replayed as it was sent.
+        self.assertEqual(history[1]["a2ui"], SURFACE)
+        self.assertNotIn("rendered", history[1], "the surface replaces the Markdown fallback")
 
     def test_turn_entries_keep_rendered_only_when_it_differs(self) -> None:
         _, same = routes._turn_entries("p", "reply", [], [], "reply")
@@ -138,6 +141,11 @@ class TestChatSessions(unittest.TestCase):
         self.assertNotIn("rendered", same)
         self.assertEqual(different["rendered"], "full report")
         self.assertEqual(different["thinking"], "step")
+
+    def test_turn_entries_prefer_the_surface_over_markdown(self) -> None:
+        _, model = routes._turn_entries("p", "summary", [], ["list_incidents"], "| table |", SURFACE)
+        self.assertEqual(model["a2ui"], SURFACE)
+        self.assertNotIn("rendered", model)
 
 
 if __name__ == "__main__":

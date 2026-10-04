@@ -13,6 +13,8 @@
     
     <!-- Markdown Parser -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- A2UI renderer (@a2ui/lit, v0.9) + the SRE catalog, bundled from agent/web -->
+    <script type="module" src="/static/sre-a2ui.js"></script>
     
     <style>
         :root {
@@ -210,54 +212,24 @@
             gap: 16px;
         }
 
-        .a2ui-header {
-            font-size: 18px;
-            font-weight: 600;
-            color: #ffffff;
-            border-left: 3px solid var(--primary);
-            padding-left: 10px;
-            margin-bottom: 4px;
-        }
-
-        .a2ui-alert {
-            padding: 14px 18px;
-            border-radius: 12px;
-            border-left: 4px solid var(--primary);
-            background: rgba(99, 102, 241, 0.08);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-left-width: 4px;
-            color: var(--text-main);
-            margin-bottom: 8px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-        .a2ui-alert.error {
-            border-left-color: var(--danger);
-            background: rgba(239, 68, 68, 0.08);
-            border-color: rgba(239, 68, 68, 0.15);
-        }
-        .a2ui-alert.warning {
-            border-left-color: var(--warning);
-            background: rgba(245, 158, 11, 0.08);
-            border-color: rgba(245, 158, 11, 0.15);
-        }
-        .a2ui-alert.success {
-            border-left-color: var(--success);
-            background: rgba(16, 185, 129, 0.08);
-            border-color: rgba(16, 185, 129, 0.15);
-        }
-        .a2ui-alert-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 600;
-            font-size: 15px;
-        }
-        .a2ui-alert-text {
-            font-size: 14px;
-            color: var(--text-muted);
-            line-height: 1.5;
+        /* A2UI surfaces (@a2ui/lit): the basic catalog is themed through these variables,
+           which reach into the surface's shadow root. */
+        .sre-surface {
+            color-scheme: dark;
+            --a2ui-color-background: var(--bg-primary);
+            --a2ui-color-on-background: var(--text-main);
+            --a2ui-color-surface: var(--card-bg);
+            --a2ui-color-on-surface: var(--text-main);
+            --a2ui-color-primary: var(--primary-hover);
+            --a2ui-color-on-primary: #fff;
+            --a2ui-color-secondary: rgba(255, 255, 255, 0.06);
+            --a2ui-color-on-secondary: var(--text-main);
+            --a2ui-color-border: var(--border-glass);
+            --a2ui-border-radius: 10px;
+            --a2ui-font-size: 15px;
+            --sre-sev1: var(--danger);
+            --sre-sev2: var(--warning);
+            --sre-sev3: var(--primary);
         }
 
         .a2ui-text {
@@ -266,22 +238,22 @@
         }
 
         /* Markdown rendering styles */
-        .a2ui-text p, .a2ui-alert-text p, .a2ui-section-content p {
+        .a2ui-text p {
             margin-bottom: 12px;
             line-height: 1.6;
         }
-        .a2ui-text p:last-child, .a2ui-alert-text p:last-child, .a2ui-section-content p:last-child {
+        .a2ui-text p:last-child {
             margin-bottom: 0;
         }
-        .a2ui-text ul, .a2ui-text ol, .a2ui-section-content ul, .a2ui-section-content ol {
+        .a2ui-text ul, .a2ui-text ol {
             margin: 12px 0;
             padding-left: 20px;
         }
-        .a2ui-text li, .a2ui-section-content li {
+        .a2ui-text li {
             margin-bottom: 6px;
             line-height: 1.5;
         }
-        .a2ui-text code, .a2ui-alert-text code, .a2ui-section-content code {
+        .a2ui-text code {
             font-family: 'JetBrains Mono', monospace;
             background: rgba(0, 0, 0, 0.3);
             padding: 2px 6px;
@@ -289,7 +261,7 @@
             font-size: 0.9em;
             color: #f43f5e;
         }
-        .a2ui-text pre, .a2ui-section-content pre {
+        .a2ui-text pre {
             background: rgba(0, 0, 0, 0.4);
             padding: 14px;
             border-radius: 8px;
@@ -297,124 +269,34 @@
             margin: 14px 0;
             border: 1px solid rgba(255, 255, 255, 0.05);
         }
-        .a2ui-text pre code, .a2ui-section-content pre code {
+        .a2ui-text pre code {
             background: none;
             padding: 0;
             border-radius: 0;
             color: inherit;
         }
-        .a2ui-text h1, .a2ui-text h2, .a2ui-text h3, .a2ui-section-content h1, .a2ui-section-content h2, .a2ui-section-content h3 {
+        .a2ui-text h1, .a2ui-text h2, .a2ui-text h3 {
             margin: 18px 0 10px 0;
             font-weight: 600;
             color: var(--text-main);
         }
-        .a2ui-text h1, .a2ui-section-content h1 { font-size: 1.3em; }
-        .a2ui-text h2, .a2ui-section-content h2 { font-size: 1.2em; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 4px; }
-        .a2ui-text h3, .a2ui-section-content h3 { font-size: 1.1em; }
-        .a2ui-text table, .a2ui-section-content table {
+        .a2ui-text h1 { font-size: 1.3em; }
+        .a2ui-text h2 { font-size: 1.2em; border-bottom: 1px solid rgba(255, 255, 255, 0.05); padding-bottom: 4px; }
+        .a2ui-text h3 { font-size: 1.1em; }
+        .a2ui-text table {
             width: 100%;
             border-collapse: collapse;
             margin: 14px 0;
             font-size: 0.95em;
         }
-        .a2ui-text th, .a2ui-text td, .a2ui-section-content th, .a2ui-section-content td {
+        .a2ui-text th, .a2ui-text td {
             border: 1px solid rgba(255, 255, 255, 0.08);
             padding: 8px 12px;
             text-align: left;
         }
-        .a2ui-text th, .a2ui-section-content th {
+        .a2ui-text th {
             background: rgba(255, 255, 255, 0.04);
             font-weight: 600;
-        }
-
-        /* Rich Component: Card */
-        .a2ui-card {
-            background: var(--card-bg);
-            border: 1px solid rgba(255, 255, 255, 0.05);
-            border-radius: 12px;
-            padding: 16px;
-        }
-
-        .a2ui-card-title {
-            font-size: 13px;
-            text-transform: uppercase;
-            font-weight: 600;
-            color: var(--text-muted);
-            letter-spacing: 0.5px;
-            margin-bottom: 12px;
-        }
-
-        .a2ui-card-fields {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 16px;
-        }
-
-        .a2ui-field {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-
-        .a2ui-field-label {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        .a2ui-field-value {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
-            color: var(--text-main);
-            background: rgba(0, 0, 0, 0.2);
-            padding: 6px 10px;
-            border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.02);
-        }
-
-        /* Rich Component: Section */
-        .a2ui-section {
-            background: rgba(99, 102, 241, 0.02);
-            border-left: 3px solid var(--primary);
-            padding: 14px 16px;
-            border-radius: 0 8px 8px 0;
-        }
-
-        .a2ui-section-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: var(--text-main);
-            margin-bottom: 6px;
-        }
-
-        .a2ui-section-content {
-            font-size: 14px;
-            color: var(--text-muted);
-        }
-
-        /* Rich Component: Code Terminal Block */
-        .a2ui-codeblock {
-            background-color: var(--terminal-bg);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-        }
-
-        .a2ui-codeblock-header {
-            background: rgba(255, 255, 255, 0.03);
-            padding: 10px 16px;
-            font-size: 12px;
-            color: var(--text-muted);
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-        }
-
-        .a2ui-codeblock-dots {
-            display: flex;
-            gap: 6px;
         }
 
         .code-dot {
@@ -426,51 +308,6 @@
         .code-dot.red { background-color: #ff5f56; }
         .code-dot.yellow { background-color: #ffbd2e; }
         .code-dot.green { background-color: #27c93f; }
-
-        .a2ui-codeblock-body {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
-            padding: 16px;
-            color: #a7f3d0;
-            white-space: pre-wrap;
-            overflow-x: auto;
-            line-height: 1.6;
-        }
-
-        /* Rich Component: List */
-        .a2ui-list {
-            background: var(--card-bg);
-            border-radius: 12px;
-            padding: 16px;
-            border: 1px solid rgba(255, 255, 255, 0.03);
-        }
-
-        .a2ui-list-title {
-            font-size: 15px;
-            font-weight: 600;
-            color: var(--text-main);
-            margin-bottom: 10px;
-        }
-
-        .a2ui-list-items {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            list-style: none;
-        }
-
-        .a2ui-list-item {
-            font-size: 14px;
-            color: var(--text-muted);
-            display: flex;
-            align-items: flex-start;
-            gap: 10px;
-        }
-
-        .a2ui-list-item-bullet {
-            color: var(--success);
-            font-weight: bold;
-        }
 
         /* Streaming Elements styling */
         .agent-thinking-box {
@@ -842,56 +679,6 @@
             padding: 0;
         }
 
-        /* Incident severity badge (A2UI `severity_badge`) */
-        .severity-badge {
-            display: inline-flex;
-            align-self: flex-start;
-            width: fit-content;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 12px;
-            padding: 6px 14px;
-            border-radius: 999px;
-            font-weight: 700;
-            font-size: 13px;
-            letter-spacing: 0.04em;
-            color: #fff;
-        }
-        .severity-badge.sev1 { background: var(--danger); }
-        .severity-badge.sev2 { background: var(--warning); color: #111827; }
-        .severity-badge.sev3 { background: var(--success); }
-
-        /* PM download button styles */
-        .download-pm-btn {
-            margin-top: 12px;
-            padding: 10px 20px;
-            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            cursor: pointer;
-            font-weight: 600;
-            font-family: inherit;
-            display: inline-flex;
-            align-items: center;
-            font-size: 14px;
-            box-shadow: 0 4px 12px var(--success-glow);
-            transition: all 0.2s ease;
-            outline: none;
-        }
-        .download-pm-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 16px rgba(16, 185, 129, 0.35);
-            filter: brightness(1.05);
-        }
-        .download-pm-btn:active {
-            transform: translateY(1px);
-        }
-        .download-pm-btn:focus-visible {
-            outline: 2px solid var(--success);
-            outline-offset: 2px;
-        }
-
         /* Responsive Breakpoint: Tablet (768px - 1024px) */
         @media (max-width: 1024px) {
             .app-container {
@@ -1044,187 +831,34 @@
         }
 
         // Render an A2UI payload into HTML components
-        function renderA2UIContainer(payload) {
-            const containerDiv = document.createElement('div');
-            containerDiv.className = 'a2ui-container';
-
-            if (!payload || !payload.components) {
-                return containerDiv;
+        // One agent turn: the model's short reply, then the SRE agent's result under it -
+        // its A2UI surface (rendered by @a2ui/lit, see /static/sre-a2ui.js), or its Markdown.
+        function renderTurn(turn) {
+            const container = document.createElement('div');
+            container.className = 'a2ui-container';
+            if (turn.response) {
+                const reply = document.createElement('div');
+                reply.className = 'a2ui-text';
+                reply.innerHTML = formatMarkdownInline(turn.response);
+                container.appendChild(reply);
             }
-
-            payload.components.forEach(comp => {
-                switch (comp.type) {
-                    case 'alert':
-                        const alertDiv = document.createElement('div');
-                        alertDiv.className = `a2ui-alert ${comp.level || 'info'}`;
-                        
-                        const alertTitle = document.createElement('div');
-                        alertTitle.className = 'a2ui-alert-title';
-                        
-                        let icon = 'ℹ️';
-                        if (comp.level === 'error') icon = '🚨';
-                        else if (comp.level === 'warning') icon = '⚠️';
-                        else if (comp.level === 'success') icon = '✅';
-                        
-                        alertTitle.innerHTML = `<span>${icon}</span> <span>${formatMarkdownInline(comp.title || 'Notification')}</span>`;
-                        alertDiv.appendChild(alertTitle);
-                        
-                        if (comp.text) {
-                            const alertText = document.createElement('div');
-                            alertText.className = 'a2ui-alert-text';
-                            alertText.innerHTML = formatMarkdownInline(comp.text);
-                            alertDiv.appendChild(alertText);
-                        }
-                        
-                        containerDiv.appendChild(alertDiv);
-                        break;
-
-                    case 'header':
-                        const header = document.createElement('div');
-                        header.className = 'a2ui-header';
-                        header.innerHTML = formatMarkdownInline(comp.text);
-                        containerDiv.appendChild(header);
-                        break;
-
-                    case 'text':
-                        const text = document.createElement('div');
-                        text.className = 'a2ui-text';
-                        text.innerHTML = formatMarkdownInline(comp.content);
-                        containerDiv.appendChild(text);
-                        break;
-
-                    case 'card':
-                        const card = document.createElement('div');
-                        card.className = 'a2ui-card';
-                        
-                        const cardTitle = document.createElement('div');
-                        cardTitle.className = 'a2ui-card-title';
-                        cardTitle.innerText = comp.title || "Details";
-                        card.appendChild(cardTitle);
-
-                        const fieldsContainer = document.createElement('div');
-                        fieldsContainer.className = 'a2ui-card-fields';
-
-                        if (comp.fields) {
-                            comp.fields.forEach(field => {
-                                const fieldDiv = document.createElement('div');
-                                fieldDiv.className = 'a2ui-field';
-
-                                const label = document.createElement('div');
-                                label.className = 'a2ui-field-label';
-                                label.innerText = field.label;
-
-                                const val = document.createElement('div');
-                                val.className = 'a2ui-field-value';
-                                val.innerText = field.value;
-
-                                fieldDiv.appendChild(label);
-                                fieldDiv.appendChild(val);
-                                fieldsContainer.appendChild(fieldDiv);
-                            });
-                        }
-
-                        card.appendChild(fieldsContainer);
-                        containerDiv.appendChild(card);
-                        break;
-
-                    case 'section':
-                        const section = document.createElement('div');
-                        section.className = 'a2ui-section';
-
-                        const secTitle = document.createElement('div');
-                        secTitle.className = 'a2ui-section-title';
-                        secTitle.innerHTML = formatMarkdownInline(comp.title);
-                        section.appendChild(secTitle);
-
-                        const secContent = document.createElement('div');
-                        secContent.className = 'a2ui-section-content';
-                        secContent.innerHTML = formatMarkdownInline(comp.content);
-                        section.appendChild(secContent);
-
-                        containerDiv.appendChild(section);
-                        break;
-
-                    case 'code_block':
-                        const cb = document.createElement('div');
-                        cb.className = 'a2ui-codeblock';
-
-                        const cbHeader = document.createElement('div');
-                        cbHeader.className = 'a2ui-codeblock-header';
-                        
-                        const dots = document.createElement('div');
-                        dots.className = 'a2ui-codeblock-dots';
-                        dots.innerHTML = '<div class="code-dot red"></div><div class="code-dot yellow"></div><div class="code-dot green"></div>';
-                        
-                        const titleSpan = document.createElement('span');
-                        titleSpan.innerText = comp.title || "Diagnostics Log";
-                        
-                        cbHeader.appendChild(dots);
-                        cbHeader.appendChild(titleSpan);
-                        cb.appendChild(cbHeader);
-
-                        const cbBody = document.createElement('div');
-                        cbBody.className = 'a2ui-codeblock-body';
-                        cbBody.innerText = comp.code;
-                        cb.appendChild(cbBody);
-
-                        containerDiv.appendChild(cb);
-                        break;
-
-                    case 'list':
-                        const list = document.createElement('div');
-                        list.className = 'a2ui-list';
-
-                        const listTitle = document.createElement('div');
-                        listTitle.className = 'a2ui-list-title';
-                        listTitle.innerHTML = formatMarkdownInline(comp.title);
-                        list.appendChild(listTitle);
-
-                        const listItems = document.createElement('ul');
-                        listItems.className = 'a2ui-list-items';
-
-                        if (comp.items) {
-                            comp.items.forEach(item => {
-                                const li = document.createElement('li');
-                                li.className = 'a2ui-list-item';
-                                li.innerHTML = `<span class="a2ui-list-item-bullet">✓</span> <span>${formatMarkdownInline(item)}</span>`;
-                                listItems.appendChild(li);
-                            });
-                        }
-
-                        list.appendChild(listItems);
-                        containerDiv.appendChild(list);
-                        break;
-
-                    case 'severity_badge':
-                        const badge = document.createElement('div');
-                        const level = String(comp.level || 'SEV3');
-                        badge.className = `severity-badge ${level.toLowerCase()}`;
-                        badge.textContent = `${level} · bottleneck owns ${comp.contribution}% of the request`;
-                        containerDiv.appendChild(badge);
-                        break;
-
-                    case 'download_button':
-                        const btn = document.createElement('button');
-                        btn.className = 'download-pm-btn';
-                        btn.innerHTML = `<span style="margin-right:6px;" aria-hidden="true">📥</span> ${comp.text || 'Download Post-Mortem'}`;
-                        btn.onclick = () => {
-                            const blob = new Blob([comp.content], { type: 'text/markdown' });
-                            const url = URL.createObjectURL(blob);
-                            const a = document.createElement('a');
-                            a.href = url;
-                            a.download = comp.filename || 'post_mortem.md';
-                            document.body.appendChild(a);
-                            a.click();
-                            document.body.removeChild(a);
-                            URL.revokeObjectURL(url);
-                        };
-                        containerDiv.appendChild(btn);
-                        break;
+            if (turn.a2ui && turn.a2ui.length) {
+                const surface = document.createElement('div');
+                surface.className = 'sre-surface';
+                container.appendChild(surface);
+                try {
+                    window.SreA2ui.renderSurface(surface, turn.a2ui, onSurfaceAction);
+                } catch (err) {
+                    console.error('Failed to render the A2UI surface:', err);
+                    surface.innerText = `Could not render this result: ${err.message}`;
                 }
-            });
-
-            return containerDiv;
+            } else if (turn.rendered) {
+                const report = document.createElement('div');
+                report.className = 'a2ui-text';
+                report.innerHTML = formatMarkdownInline(turn.rendered);
+                container.appendChild(report);
+            }
+            return container;
         }
 
         // Add message row to history UI
@@ -1254,9 +888,19 @@
 
             const prompt = textInput.value.trim();
             if (!prompt) return;
-
-            // Clear input and disable text field
             textInput.value = '';
+            await sendTurn({ prompt });
+        });
+
+        // A button on an A2UI surface (e.g. "Diagnose" on an incident row) starts the next turn.
+        // The Orchestrator turns the action into a prompt, so it goes through the agent's policy.
+        function onSurfaceAction(action) {
+            if (currentAbortController) return; // one turn at a time
+            sendTurn({ action: { name: action.name, context: action.context, surfaceId: action.surfaceId } });
+        }
+
+        // Sends one chat turn - a typed prompt or a surface action - and streams the answer.
+        async function sendTurn({ prompt, action }) {
             textInput.disabled = true;
 
             // Initialize AbortController for this request
@@ -1271,7 +915,7 @@
             // 1. Render User Message bubble
             const userTextDiv = document.createElement('div');
             userTextDiv.className = 'a2ui-text';
-            userTextDiv.innerText = prompt;
+            userTextDiv.innerText = prompt || '…';
             const userContainer = document.createElement('div');
             userContainer.className = 'a2ui-container';
             userContainer.appendChild(userTextDiv);
@@ -1309,7 +953,8 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        prompt: prompt,
+                        prompt: prompt || '',
+                        action: action || null,
                         conversation_id: activeConversationId,
                     }),
                     signal: currentAbortController.signal
@@ -1322,9 +967,7 @@
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder("utf-8");
                 let buffer = "";
-                let finalMarkdown = "";
-                let finalA2UI = null;
-                let limitReachedObj = null;
+                let finalTurn = null;
 
                 while (true) {
                     const { done, value } = await reader.read();
@@ -1345,6 +988,8 @@
                                 const event = JSON.parse(dataStr);
                                 
                                 if (event.type === "start") {
+                                    // The prompt the agent got (for a surface action, the server builds it).
+                                    if (event.prompt) userTextDiv.innerText = event.prompt;
                                     if (event.conversation_id) {
                                         const prevId = activeConversationId;
                                         activeConversationId = event.conversation_id;
@@ -1362,11 +1007,8 @@
                                 } else if (event.type === "chunk") {
                                     textStreamBox.innerText += event.text;
                                     chatHistory.scrollTop = chatHistory.scrollHeight;
-                                } else if (event.type === "limit_reached") {
-                                    limitReachedObj = event;
                                 } else if (event.type === "done") {
-                                    finalMarkdown = event.response;
-                                    finalA2UI = event.response_a2ui;
+                                    finalTurn = event;
                                     // A new conversation only gets its ID once its first turn ran,
                                     // so "start" may not carry it. Adopt it here so follow-ups
                                     // continue this conversation (and its memory).
@@ -1389,124 +1031,7 @@
 
                 // Stream ended. Transform the bubble!
                 agentBubble.innerHTML = ''; // Clear temporary stream containers
-                
-                if (limitReachedObj) {
-                    const res = limitReachedObj.response_a2ui;
-                    if (res) {
-                        agentBubble.appendChild(renderA2UIContainer(res));
-                    } else {
-                        const fallbackTextDiv = document.createElement('div');
-                        fallbackTextDiv.className = 'a2ui-text';
-                        fallbackTextDiv.innerText = limitReachedObj.response || "Suspended due to tool limit.";
-                        const fallbackContainer = document.createElement('div');
-                        fallbackContainer.className = 'a2ui-container';
-                        fallbackContainer.appendChild(fallbackTextDiv);
-                        agentBubble.appendChild(fallbackContainer);
-                    }
-
-                    // Append interactive decision panel
-                    const panel = document.createElement('div');
-                    panel.className = 'limit-reached-panel';
-                    panel.style.marginTop = '15px';
-                    panel.style.padding = '15px';
-                    panel.style.background = 'rgba(245, 158, 11, 0.05)';
-                    panel.style.borderRadius = '12px';
-                    panel.style.border = '1px solid rgba(245, 158, 11, 0.2)';
-                    
-                    const title = document.createElement('div');
-                    title.style.color = 'var(--warning)';
-                    title.style.fontWeight = '600';
-                    title.style.marginBottom = '8px';
-                    title.style.fontSize = '15px';
-                    title.style.display = 'flex';
-                    title.style.alignItems = 'center';
-                    title.style.gap = '8px';
-                    title.innerHTML = '<span>⚠️</span> <span>Tool execution limit reached (6 tools)</span>';
-                    panel.appendChild(title);
-
-                    const desc = document.createElement('div');
-                    desc.style.fontSize = '13.5px';
-                    desc.style.color = 'var(--text-muted)';
-                    desc.style.marginBottom = '15px';
-                    desc.style.lineHeight = '1.4';
-                    desc.innerText = 'To prevent infinite loops, processing has paused. Choose how you want to proceed:';
-                    panel.appendChild(desc);
-
-                    const btnGroup = document.createElement('div');
-                    btnGroup.style.display = 'flex';
-                    btnGroup.style.gap = '10px';
-                    btnGroup.style.flexWrap = 'wrap';
-
-                    const continueBtn = document.createElement('button');
-                    continueBtn.className = 'send-button';
-                    continueBtn.style.padding = '8px 16px';
-                    continueBtn.style.fontSize = '13px';
-                    continueBtn.style.height = 'auto';
-                    continueBtn.style.width = 'auto';
-                    continueBtn.style.background = 'rgba(245, 158, 11, 0.15)';
-                    continueBtn.style.border = '1px solid var(--warning)';
-                    continueBtn.style.color = 'var(--warning)';
-                    continueBtn.style.borderRadius = '8px';
-                    continueBtn.innerText = '🔄 Continue diagnostics';
-                    continueBtn.addEventListener('click', () => {
-                        panel.remove();
-                        // Automatically submit a continuation prompt
-                        textInput.value = 'Please continue the investigation.';
-                        inputForm.dispatchEvent(new Event('submit'));
-                    });
-                    btnGroup.appendChild(continueBtn);
-
-                    const clarifyBtn = document.createElement('button');
-                    clarifyBtn.className = 'send-button';
-                    clarifyBtn.style.padding = '8px 16px';
-                    clarifyBtn.style.fontSize = '13px';
-                    clarifyBtn.style.height = 'auto';
-                    clarifyBtn.style.width = 'auto';
-                    clarifyBtn.style.background = 'rgba(255, 255, 255, 0.05)';
-                    clarifyBtn.style.border = '1px solid var(--border-glass)';
-                    clarifyBtn.style.color = 'var(--text-main)';
-                    clarifyBtn.style.borderRadius = '8px';
-                    clarifyBtn.innerText = '🔍 Refine scope / clarify';
-                    clarifyBtn.addEventListener('click', () => {
-                        panel.remove();
-                        textInput.value = 'Focus search on service: [enter service name]';
-                        textInput.focus();
-                        const len = textInput.value.length;
-                        textInput.setSelectionRange(len - 20, len);
-                    });
-                    btnGroup.appendChild(clarifyBtn);
-
-                    const stopBtn = document.createElement('button');
-                    stopBtn.className = 'send-button';
-                    stopBtn.style.padding = '8px 16px';
-                    stopBtn.style.fontSize = '13px';
-                    stopBtn.style.height = 'auto';
-                    stopBtn.style.width = 'auto';
-                    stopBtn.style.background = 'rgba(239, 68, 68, 0.15)';
-                    stopBtn.style.border = '1px solid var(--danger)';
-                    stopBtn.style.color = 'var(--danger)';
-                    stopBtn.style.borderRadius = '8px';
-                    stopBtn.innerText = '➕ Start new chat';
-                    stopBtn.addEventListener('click', () => {
-                        newSession();
-                    });
-                    btnGroup.appendChild(stopBtn);
-
-                    panel.appendChild(btnGroup);
-                    agentBubble.appendChild(panel);
-                } else if (finalA2UI) {
-                    const finalA2UIDiv = renderA2UIContainer(finalA2UI);
-                    agentBubble.appendChild(finalA2UIDiv);
-                } else {
-                    // Fallback to text if missing A2UI payload
-                    const fallbackTextDiv = document.createElement('div');
-                    fallbackTextDiv.className = 'a2ui-text';
-                    fallbackTextDiv.innerText = finalMarkdown || "No response received.";
-                    const fallbackContainer = document.createElement('div');
-                    fallbackContainer.className = 'a2ui-container';
-                    fallbackContainer.appendChild(fallbackTextDiv);
-                    agentBubble.appendChild(fallbackContainer);
-                }
+                agentBubble.appendChild(renderTurn(finalTurn || { response: 'No response received.' }));
                 chatHistory.scrollTop = chatHistory.scrollHeight;
 
             } catch (err) {
@@ -1545,7 +1070,7 @@
                 // Refresh sessions to show any updated timestamps or prompts
                 loadSessions();
             }
-        });
+        }
 
         // Sidebar sessions rendering and loading
         function renderSessionItem(session) {
@@ -1887,13 +1412,9 @@
                             });
                         }
 
-                        if (step.response_a2ui) {
-                            const a2uiDiv = renderA2UIContainer(step.response_a2ui);
-                            currentTextStreamBox.innerHTML = '';
-                            currentTextStreamBox.appendChild(a2uiDiv);
-                        } else if (step.content) {
-                            currentTextStreamBox.innerText = step.content;
-                        }
+                        currentTextStreamBox.innerHTML = '';
+                        currentTextStreamBox.appendChild(
+                            renderTurn({ response: step.content, a2ui: step.a2ui, rendered: step.rendered }));
                     }
                 });
 

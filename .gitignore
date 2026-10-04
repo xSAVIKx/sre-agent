@@ -28,3 +28,6 @@ mock_telemetry_data/
 
 # Agent runtime scratch/trajectory artifacts
 scratch_save_dir/
+
+# A2UI renderer bundle sources: only the built agent/src/agent/static/sre-a2ui.js is committed
+node_modules/

@@ -30,6 +30,14 @@ The codebase is a **`uv` workspace** organized into five packages:
 > `AgentExecutor`, publish an agent card with explicit skills, and call it with
 > `sre_common.a2a_client.call_agent`.
 
+> **People get A2UI (v0.9), not HTML**: each SRE skill result is also an A2UI surface built in
+> `sre_agent/src/sre_agent/a2ui_surfaces.py` from the SRE catalog (the basic catalog plus
+> `SeverityBadge` and `Download`), sent as A2A data parts marked `application/json+a2ui` to callers
+> that send A2UI client capabilities. The chat renders them with `@a2ui/lit` from the prebuilt
+> bundle `agent/src/agent/static/sre-a2ui.js`. A new custom component needs a Pydantic model there
+> *and* a Lit element in `agent/web/src/sre-a2ui.js`; rebuild with
+> `cd agent/web && npm ci && npm run build` and commit the bundle (CI fails on a stale one).
+
 > A portable copy of the diagnostics engine also lives under `skills/sre_incident_solver/` as an
 > Antigravity Agent Skill (auto-discovered by the Antigravity CLI / desktop app). The running
 > services import the `sre_agent` package — **add or modify tools there**, not in the skill mirror. The

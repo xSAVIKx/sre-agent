@@ -349,56 +349,42 @@ the policy approves it, and the sub-agent's progress is streamed back while the 
 
 ---
 
-## Step 7: Rendering & the One-Click Download
+## Step 7: Rendering with A2UI
 
-A Markdown report is fine for a terminal, but the web chat renders it as rich UI. [
-`agent/src/agent/a2ui_translator.py`](agent/src/agent/a2ui_translator.py) detects a post-mortem and
-wraps it in A2UI components, including a `download_button`:
+A Markdown report is fine for a terminal and for the Orchestrator's model. People get a UI instead.
+The SRE agent also sends each result as an **[A2UI](https://a2ui.org/) v0.9 surface**: JSON that
+names components from a catalog, never HTML. [`sre_agent/src/sre_agent/a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py)
+builds one per answer type:
 
 ```python
-if "# 🚨 Incident Post-Mortem" in text or "Incident Post-Mortem" in text:
-    return {
-        "type": "container",
-        "components": [
-            {
-                "type": "alert",
-                "level": "success",
-                "title": title,
-                "text": "The SRE agent has auto-generated the incident post-mortem report.",
-            },
-            {"type": "section", "title": "Document Preview", "content": text},
-            {
-                "type": "download_button",
-                "text": "Download Post-Mortem Markdown",
-                "filename": "post_mortem.md",
-                "content": text,
-            },
-        ],
-    }
+components = [
+    {"id": "root", "component": "Card", "child": "body"},
+    {"id": "body", "component": "Column", "children": ["severity", "title", "sections", "download"]},
+    {"id": "severity", "component": "SeverityBadge", "level": "SEV1", "contribution": 99.3},
+    {"id": "title", "component": "Text", "text": "🚨 Incident post-mortem", "variant": "h3"},
+    {"id": "sections", "component": "Tabs", "tabs": [{"title": "Post-mortem", "child": "tab-0"}]},
+    {"id": "tab-0", "component": "Text", "text": post_mortem_markdown},
+    {
+        "id": "download",
+        "component": "Download",
+        "label": "Download post-mortem",
+        "filename": "post-mortem-1c65bf87.md",
+        "content": post_mortem_markdown,
+    },
+]
 ```
 
-The frontend ([`agent/src/agent/index.html`](agent/src/agent/index.html)) renders that component as
-a styled `.download-pm-btn` that builds the file client-side with the Blob API:
-
-```javascript
-case 'download_button':
-const btn = document.createElement('button');
-btn.className = 'download-pm-btn';
-btn.innerHTML = `<span aria-hidden="true">📥</span> ${comp.text || 'Download Post-Mortem'}`;
-btn.onclick = () => {
-    const blob = new Blob([comp.content], {type: 'text/markdown'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = comp.filename || 'post_mortem.md';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-};
-containerDiv.appendChild(btn);
-break;
-```
+* **Catalog.** The surfaces use the SRE catalog: A2UI's basic catalog plus two custom components,
+  `SeverityBadge` and `Download`.
+* **Negotiation and transport.** The agent card advertises the A2UI extension, and the Orchestrator
+  sends A2UI client capabilities for its chat. Each A2UI message travels as an A2A data part marked
+  `application/json+a2ui`.
+* **Rendering.** The browser renders the surfaces with `@a2ui/lit`
+  ([`agent/web/src/sre-a2ui.js`](agent/web/src/sre-a2ui.js), prebuilt into
+  `agent/src/agent/static/sre-a2ui.js`). Its `Download` component builds the file client-side with
+  the Blob API.
+* **Interaction.** Buttons send A2UI actions: "Diagnose" on an incident-list row comes back to the
+  Orchestrator as the next chat turn, which still goes through its policy.
 
 ---
 
