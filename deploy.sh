@@ -82,7 +82,8 @@ if [ "$SKIP_INFRA" = "false" ]; then
         monitoring.googleapis.com \
         artifactregistry.googleapis.com \
         firestore.googleapis.com \
-        secretmanager.googleapis.com
+        secretmanager.googleapis.com \
+        cloudasset.googleapis.com
 
     # Create GEMINI_API_KEY secret if it doesn't exist
     echo "Checking GEMINI_API_KEY secret in Secret Manager..."
@@ -211,7 +212,11 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
         --role="roles/logging.logWriter" >/dev/null
-    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer & roles/logging.logWriter to Inventory Agent SA${NC}"
+    # Read-only search of the project's databases (Firestore, Spanner, Cloud SQL).
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/cloudasset.viewer" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer, roles/logging.logWriter & roles/cloudasset.viewer to Inventory Agent SA${NC}"
 
     # Allow SRE Build SA to act as the SRE application service accounts
     echo "Allowing SRE Build SA to act as application and agent service accounts..."

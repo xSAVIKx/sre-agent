@@ -6,6 +6,10 @@ requires-python = ">=3.11"
 dependencies = [
     "google-antigravity>=0.1.20,<0.2",
     "google-cloud-firestore>=2.28.1",
+    # Discovery: Cloud Run services (and triggering the scanner job), plus
+    # databases via Cloud Asset Inventory.
+    "google-cloud-run>=0.16.2",
+    "google-cloud-asset>=4.5.0",
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx>=0.28.1",
