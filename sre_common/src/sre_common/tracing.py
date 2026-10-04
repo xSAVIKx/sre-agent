@@ -23,11 +23,24 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor, SpanExporter
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON, Sampler
 
 logger = logging.getLogger("sre_common.tracing")
 
 # Health checks would otherwise fill Cloud Trace with one-span traces.
 EXCLUDED_URLS = "health,favicon.ico"
+
+
+def _sampler() -> Sampler | None:
+    """Record every request, unless OTEL_TRACES_SAMPLER says otherwise.
+
+    The SDK default (parent-based) obeys the caller's sampled flag. On Cloud Run
+    that flag comes from the front end, which samples at a limited rate per
+    instance: the A2A POST that follows an agent-card GET within the same second
+    arrives "not sampled", so the default would drop exactly the diagnosis spans.
+    Returning None lets the SDK read OTEL_TRACES_SAMPLER (e.g. traceidratio) instead.
+    """
+    return None if os.getenv("OTEL_TRACES_SAMPLER") else ALWAYS_ON
 
 
 def tracing_enabled() -> bool:
@@ -60,12 +73,15 @@ def setup_tracing(app: FastAPI | None, service_name: str, exporter: SpanExporter
             logger.warning(f"Cloud Trace exporter unavailable, tracing disabled: {e}")
             return False
 
-    provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
+    provider = TracerProvider(resource=Resource.create({"service.name": service_name}), sampler=_sampler())
     provider.add_span_processor(BatchSpanProcessor(exporter))
     trace.set_tracer_provider(provider)
 
     HTTPXClientInstrumentor().instrument(tracer_provider=provider)
     if app is not None:
-        FastAPIInstrumentor.instrument_app(app, tracer_provider=provider, excluded_urls=EXCLUDED_URLS)
+        # exclude_spans: no span per ASGI message - a streamed answer would add one per SSE chunk.
+        FastAPIInstrumentor.instrument_app(
+            app, tracer_provider=provider, excluded_urls=EXCLUDED_URLS, exclude_spans=["receive", "send"]
+        )
     logger.info(f"Tracing enabled for {service_name}: exporting spans to Cloud Trace")
     return True

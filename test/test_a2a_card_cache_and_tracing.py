@@ -74,7 +74,7 @@ class TestAgentCardCache(unittest.IsolatedAsyncioTestCase):
 # Runs in a subprocess: the tracer provider and the httpx instrumentation are process-global.
 TRACE_PROPAGATION_SCRIPT = textwrap.dedent(
     """
-    import threading, time
+    import json, threading, time, urllib.request
     import httpx, uvicorn
     from fastapi import FastAPI, Request
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -95,14 +95,21 @@ TRACE_PROPAGATION_SCRIPT = textwrap.dedent(
 
     exporter = InMemorySpanExporter()
     assert setup_tracing(upstream, "upstream", exporter=exporter)
-    FastAPIInstrumentor.instrument_app(downstream, tracer_provider=trace.get_tracer_provider())
+    FastAPIInstrumentor.instrument_app(
+        downstream, tracer_provider=trace.get_tracer_provider(), exclude_spans=["receive", "send"]
+    )
+
+    def browser_get(url, headers=None):
+        # urllib is not instrumented: it plays the outside caller (browser / Cloud Run).
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {})) as resp:
+            return json.loads(resp.read())
 
     for app, port in ((upstream, 18901), (downstream, 18902)):
         server = uvicorn.Server(uvicorn.Config(app, port=port, log_level="error"))
         threading.Thread(target=server.run, daemon=True).start()
     time.sleep(1.5)
 
-    seen = httpx.get("http://127.0.0.1:18901/chat").json()["traceparent"]
+    seen = browser_get("http://127.0.0.1:18901/chat")["traceparent"]
     trace.get_tracer_provider().force_flush()
     spans = exporter.get_finished_spans()
     trace_ids = {format(s.context.trace_id, "032x") for s in spans}
@@ -110,12 +117,21 @@ TRACE_PROPAGATION_SCRIPT = textwrap.dedent(
     print("TRACEPARENT", seen)
     print("TRACE_IDS", len(trace_ids), sorted(trace_ids)[0])
     print("KINDS", ",".join(kinds))
+    print("ASGI_MESSAGE_SPANS", sum(1 for s in spans if s.name.endswith((" http send", " http receive"))))
+
+    # Cloud Run's front end often forwards "not sampled" (flags 00): still record.
+    exporter.clear()
+    unsampled = "00-" + "ab" * 16 + "-" + "cd" * 8 + "-00"
+    browser_get("http://127.0.0.1:18901/chat", headers={"traceparent": unsampled})
+    trace.get_tracer_provider().force_flush()
+    kept = {format(s.context.trace_id, "032x") for s in exporter.get_finished_spans()}
+    print("UNSAMPLED_KEPT", "ab" * 16 in kept, len(exporter.get_finished_spans()))
     """
 )
 
 
 class TestTracePropagation(unittest.TestCase):
-    def test_one_request_is_one_trace_across_services(self) -> None:
+    def _run(self) -> dict[str, str]:
         result = subprocess.run(
             [sys.executable, "-c", TRACE_PROPAGATION_SCRIPT],
             capture_output=True,
@@ -124,12 +140,21 @@ class TestTracePropagation(unittest.TestCase):
             env={"PYTHONPATH": str(REPO_ROOT / "sre_common" / "src"), "PATH": "/usr/bin:/bin"},
         )
         self.assertEqual(result.returncode, 0, result.stderr[-2000:])
-        lines = dict(line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
+        return dict(line.split(" ", 1) for line in result.stdout.splitlines() if " " in line)
 
+    def test_one_request_is_one_trace_across_services(self) -> None:
+        lines = self._run()
         count, trace_id = lines["TRACE_IDS"].split()
         self.assertEqual(count, "1", "server, client and downstream spans must share one trace")
         self.assertIn(trace_id, lines["TRACEPARENT"], "the outgoing call carries the trace context")
-        self.assertEqual(lines["KINDS"], "CLIENT,INTERNAL,SERVER")
+        self.assertEqual(lines["KINDS"], "CLIENT,SERVER")
+        self.assertEqual(lines["ASGI_MESSAGE_SPANS"], "0", "no span per ASGI message")
+
+    def test_requests_the_front_end_did_not_sample_are_still_recorded(self) -> None:
+        lines = self._run()
+        kept, count = lines["UNSAMPLED_KEPT"].split()
+        self.assertEqual(kept, "True", "spans must join the caller's trace even when flags=00")
+        self.assertGreater(int(count), 0)
 
 
 if __name__ == "__main__":
