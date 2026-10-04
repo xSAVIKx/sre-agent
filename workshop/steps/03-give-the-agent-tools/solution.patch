@@ -1,8 +1,8 @@
 --- a/skills/sre_incident_solver/sre_workflow.py
 +++ b/skills/sre_incident_solver/sre_workflow.py
-@@ -99,10 +99,7 @@
-         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
-         "if you need more context or need to build a post-mortem report."
+@@ -101,10 +101,7 @@
+         "Call each tool at most once per trace: the system appends the full cascade table and "
+         "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
      ),
 -    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
 -    #   on their type hints and docstrings. They are already imported at the top of this file:
@@ -14,9 +14,9 @@
  
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -97,10 +97,7 @@
-         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
-         "if you need more context or need to build a post-mortem report."
+@@ -99,10 +99,7 @@
+         "Call each tool at most once per trace: the system appends the full cascade table and "
+         "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
      ),
 -    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
 -    #   on their type hints and docstrings. They are already imported at the top of this file:
