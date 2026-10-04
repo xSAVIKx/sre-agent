@@ -265,6 +265,8 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
 
             async with Agent(config) as agent:
                 conv_id = agent.conversation_id or request.conversation_id
+                # One A2A context per chat conversation, so the SRE agent keeps its session.
+                sink.context_id = conv_id or ""
 
                 # Load history steps if available
                 if conv_id:

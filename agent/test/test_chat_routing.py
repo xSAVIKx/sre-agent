@@ -1,5 +1,6 @@
 """Tests for policy-gated chat routing and the diagnose_sre A2A stream."""
 
+import functools
 import json
 import os
 import unittest
@@ -40,54 +41,68 @@ class TestMockPolicyEvaluation(unittest.TestCase):
         self.assertEqual(config.evaluate_mock_policy([], "diagnose_sre"), "deny")
 
 
-class TestStreamFromSreAgent(unittest.IsolatedAsyncioTestCase):
-    """`_stream_from_sre_agent` forwards progress and returns the final report."""
+class TestDiagnoseSreOverA2A(unittest.IsolatedAsyncioTestCase):
+    """`diagnose_sre` talks to the SRE engine's real A2A server (in-process, fake pipeline)."""
 
-    async def test_forwards_thoughts_and_returns_done_response(self) -> None:
-        body = (
-            'data: {"type": "thought", "text": "Fetching traces"}\n\n'
-            'data: {"type": "chunk", "text": "partial"}\n\n'
-            f"data: {json.dumps({'type': 'done', 'response': POST_MORTEM})}\n\n"
-        )
-        transport = httpx.MockTransport(lambda request: httpx.Response(200, text=body))
-        real_client = httpx.AsyncClient
+    BASE_URL = "http://sre-agent.test"
 
-        sink = config.DiagnosisSink()
+    async def asyncSetUp(self) -> None:
+        from sre_agent.diagnosis import Progress, Report
+
+        from sre_agent import a2a_agent
+
+        self.calls: list[dict] = []
+        self.fail = False
+
+        async def fake_run_diagnosis(prompt, project_id=None, refresh=False, conversation_id=None):
+            self.calls.append({"project_id": project_id, "refresh": refresh, "conversation_id": conversation_id})
+            yield Progress("Fetching traces")
+            if self.fail:
+                raise RuntimeError("Trace API query failed: 503")
+            yield Report(POST_MORTEM)
+
+        patcher = mock.patch.object(a2a_agent, "run_diagnosis", fake_run_diagnosis)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        app = a2a_agent.build_a2a_app(self.BASE_URL)
+        lifespan = app.router.lifespan_context(app)
+        await lifespan.__aenter__()
+        self.addAsyncCleanup(lifespan.__aexit__, None, None, None)
+        http = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=self.BASE_URL, timeout=30)
+        self.addAsyncCleanup(http.aclose)
+
+        # Route the Orchestrator's A2A client to the in-process server.
+        call_agent = functools.partial(config.call_agent, http=http)
+        for patch in (
+            mock.patch.object(config, "call_agent", call_agent),
+            mock.patch.dict(os.environ, {"SRE_AGENT_URL": self.BASE_URL, "MOCK_GCP": "false"}),
+        ):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    async def _diagnose(self, sink: config.DiagnosisSink) -> str:
         token = config.diagnosis_sink.set(sink)
         try:
-            with mock.patch.object(config.httpx, "AsyncClient", lambda **kw: real_client(transport=transport, **kw)):
-                report = await config._stream_from_sre_agent("http://sre/v1/agents/sre/messages", {"prompt": "x"})
+            return await config.diagnose_sre("Diagnose it", project_id="demo", refresh=True)
         finally:
             config.diagnosis_sink.reset(token)
 
+    async def test_progress_streams_and_report_returns(self) -> None:
+        sink = config.DiagnosisSink(context_id="conversation-7")
+        report = await self._diagnose(sink)
+
         self.assertEqual(report, POST_MORTEM)
-        self.assertEqual(sink.progress, ["Fetching traces"])
+        self.assertEqual(sink.report, POST_MORTEM)
+        self.assertIn("Fetching traces", sink.progress)
+        self.assertNotIn(POST_MORTEM, sink.progress, "the report is the artifact, not a progress line")
+        self.assertEqual(self.calls, [{"project_id": "demo", "refresh": True, "conversation_id": "conversation-7"}])
 
-
-class TestStreamFailures(unittest.IsolatedAsyncioTestCase):
-    """A broken stream must surface as an error, and must not re-run the diagnosis."""
-
-    async def _stream(self, handler) -> str:
-        real_client = httpx.AsyncClient
-        transport = httpx.MockTransport(handler)
-        with mock.patch.object(config.httpx, "AsyncClient", lambda **kw: real_client(transport=transport, **kw)):
-            return await config._stream_from_sre_agent("http://sre/v1/agents/sre/messages", {"prompt": "x"})
-
-    async def test_stream_without_done_is_an_error(self) -> None:
-        body = 'data: {"type": "chunk", "text": "partial"}\n\n'
-        with self.assertRaisesRegex(RuntimeError, "without a final report"):
-            await self._stream(lambda request: httpx.Response(200, text=body))
-
-    async def test_error_event_is_not_retried(self) -> None:
-        calls = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            calls.append(request)
-            return httpx.Response(200, text='data: {"type": "error", "detail": "upstream 503"}\n\n')
-
-        with self.assertRaises(RuntimeError):
-            await self._stream(handler)
-        self.assertEqual(len(calls), 1)
+    async def test_failed_task_becomes_an_error_report(self) -> None:
+        self.fail = True
+        report = await self._diagnose(config.DiagnosisSink())
+        self.assertTrue(report.startswith("Error:"), report)
+        self.assertEqual(len(self.calls), 1, "a failed task is not retried")
 
 
 class TestChatRouting(unittest.TestCase):
@@ -147,12 +162,12 @@ class TestDiagnoseSreModeSelection(unittest.IsolatedAsyncioTestCase):
     """In mock mode diagnose_sre only runs in-process when no sub-agent URL is set."""
 
     async def test_sre_agent_url_forces_a2a_even_in_mock_mode(self) -> None:
-        stream = mock.AsyncMock(return_value="report")
+        call = mock.AsyncMock(return_value=mock.Mock(text="report"))
         env = {"MOCK_GCP": "true", "SRE_AGENT_URL": "http://sre-agent:8080"}
-        with mock.patch.dict(os.environ, env), mock.patch.object(config, "_stream_from_sre_agent", stream):
+        with mock.patch.dict(os.environ, env), mock.patch.object(config, "call_agent", call):
             self.assertEqual(await config.diagnose_sre("diagnose"), "report")
-        stream.assert_awaited_once()
-        self.assertEqual(stream.await_args.args[0], "http://sre-agent:8080/v1/agents/sre/messages")
+        call.assert_awaited_once()
+        self.assertEqual(call.await_args.args[0], "http://sre-agent:8080")
 
 
 if __name__ == "__main__":
