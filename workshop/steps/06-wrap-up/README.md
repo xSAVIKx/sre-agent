@@ -7,7 +7,7 @@ Orchestrator → rich chat UI**. Here's how it goes to production, and where to 
 
 ```bash
 ./bootstrap.sh   # pick/create a project, link billing, store GEMINI_API_KEY in .env
-./deploy.sh      # APIs, least-privilege service accounts, 4 Cloud Run services (~25 min)
+./deploy.sh      # APIs, least-privilege service accounts, 4 Cloud Run services (~6 min)
 ./cleanup.sh     # delete everything again
 ```
 

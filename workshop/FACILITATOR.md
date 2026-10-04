@@ -17,7 +17,8 @@ git switch --detach step-05 && uv run workshop/check.py all   # 1-5 must all be 
 ```
 
 If you want the production demo in step 6, run `./bootstrap.sh && ./deploy.sh` **the day before**.
-A first deploy builds four images sequentially and takes about 25 minutes. Keep the URLs that
+A first deploy into a fresh project takes about 6 minutes, and a redeploy about 3. All four
+services build and deploy in parallel on the prebuilt dependency image. Keep the URLs that
 `deploy.sh` prints. Run `./cleanup.sh` after the session.
 
 ## Timeline (90 min)
