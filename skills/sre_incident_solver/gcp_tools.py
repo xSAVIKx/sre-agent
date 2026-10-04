@@ -670,6 +670,36 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
         return json.dumps({"error": f"GCP Logging API Error: {e!s}"}, indent=2)
 
 
+# Tool results go straight into the model's context. An unfiltered Monitoring query
+# can return thousands of points (or descriptors) and overflow even a 1M-token
+# window, so real-mode results are capped; the model can always narrow its filter.
+MAX_TIME_SERIES = 20
+MAX_POINTS_PER_SERIES = 30
+MAX_METRIC_DESCRIPTORS = 50
+
+
+def _bound_time_series(time_series: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Caps the number of series and the points per series, keeping the newest points.
+
+    Cloud Monitoring returns points newest first. A trailing ``{"note": ...}`` entry
+    tells the model when series were dropped.
+    """
+    bounded = []
+    for ts in time_series[:MAX_TIME_SERIES]:
+        points = ts.get("points") or []
+        if len(points) > MAX_POINTS_PER_SERIES:
+            ts = {**ts, "points": points[:MAX_POINTS_PER_SERIES], "points_truncated": len(points)}
+        bounded.append(ts)
+    if len(time_series) > MAX_TIME_SERIES:
+        bounded.append(
+            {
+                "note": f"Showing {MAX_TIME_SERIES} of {len(time_series)} time series. "
+                "Narrow the filter (e.g. by resource.labels.service_name) to see the rest."
+            }
+        )
+    return bounded
+
+
 @register_tool
 @retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_metrics")
@@ -753,7 +783,7 @@ async def query_metrics(filter_expression: str, duration_minutes: int = 15, proj
             time_series_list.append(ts_dict)
 
         logger.info(f"[GCP Observability] Successfully queried {len(time_series_list)} timeseries from GCP Monitoring")
-        return json.dumps(time_series_list, indent=2)
+        return json.dumps(_bound_time_series(time_series_list))
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to query GCP Monitoring API: {e}")
         return json.dumps({"error": f"GCP Monitoring API Error: {e!s}"}, indent=2)
@@ -836,10 +866,25 @@ async def list_metric_descriptors(filter_expression: str | None = None, project_
                 desc_dict["value_type"] = (
                     desc.value_type.name if hasattr(desc.value_type, "name") else str(desc.value_type)
                 )
-            descriptors_list.append(desc_dict)
+            descriptors_list.append(
+                {
+                    "type": desc_dict.get("type"),
+                    "metric_kind": desc_dict.get("metric_kind"),
+                    "value_type": desc_dict.get("value_type"),
+                    "unit": desc_dict.get("unit"),
+                    "description": (desc_dict.get("description") or "")[:200],
+                }
+            )
+            if len(descriptors_list) > MAX_METRIC_DESCRIPTORS:
+                break
 
         logger.info(f"[GCP Observability] Successfully listed {len(descriptors_list)} metric descriptors")
-        return json.dumps(descriptors_list, indent=2)
+        if len(descriptors_list) > MAX_METRIC_DESCRIPTORS:
+            descriptors_list = descriptors_list[:MAX_METRIC_DESCRIPTORS]
+            descriptors_list.append(
+                {"note": f"Showing the first {MAX_METRIC_DESCRIPTORS} descriptors. Pass a narrower filter."}
+            )
+        return json.dumps(descriptors_list)
     except Exception as e:
         logger.error(f"[GCP Observability] Failed to list GCP Metric Descriptors: {e}")
         return json.dumps({"error": f"GCP Metric Descriptors Error: {e!s}"}, indent=2)
