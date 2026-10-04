@@ -14,100 +14,87 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("inventory_scanner")
 
 
-def run_gcp_discovery(project_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Runs real GCP asset discovery inside the target project using Cloud Asset API or gcloud CLI."""
-    logger.info(f"Initiating GCP discovery for project: {project_id}")
+DATABASE_ASSET_TYPES = {
+    "firestore.googleapis.com/Database": "FIRESTORE",
+    "spanner.googleapis.com/Instance": "SPANNER",
+    "sqladmin.googleapis.com/Instance": "CLOUDSQL",
+}
 
-    discovered_resources = {"services": [], "databases": []}
 
-    # Try using Google Cloud Asset API
-    try:
-        from google.cloud import asset_v1
+class DiscoveryError(RuntimeError):
+    """Raised when the project's services cannot be listed at all."""
 
-        client = asset_v1.AssetServiceClient()
-        parent = f"projects/{project_id}"
 
-        # Search for Cloud Run services and databases (Firestore/Datastore, Spanner, SQL)
-        asset_types = [
-            "run.googleapis.com/Service",
-            "firestore.googleapis.com/Database",
-            "spanner.googleapis.com/Instance",
-            "sqladmin.googleapis.com/Instance",
-        ]
+def discover_services(project_id: str) -> list[dict[str, Any]]:
+    """Lists the project's Cloud Run services in every region via the Cloud Run Admin API.
 
-        response = client.search_all_resources(
-            request={
-                "scope": parent,
-                "asset_types": asset_types,
+    Needs `run.services.list` (roles/run.developer or roles/run.viewer).
+    """
+    from google.cloud import run_v2
+
+    client = run_v2.ServicesClient()
+    services = []
+    for svc in client.list_services(parent=f"projects/{project_id}/locations/-"):
+        services.append(
+            {
+                "name": svc.name.rsplit("/", 1)[-1],
+                "url": svc.uri,
+                "region": svc.name.split("/")[3],
+                "vpc_connector": svc.template.vpc_access.connector,
             }
         )
+    return services
 
-        for resource in response:
-            asset_type = resource.asset_type
-            name = resource.name.split("/")[-1]
-            logger.info(f"Discovered asset: {name} (type: {asset_type})")
 
-            if "run.googleapis.com" in asset_type:
-                # Resolve service URL
-                url = resource.additional_attributes.get("status", {}).get("url", "")
-                discovered_resources["services"].append(
-                    {
-                        "name": name,
-                        "url": url,
-                        "vpc_connector": resource.additional_attributes.get("spec", {})
-                        .get("template", {})
-                        .get("metadata", {})
-                        .get("annotations", {})
-                        .get("run.googleapis.com/vpc-access-connector", ""),
-                    }
-                )
-            elif "firestore.googleapis.com" in asset_type:
-                discovered_resources["databases"].append({"name": name, "type": "FIRESTORE"})
-            elif "spanner.googleapis.com" in asset_type:
-                discovered_resources["databases"].append({"name": name, "type": "SPANNER"})
-            elif "sqladmin.googleapis.com" in asset_type:
-                discovered_resources["databases"].append({"name": name, "type": "CLOUDSQL"})
+def discover_databases(project_id: str) -> list[dict[str, Any]]:
+    """Finds Firestore, Spanner and Cloud SQL databases via Cloud Asset Inventory.
 
+    Needs the Cloud Asset API and `cloudasset.assets.searchAllResources`
+    (roles/cloudasset.viewer).
+    """
+    from google.cloud import asset_v1
+
+    client = asset_v1.AssetServiceClient()
+    response = client.search_all_resources(
+        request={"scope": f"projects/{project_id}", "asset_types": list(DATABASE_ASSET_TYPES)}
+    )
+    return [
+        {"name": res.display_name or res.name.rsplit("/", 1)[-1], "type": DATABASE_ASSET_TYPES[res.asset_type]}
+        for res in response
+        if res.asset_type in DATABASE_ASSET_TYPES
+    ]
+
+
+def run_gcp_discovery(project_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Discovers the target project's Cloud Run services and databases.
+
+    Services are required: if they cannot be listed, DiscoveryError is raised so
+    the scan is reported as FAILED instead of caching an empty or invented
+    topology. Databases are best-effort (Cloud Asset Inventory may be disabled).
+    """
+    logger.info(f"Initiating GCP discovery for project: {project_id}")
+
+    try:
+        services = discover_services(project_id)
     except Exception as e:
-        logger.warning(f"Failed to query Cloud Asset API: {e}. Falling back to gcloud CLI subprocesses.")
+        raise DiscoveryError(f"Could not list Cloud Run services in {project_id}: {e}") from e
+    for svc in services:
+        logger.info(f"Discovered service: {svc['name']} ({svc['region']})")
 
-        # Fallback to subprocess running gcloud command execution if installed
-        import subprocess
-
-        try:
-            # 1. Cloud Run services list
-            run_cmd = ["gcloud", "run", "services", "list", f"--project={project_id}", "--format=json"]
-            res = subprocess.run(run_cmd, capture_output=True, text=True, check=True)
-            services_data = json.loads(res.stdout)
-            for svc in services_data:
-                svc_metadata = svc.get("metadata", {})
-                svc_spec = svc.get("spec", {}).get("template", {}).get("metadata", {})
-                discovered_resources["services"].append(
-                    {
-                        "name": svc_metadata.get("name"),
-                        "url": svc.get("status", {}).get("url"),
-                        "vpc_connector": svc_spec.get("annotations", {}).get(
-                            "run.googleapis.com/vpc-access-connector", ""
-                        ),
-                    }
-                )
-        except Exception as sub_e:
-            logger.error(f"Failed to execute gcloud subprocess: {sub_e}")
-
-    # Fallback/default logic if no resources are found to ensure we have a bootable layout
-    if not discovered_resources["services"]:
-        logger.info("No active compute services resolved in target project. Using default discovery fallbacks.")
-        discovered_resources["services"].append(
-            {"name": "sre-chaos-monkey", "url": f"https://sre-chaos-monkey-{project_id}.a.run.app"}
-        )
+    databases: list[dict[str, Any]] = []
+    try:
+        databases = discover_databases(project_id)
+        for db in databases:
+            logger.info(f"Discovered database: {db['name']} ({db['type']})")
+    except Exception as e:
+        logger.warning(f"Cloud Asset Inventory search failed, continuing without databases: {e}")
 
     aggregated_metadata = {
         "region": os.environ.get("SCANNER_JOB_REGION", "us-central1"),
-        "resource_count": len(discovered_resources["services"]) + len(discovered_resources["databases"]),
+        "resource_count": len(services) + len(databases),
         "labels": {"scanner": "inventory-scanner-job"},
     }
-
-    return discovered_resources, aggregated_metadata
+    return {"services": services, "databases": databases}, aggregated_metadata
 
 
 def run_mock_discovery(project_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -148,10 +135,17 @@ def main() -> None:
     logger.info(f"Starting inventory discovery task for project: {project_id} (is_mock={is_mock_env})")
 
     # Run fingerprinting
+    status = "ACTIVE"
     if is_mock_env:
         discovered_resources, aggregated_metadata = run_mock_discovery(project_id)
     else:
-        discovered_resources, aggregated_metadata = run_gcp_discovery(project_id)
+        try:
+            discovered_resources, aggregated_metadata = run_gcp_discovery(project_id)
+        except DiscoveryError as e:
+            logger.error(str(e))
+            status = "FAILED"
+            discovered_resources = {"services": [], "databases": []}
+            aggregated_metadata = {"error": str(e)}
 
     # Post results back to inventory agent callback URL if configured
     if callback_url:
@@ -160,7 +154,7 @@ def main() -> None:
             "project_id": project_id,
             "discovered_resources": discovered_resources,
             "aggregated_metadata": aggregated_metadata,
-            "status": "ACTIVE",
+            "status": status,
         }
 
         try:
@@ -185,6 +179,9 @@ def main() -> None:
                 indent=2,
             )
         )
+
+    if status == "FAILED":
+        sys.exit(1)  # already reported; still fail the task so the job execution shows the error
 
 
 if __name__ == "__main__":
