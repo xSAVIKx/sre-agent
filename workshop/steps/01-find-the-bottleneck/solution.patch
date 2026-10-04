@@ -1,6 +1,6 @@
 --- a/skills/sre_incident_solver/gcp_tools.py
 +++ b/skills/sre_incident_solver/gcp_tools.py
-@@ -999,14 +999,16 @@
+@@ -1003,14 +1003,16 @@
          inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
          inclusive_durations[s["spanId"]] = inc_dur
  
@@ -27,7 +27,7 @@
  
 --- a/sre_agent/src/sre_agent/gcp_tools.py
 +++ b/sre_agent/src/sre_agent/gcp_tools.py
-@@ -997,14 +997,16 @@
+@@ -1001,14 +1001,16 @@
          inc_dur = _calculate_duration_ms(s["startTime"], s["endTime"])
          inclusive_durations[s["spanId"]] = inc_dur
  
