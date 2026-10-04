@@ -278,7 +278,9 @@ def _service_name(root_span: dict[str, Any] | None) -> str:
     """The Cloud Run service that served a trace's root request ("" if unknown).
 
     Cloud Run labels the root span with the serving revision (``cloud.resource_id``)
-    and the host it was called on; either one names the service.
+    and the host it was called on; either one names the service. When Cloud Run did
+    not sample a request, the root is the service's own OpenTelemetry server span: its
+    ``/http/host`` is the container's internal address, ``http.server_name`` the public host.
     """
     if not root_span:
         return ""
@@ -286,9 +288,9 @@ def _service_name(root_span: dict[str, Any] | None) -> str:
     resource = labels.get("cloud.resource_id", "")
     if "/revisions/" in resource:
         return _REVISION_SUFFIX.sub("", resource.rsplit("/revisions/", 1)[1])
-    host = labels.get("/http/host") or labels.get("http.server_name") or ""
-    if host.endswith(".run.app"):
-        return _HOST_SUFFIX.sub("", host.split(".", 1)[0])
+    for host in (labels.get("/http/host", ""), labels.get("http.server_name", "")):
+        if host.endswith(".run.app"):
+            return _HOST_SUFFIX.sub("", host.split(".", 1)[0])
     return ""
 
 

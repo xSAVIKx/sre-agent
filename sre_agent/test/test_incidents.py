@@ -70,6 +70,12 @@ class TestServiceName(unittest.TestCase):
         )
         self.assertEqual(f({"labels": {"/http/host": "inventory-agent-oeglp6ptnq-uc.a.run.app"}}), "inventory-agent")
         self.assertEqual(f({"labels": {}}), "")
+        # Cloud Run did not sample the request: the root is the service's own server span.
+        own_span = {
+            "/http/host": "169.254.169.1:8080",
+            "http.server_name": "sre-agent-285931116611.us-central1.run.app",
+        }
+        self.assertEqual(f({"labels": own_span}), "sre-agent")
 
 
 class TestPostMortem(unittest.TestCase):
