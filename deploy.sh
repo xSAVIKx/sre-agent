@@ -168,6 +168,10 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/cloudtrace.user" >/dev/null
+    # Write access to Cloud Trace for the agents' *own* spans (sre_common.tracing).
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${AGENT_SA_EMAIL}" \
+        --role="roles/cloudtrace.agent" >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/logging.viewer" >/dev/null
@@ -180,7 +184,7 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
         --role="roles/secretmanager.secretAccessor" >/dev/null
-    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/logging.viewer, roles/monitoring.viewer, roles/datastore.user & secretAccessor to SRE Agent${NC}"
+    echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/cloudtrace.agent, roles/logging.viewer, roles/monitoring.viewer, roles/datastore.user & secretAccessor to SRE Agent${NC}"
 
     # SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
     echo "Assigning roles to SRE Build service account..."
@@ -216,7 +220,10 @@ if [ "$SKIP_INFRA" = "false" ]; then
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
         --role="roles/cloudasset.viewer" >/dev/null
-    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer, roles/logging.logWriter & roles/cloudasset.viewer to Inventory Agent SA${NC}"
+    gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
+        --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
+        --role="roles/cloudtrace.agent" >/dev/null
+    echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer, roles/logging.logWriter, roles/cloudasset.viewer & roles/cloudtrace.agent to Inventory Agent SA${NC}"
 
     # Allow SRE Build SA to act as the SRE application service accounts
     echo "Allowing SRE Build SA to act as application and agent service accounts..."

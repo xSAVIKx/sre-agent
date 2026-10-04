@@ -38,7 +38,13 @@ The web chat parses diagnostic reports server-side; when it detects a post-morte
 
 ## 🏗️ Architecture
 
-Four FastAPI services collaborate over HTTP (Agent-to-Agent / A2A) with results streamed back as Server-Sent Events (SSE). The user-facing Orchestrator is locked to a **deny-by-default** policy — its only capability is to delegate to the read-only SRE diagnostics agent.
+Four services on Cloud Run. The agents talk to each other over the **[Agent2Agent (A2A) protocol](https://a2a-protocol.org)** (v1.0): each publishes an agent card at `/.well-known/agent-card.json`, and calls are A2A tasks whose progress streams as status updates and whose result is the task artifact. The user-facing Orchestrator is locked to a **deny-by-default** policy — its only capability is to delegate to the read-only SRE diagnostics agent.
+
+| Agent | Built with | Served over A2A by | Skill |
+| :--- | :--- | :--- | :--- |
+| SRE diagnostics | ADK (custom agent + workflow) | ADK `to_a2a()` | `diagnose_incident` → Markdown report |
+| Inventory | plain Python | `a2a-sdk` `AgentExecutor` | `get_topology` → JSON data artifact |
+| Orchestrator | Antigravity SDK | — (A2A **client**, via its `diagnose_sre` tool) | — |
 
 ```mermaid
 flowchart LR
@@ -48,8 +54,8 @@ flowchart LR
         ORCH["Antigravity runtime<br/>policy = deny('*'), allow('diagnose_sre')"]
     end
 
-    ORCH -->|"diagnose_sre — A2A/SSE"| SRE["🔬 SRE diagnostics<br/>service: sre-sub-agent<br/>ADK: TraceAnalyzer ➜ LogCorrelator"]
-    SRE -->|"topology"| INV["📚 Inventory agent<br/>service: inventory-agent"]
+    ORCH -->|"diagnose_sre — A2A"| SRE["🔬 SRE diagnostics<br/>service: sre-sub-agent<br/>ADK: TraceAnalyzer ➜ LogCorrelator"]
+    SRE -->|"get_topology — A2A"| INV["📚 Inventory agent<br/>service: inventory-agent"]
     INV --> FS[("Firestore")]
     SRE -->|"read-only · or MOCK_GCP"| OBS[("☁️ Trace · Logging · Monitoring")]
     APP["🐒 Target app<br/>service: sre-chaos-monkey"] -->|"write-only telemetry"| OBS
@@ -62,7 +68,7 @@ flowchart LR
 | SRE diagnostics | [`sre_agent/`](sre_agent) | The engine: observability tools + the ADK multi-agent workflow. |
 | Inventory | [`inventory_agent/`](inventory_agent) | Discovers & caches the project topology (Cloud Run services + databases). |
 | Target app | [`app/`](app) | OpenTelemetry-instrumented "chaos monkey" that generates synthetic incidents. |
-| Shared lib | [`sre_common/`](sre_common) | `otel_trace`, `retry_async`, `setup_logging`, trace-context middleware. |
+| Shared lib | [`sre_common/`](sre_common) | `otel_trace`, `retry_async`, `setup_logging`, trace-context middleware, the A2A client. |
 
 ---
 
@@ -101,18 +107,20 @@ flowchart LR
 │   ├── src/sre_agent/
 │   │   ├── gcp_tools.py     # Trace/log/metric tools + cascade & post-mortem
 │   │   ├── sre_workflow.py  # ADK multi-agent orchestration (two tiers)
-│   │   ├── routes.py        # A2A SSE endpoint /v1/agents/sre/messages
+│   │   ├── a2a_agent.py     # The engine as an ADK agent, served over A2A (to_a2a)
+│   │   ├── diagnosis.py     # Pipeline: topology → traces → workflow → report
+│   │   ├── routes.py        # REST: /health, /trace
 │   │   ├── registry.py      # @register_tool decorator
 │   │   ├── itinerary.py · config.py · firestore_strategy.py · main.py
 │   ├── test/
 │   └── Dockerfile · pyproject.toml
 │
 ├── inventory_agent/        # 📚 Infrastructure topology discovery
-│   ├── src/inventory_agent/{main,routes,discovery,config,firestore_strategy}.py
+│   ├── src/inventory_agent/{main,a2a_server,routes,discovery,config,firestore_strategy}.py
 │   └── Dockerfile · pyproject.toml
 │
 ├── sre_common/             # 🧰 Shared library
-│   └── src/sre_common/{otel,retry,logging,middleware}.py
+│   └── src/sre_common/{otel,retry,logging,middleware,a2a_client}.py
 │
 └── skills/                 # 🧩 Portable Antigravity skill (mirror of the engine)
     └── sre_incident_solver/{SKILL.md, sre_workflow.py, gcp_tools.py, registry.py}
@@ -213,8 +221,8 @@ This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Ar
 | Service account | Used by | Roles |
 | :--- | :--- | :--- |
 | `sre-chaos-monkey-sa` | target app (`sre-chaos-monkey`) | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)* |
-| `sre-agent-sa` | SRE diagnostics (`sre-sub-agent`) | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)* |
+| `sre-agent-sa` | Orchestrator + SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(write only its own spans)* |
+| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)*, `cloudtrace.agent` *(its own spans)* |
 | `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter` |
 
 The split is the point: the app that *generates* chaos can only **write** telemetry; the agent that *investigates* it can only **read**.

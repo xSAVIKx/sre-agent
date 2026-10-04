@@ -301,6 +301,7 @@ def _generate_mock_trace(trace_id: str, trigger_error: bool) -> None:
         0,
         {
             "traceId": trace_id,
+            "service": "sre-chaos-monkey",
             "name": "/api/gateway",
             "startTime": "2026-06-11T16:00:00.000Z",
             "durationMs": gateway_duration,

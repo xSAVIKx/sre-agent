@@ -13,15 +13,22 @@ The codebase is a **`uv` workspace** organized into five packages:
    the synthetic `Gateway → Backend → Database` incidents that the agent later diagnoses.
 2. **SRE Diagnostics Engine (`sre_agent/`)**: The runnable core. Observability tools live in
    `sre_agent/src/sre_agent/gcp_tools.py`, and the ADK multi-agent graph (Trace Analyzer +
-   Log Correlator) lives in `sre_agent/src/sre_agent/sre_workflow.py`.
+   Log Correlator) lives in `sre_agent/src/sre_agent/sre_workflow.py`. It is served over A2A by
+   ADK's `to_a2a()` (`a2a_agent.py`).
 3. **Orchestrator Service (`agent/`)**: The user-facing FastAPI wrapper and web chat UI. The
    `google-antigravity` SDK handles GCP access and safety gating (deny-by-default) via
    `agent/src/agent/config.py` and `agent/src/agent/main.py`. `google-adk` powers the multi-agent
    graph inside the SRE engine.
 4. **Inventory Agent (`inventory_agent/`)**: Discovers and caches the project topology (Cloud Run
-   services + databases) used to enrich diagnostics.
-5. **Shared Library (`sre_common/`)**: Common `otel_trace`, `retry_async`, `setup_logging`, and
-   trace-context middleware imported across the services.
+   services + databases) used to enrich diagnostics. Served over A2A with a plain `a2a-sdk`
+   `AgentExecutor` (`a2a_server.py`).
+5. **Shared Library (`sre_common/`)**: Common `otel_trace`, `retry_async`, `setup_logging`,
+   trace-context middleware, and `a2a_client.call_agent` imported across the services.
+
+> **Agent-to-agent calls use the A2A protocol (v1.0, `a2a-sdk`)**: never add ad-hoc HTTP/SSE
+> endpoints between agents. Serve an agent with `to_a2a()` (ADK agents) or an `a2a-sdk`
+> `AgentExecutor`, publish an agent card with explicit skills, and call it with
+> `sre_common.a2a_client.call_agent`.
 
 > A portable copy of the diagnostics engine also lives under `skills/sre_incident_solver/` as an
 > Antigravity Agent Skill (auto-discovered by the Antigravity CLI / desktop app). The running

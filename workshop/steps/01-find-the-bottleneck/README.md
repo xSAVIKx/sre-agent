@@ -29,7 +29,8 @@ the root span, which is exactly the mistake a tired human makes at 3 AM.
 git grep -n "TODO(step-1)"
 ```
 
-In `sre_agent/src/sre_agent/gcp_tools.py`, `analyze_trace_cascade` already builds:
+In `sre_agent/src/sre_agent/gcp_tools.py`, `_cascade(spans)` (the calculation behind the
+`analyze_trace_cascade` tool and the post-mortem) already builds:
 
 * `span_map`: span ID → span
 * `children_map`: span ID → list of child span IDs

@@ -16,10 +16,11 @@ The interesting part is the IAM split:
 | Service account       | Can                                   | Cannot                  |
 |:----------------------|:--------------------------------------|:------------------------|
 | `sre-chaos-monkey-sa` | **write** traces and logs             | read any telemetry      |
-| `sre-agent-sa`        | **read** traces, logs, metrics        | write or change anything |
+| `sre-agent-sa`        | **read** traces, logs, metrics (+ write its own spans) | change telemetry or infrastructure |
 
 The app that *creates* incidents can't read telemetry, and the agent that *investigates* them
-can't change anything. Least privilege at the IAM layer, plus the policy layer from step 4.
+can't change anything; it only adds its own trace spans, so it can diagnose itself too. Least
+privilege at the IAM layer, plus the policy layer from step 4.
 
 > ⚠️ The demo deploys the services with `--allow-unauthenticated` so the chat is easy to reach.
 > Tear it down after the session (`./cleanup.sh`) or put it behind IAP before sharing the URL.

@@ -56,6 +56,8 @@ PACKAGES: dict[str, tuple[str, ...]] = {
         "sre_incident_solver.config",
         "sre_incident_solver.firestore_strategy",
         "sre_incident_solver.gcp_tools",
+        "sre_incident_solver.incidents",
+        "sre_incident_solver.inventory_client",
         "sre_incident_solver.itinerary",
         "sre_incident_solver.registry",
         "sre_incident_solver.sre_workflow",

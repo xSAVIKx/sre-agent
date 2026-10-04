@@ -7,16 +7,13 @@ to the SRE Sub-Agent, registers the A2A tool, and establishes safety policies.
 
 import asyncio
 import contextvars
-import json
 import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
-from sre_common import retry_async
+from sre_common.a2a_client import call_agent
 
 # Fail-safe OpenTelemetry imports for tracer initialization. These names are a
 # capability probe for HAS_OTEL, not call sites - hence the noqa.
@@ -358,6 +355,8 @@ class DiagnosisSink:
 
     on_progress: Callable[[str], None] = lambda _text: None
     report: str = ""
+    # The A2A contextId for this chat, so the SRE agent keeps one session per conversation.
+    context_id: str = ""
     progress: list[str] = field(default_factory=list)
 
     def emit(self, text: str) -> None:
@@ -372,52 +371,6 @@ def _emit_progress(text: str) -> None:
     sink = diagnosis_sink.get()
     if sink is not None:
         sink.emit(text)
-
-
-@retry_async(max_retries=3, initial_delay=2.0)
-async def _open_sre_stream(client: httpx.AsyncClient, url: str, payload: dict[str, Any]) -> httpx.Response:
-    """Opens the SSE response. Only this step is retried: once events flow, a retry
-    would re-run the whole (expensive, non-idempotent) diagnosis."""
-    response = await client.send(client.build_request("POST", url, json=payload), stream=True)
-    try:
-        response.raise_for_status()
-    except httpx.HTTPStatusError:
-        await response.aclose()
-        raise
-    return response
-
-
-async def _stream_from_sre_agent(url: str, payload: dict[str, Any]) -> str:
-    """Calls the SRE sub-agent's A2A SSE endpoint and returns its final report.
-
-    `thought` events are forwarded to the active `DiagnosisSink` as they arrive,
-    so the chat UI shows live progress while the sub-agent works.
-
-    Raises:
-        RuntimeError: if the sub-agent reports an error or the stream ends without
-            a final `done` event.
-    """
-    timeout = httpx.Timeout(10.0, read=300.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await _open_sre_stream(client, url, payload)
-        try:
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    event = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-                kind = event.get("type")
-                if kind == "thought":
-                    _emit_progress(event.get("text", ""))
-                elif kind == "done":
-                    return event.get("response", "")
-                elif kind == "error":
-                    raise RuntimeError(f"SRE sub-agent error: {event.get('detail', '')}")
-        finally:
-            await response.aclose()
-    raise RuntimeError("SRE sub-agent stream ended without a final report")
 
 
 @register_tool
@@ -452,15 +405,24 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
             logger.error(f"Failed to run in-process mock diagnostics: {mock_err}")
             report = f"Error: in-process SRE diagnostics failed: {mock_err!s}"
     else:
-        url = f"{sre_agent_url or 'http://sre-agent:8080'}/v1/agents/sre/messages"
-        payload = {"prompt": prompt, "project_id": project_id, "refresh": refresh}
-        logger.info(f"Orchestrating A2A call to SRE Agent: {url}")
-        _emit_progress("Contacting the SRE diagnostics sub-agent...")
+        # The SRE engine is an A2A agent: its card at /.well-known/agent-card.json says how
+        # to reach it. Progress arrives as task status updates, the report as the artifact.
+        base_url = sre_agent_url or "http://sre-agent:8080"
+        sink = diagnosis_sink.get()
+        logger.info(f"Delegating to the SRE agent over A2A: {base_url}")
+        _emit_progress("Contacting the SRE diagnostics sub-agent over A2A...")
         try:
-            report = await _stream_from_sre_agent(url, payload)
+            result = await call_agent(
+                base_url,
+                prompt,
+                {"project_id": project_id or os.environ.get("GCP_PROJECT", ""), "refresh": refresh},
+                context_id=sink.context_id if sink else "",
+                on_progress=_emit_progress,
+            )
+            report = result.text
         except Exception as e:
             logger.error(f"Failed to communicate with SRE sub-agent: {e}")
-            report = f"Error: Failed to contact SRE Sub-Agent after retries: {e!s}"
+            report = f"Error: Failed to contact SRE Sub-Agent: {e!s}"
 
     sink = diagnosis_sink.get()
     if sink is not None:
@@ -505,6 +467,8 @@ def load_firestore_agent_config(
     system_instructions = SYSTEM_INSTRUCTIONS
 
     if HAS_ANTIGRAVITY:
+        from google.antigravity.types import SessionContinuationMode
+
         from agent.firestore_strategy import FirestoreAgentConfig
 
         return FirestoreAgentConfig(
@@ -513,6 +477,9 @@ def load_firestore_agent_config(
             policies=safety_policies,
             hooks=[SreToolErrorHook()],
             conversation_id=conversation_id,
+            # The caller picks the ID of a new conversation (so the chat can be registered
+            # before the first turn runs); the same ID resumes it on every later turn.
+            session_continuation_mode=SessionContinuationMode.CREATE_OR_RESUME,
         )
     else:
         config = LocalAgentConfig(

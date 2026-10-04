@@ -35,7 +35,7 @@ flowchart LR
     end
     APP -->|" traces + logs "| SRE
     INV -->|" topology "| SRE
-    SRE -->|" diagnosis (A2A/SSE) "| AG
+    SRE -->|" diagnosis (A2A) "| AG
     COM -.->|shared by| APP & SRE & AG & INV
     AG -->|" chat + 📥 post-mortem "| User(["👤 You"])
 ```
@@ -309,7 +309,7 @@ safety_policies = [
 ]
 ```
 
-The single allowed tool reaches the SRE sub-agent over A2A HTTP/SSE — or, in the standalone
+The single allowed tool reaches the SRE sub-agent over the **A2A protocol** — or, in the standalone
 simulation where no sub-agent service is running, runs the workflow in-process:
 
 ```python
@@ -324,8 +324,18 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
         traces_json = await query_traces(project_id=project_id, limit=10)
         return await run_sre_diagnostics(traces_json=traces_json, project_id=project_id)
 
-    # Streams the sub-agent's SSE events, forwarding its progress to the chat UI.
-    return await _stream_from_sre_agent(f"{sre_agent_url}/v1/agents/sre/messages", {...})
+    # An A2A task: progress arrives as status updates (forwarded to the chat UI),
+    # the report as the task artifact.
+    result = await call_agent(sre_agent_url, prompt, {"project_id": project_id, "refresh": refresh})
+    return result.text
+```
+
+On the other side, the SRE engine is an ADK agent served with one call to ADK's `to_a2a()`, which
+also publishes its agent card at `/.well-known/agent-card.json` (see
+[`sre_agent/a2a_agent.py`](sre_agent/src/sre_agent/a2a_agent.py)):
+
+```python
+app = to_a2a(sre_diagnostics_agent, agent_card=build_agent_card(public_url))
 ```
 
 Every message typed into the web chat goes through this agent: there is no side door that sends
@@ -497,8 +507,8 @@ flowchart TB
 | Service account       | Used by         | Roles                                                                                    |
 |:----------------------|:----------------|:-----------------------------------------------------------------------------------------|
 | `sre-chaos-monkey-sa` | target app      | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)*                         |
-| `sre-agent-sa`        | SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read-only)* |
-| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`              |
+| `sre-agent-sa`        | SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(own spans)* |
+| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`, `cloudtrace.agent` |
 | `sre-build-sa`        | Cloud Build     | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter`             |
 
 ---

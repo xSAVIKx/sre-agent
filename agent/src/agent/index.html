@@ -1367,6 +1367,16 @@
                                 } else if (event.type === "done") {
                                     finalMarkdown = event.response;
                                     finalA2UI = event.response_a2ui;
+                                    // A new conversation only gets its ID once its first turn ran,
+                                    // so "start" may not carry it. Adopt it here so follow-ups
+                                    // continue this conversation (and its memory).
+                                    if (event.conversation_id && event.conversation_id !== activeConversationId) {
+                                        activeConversationId = event.conversation_id;
+                                        loadSessions();
+                                        const url = new URL(window.location);
+                                        url.searchParams.set('sessionId', event.conversation_id);
+                                        window.history.pushState({}, '', url);
+                                    }
                                 } else if (event.type === "error") {
                                     throw new Error(event.detail);
                                 }

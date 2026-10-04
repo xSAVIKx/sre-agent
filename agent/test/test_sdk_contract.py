@@ -94,6 +94,18 @@ class TestAntigravityContract(unittest.TestCase):
         finally:
             importlib.reload(agent.config)
 
+    def test_new_conversations_take_the_callers_id(self) -> None:
+        """The chat route names a new conversation itself (CREATE_OR_RESUME), so it can
+        register the session before the first turn runs."""
+        from google.antigravity.types import SessionContinuationMode
+
+        self.assertEqual(SessionContinuationMode.CREATE_OR_RESUME.value, "create_or_resume")
+        with self._agent_config_as_deployed() as config_module:
+            chosen = "c" * 32  # the SDK requires at least 32 characters
+            config = config_module.load_firestore_agent_config(conversation_id=chosen)
+            self.assertEqual(config.conversation_id, chosen)
+            self.assertEqual(config.session_continuation_mode, SessionContinuationMode.CREATE_OR_RESUME)
+
     def test_orchestrator_policy_survives_the_trip_into_the_harness(self) -> None:
         """The deny-by-default posture must reach the harness, not just the config.
 
