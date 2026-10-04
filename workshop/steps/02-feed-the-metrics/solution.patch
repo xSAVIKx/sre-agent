@@ -1,6 +1,6 @@
 --- a/app/main.py
 +++ b/app/main.py
-@@ -187,13 +187,20 @@
+@@ -191,13 +191,20 @@
          Two time series: container CPU utilization of `sre-chaos-monkey` (a 0-1
          fraction) and the connection count of the `db-primary` database.
      """
