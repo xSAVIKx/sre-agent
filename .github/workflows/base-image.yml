@@ -11,7 +11,7 @@ name: Base image
 
 on:
   push:
-    branches: [master, perf/fast-deploy]
+    branches: [master]
     paths:
       - uv.lock
       - docker/base.Dockerfile
