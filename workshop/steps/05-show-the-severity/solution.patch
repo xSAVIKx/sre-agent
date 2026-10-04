@@ -11,7 +11,7 @@
  
  
  def _messages(components: list[dict[str, Any]], data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-@@ -150,10 +148,10 @@
+@@ -155,10 +153,10 @@
      A component is a JSON object: its ``id``, the catalog ``component`` it instantiates,
      and that component's properties - here `SeverityBadge.level` and `.contribution`.
      """
