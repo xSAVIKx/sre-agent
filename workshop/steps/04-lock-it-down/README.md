@@ -21,6 +21,12 @@ from google.antigravity.hooks.policy import allow, ask_user, deny
 Precedence is *specific beats wildcard* and *deny beats ask beats allow*, so `deny("*")` +
 `allow("diagnose_sre")` means "nothing, except this one tool".
 
+The Orchestrator has one tool per **skill** on the SRE agent's A2A card
+(`/.well-known/agent-card.json`): `list_incidents` (what is failing - fast), `diagnose_sre`
+(root cause, calls the `diagnose_incident` skill) and `write_post_mortem`. The model picks the
+cheapest tool for the question; each one needs its own `allow`. A tool you forget stays denied:
+the policy fails closed.
+
 Right now the policy is `[deny("*")]`. It's safe, but useless: the Orchestrator can't even
 delegate. You saw this in step 0:
 
@@ -34,7 +40,7 @@ The `diagnose_sre` tool call was blocked by the safety policy (decision: deny).
 git grep -n "TODO(step-4)"
 ```
 
-Complete `build_safety_policies()`, keeping `deny("*")`.
+Complete `build_safety_policies()`, keeping `deny("*")` and allowing the three SRE tools.
 
 ## Run it
 
@@ -45,7 +51,7 @@ uv run simulate_incident.py          # the real path, through the Orchestrator -
 
 You now get the full **AGENT DIAGNOSIS REPORT** through the Orchestrator. The check also runs a
 contract test against the *real* Antigravity SDK, proving your policy reaches its harness as
-`{"*": DENY, "diagnose_sre": ALLOW}`.
+`{"*": DENY, "list_incidents": ALLOW, "diagnose_sre": ALLOW, "write_post_mortem": ALLOW}`.
 
 ## Discuss
 
@@ -53,7 +59,9 @@ contract test against the *real* Antigravity SDK, proving your policy reaches it
   tools exist whether you register them or not. A policy is enforced by the runtime; an
   instruction in the system prompt is only a request.
 * There is no back door: `/chat` sends **every** message through this agent, so diagnostics only
-  ever happen through the one allowed tool.
+  ever happen through the allowed tools.
+* Why one tool per skill instead of a single generic `call_sre_agent(skill=...)`? Each tool is a
+  separate policy decision: you could `ask_user` before a post-mortem but allow listing freely.
 
 ## Stretch: human in the loop
 

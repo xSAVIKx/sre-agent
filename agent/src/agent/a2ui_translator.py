@@ -165,3 +165,21 @@ def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
 
     # 5. Standard Text Chat Fallback
     return {"type": "container", "components": [{"type": "text", "content": text}]}
+
+
+def compose_reply_a2ui(reply: str, report: str | None = None) -> dict[str, Any]:
+    """The A2UI payload of one Orchestrator turn: its short reply, then the tool's result as a card.
+
+    The Orchestrator answers in a few sentences and leaves the SRE agent's full result
+    (incident table, diagnosis, post-mortem) to the UI, rendered by
+    `translate_markdown_to_a2ui`. Without a tool result, the reply is all there is.
+
+    Args:
+        reply: The Orchestrator's own text.
+        report: The SRE skill's Markdown result, if a tool ran this turn.
+    """
+    if not report or report.strip() == reply.strip():
+        return translate_markdown_to_a2ui(reply)
+    card = translate_markdown_to_a2ui(report)
+    summary = [{"type": "text", "content": reply}] if reply.strip() else []
+    return {"type": "container", "components": [*summary, *card["components"]]}

@@ -47,7 +47,7 @@ Read the report and spot what's wrong:
 | Target app | `app/main.py` | Generates the incident: traces, logs (and soon metrics). |
 | Tools | `sre_agent/src/sre_agent/gcp_tools.py` | Plain async Python functions the agents call. Type hints + docstrings become the LLM tool schema. Each has an `if IS_MOCK:` branch that reads local files. |
 | SRE engine | `sre_agent/src/sre_agent/sre_workflow.py` | ADK multi-agent graph: `trace_analyzer → fetch_telemetry → log_correlator`, plus a deterministic tier for when there's no API key. |
-| Orchestrator | `agent/src/agent/config.py` | The user-facing Antigravity agent. Its only power is the `diagnose_sre` tool, granted by policy. |
+| Orchestrator | `agent/src/agent/config.py` | The user-facing Antigravity agent. Its only powers are three tools, one per SRE agent skill (`list_incidents`, `diagnose_sre`, `write_post_mortem`), each granted by policy. |
 | Chat UI | `agent/src/agent/routes.py`, `a2ui_translator.py`, `index.html` | Streams the agent over SSE and renders the report as A2UI components. |
 
 ✅ **Done when** `uv run workshop/check.py 0` is all `ok` and you've seen both reports.

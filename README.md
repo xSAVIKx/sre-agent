@@ -42,29 +42,29 @@ Four services on Cloud Run. The agents talk to each other over the **[Agent2Agen
 
 | Agent | Built with | Served over A2A by | Skill |
 | :--- | :--- | :--- | :--- |
-| SRE diagnostics | ADK (custom agent + workflow) | ADK `to_a2a()` | `diagnose_incident` → Markdown report |
+| SRE diagnostics | ADK (custom agent + workflow) | ADK `to_a2a()` | `list_incidents` → table + JSON data, `diagnose_incident` → Markdown report, `write_post_mortem` → post-mortem (+ AI notes with a key) |
 | Inventory | plain Python | `a2a-sdk` `AgentExecutor` | `get_topology` → JSON data artifact |
-| Orchestrator | Antigravity SDK | — (A2A **client**, via its `diagnose_sre` tool) | — |
+| Orchestrator | Antigravity SDK | — (A2A **client**, one tool per SRE skill) | — |
 
 ```mermaid
 flowchart LR
     User(["👤 On-call engineer"]) -->|"/chat (SSE)"| ORCH
 
     subgraph Safe["🛡️ Orchestrator · service: sre-agent"]
-        ORCH["Antigravity runtime<br/>policy = deny('*'), allow('diagnose_sre')"]
+        ORCH["Antigravity runtime<br/>policy = deny('*') + allow one tool per SRE skill"]
     end
 
-    ORCH -->|"diagnose_sre — A2A"| SRE["🔬 SRE diagnostics<br/>service: sre-sub-agent<br/>ADK: TraceAnalyzer ➜ LogCorrelator"]
+    ORCH -->|"list_incidents · diagnose_incident · write_post_mortem — A2A"| SRE["🔬 SRE diagnostics<br/>service: sre-sub-agent<br/>ADK: TraceAnalyzer ➜ LogCorrelator"]
     SRE -->|"get_topology — A2A"| INV["📚 Inventory agent<br/>service: inventory-agent"]
     INV --> FS[("Firestore")]
     SRE -->|"read-only · or MOCK_GCP"| OBS[("☁️ Trace · Logging · Monitoring")]
     APP["🐒 Target app<br/>service: sre-chaos-monkey"] -->|"write-only telemetry"| OBS
-    SRE -->|"report + 📥 post-mortem"| ORCH --> User
+    SRE -->|"result: table · report · 📥 post-mortem"| ORCH -->|"short summary + result card"| User
 ```
 
 | Service | Package | Role |
 | :--- | :--- | :--- |
-| Orchestrator | [`agent/`](agent) | User-facing agent + web chat UI; delegates via the `diagnose_sre` tool. |
+| Orchestrator | [`agent/`](agent) | User-facing agent + web chat UI; delegates via one tool per SRE skill and replies with a short summary. |
 | SRE diagnostics | [`sre_agent/`](sre_agent) | The engine: observability tools + the ADK multi-agent workflow. |
 | Inventory | [`inventory_agent/`](inventory_agent) | Discovers & caches the project topology (Cloud Run services + databases). |
 | Target app | [`app/`](app) | OpenTelemetry-instrumented "chaos monkey" that generates synthetic incidents. |

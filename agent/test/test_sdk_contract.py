@@ -115,7 +115,7 @@ class TestAntigravityContract(unittest.TestCase):
         everything else: `Agent.__aenter__` validates `self._config.policies`,
         which is still populated, while the harness quietly starts with the SDK
         default (every builtin tool enabled) instead of
-        `[deny("*"), allow("diagnose_sre")]`. Assert the effective posture.
+        `[deny("*"), allow(<one per SRE skill tool>)]`. Assert the effective posture.
 
         This reaches through `FirestoreConnectionStrategy._local_strategy` into
         `LocalConnectionStrategy._build_harness_config()`, both private. That is
@@ -144,9 +144,11 @@ class TestAntigravityContract(unittest.TestCase):
                 {rule.tool: rule.decision for rule in harness_config.policy_config.rules},
                 {
                     "*": localharness_pb2.POLICY_DECISION_DENY,
+                    "list_incidents": localharness_pb2.POLICY_DECISION_ALLOW,
                     "diagnose_sre": localharness_pb2.POLICY_DECISION_ALLOW,
+                    "write_post_mortem": localharness_pb2.POLICY_DECISION_ALLOW,
                 },
-                "The Orchestrator must reach the harness deny-by-default with only diagnose_sre allowed",
+                "The Orchestrator must reach the harness deny-by-default with only its SRE skill tools allowed",
             )
 
     def test_agent_chat_is_still_an_async_context_manager_protocol(self) -> None:
