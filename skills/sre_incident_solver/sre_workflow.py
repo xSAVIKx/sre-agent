@@ -97,7 +97,9 @@ log_correlator = AdkAgent(
         "logic errors), and recommend a mitigation plan. "
         "You have access to tools to query observability metrics (e.g., container CPU or memory utilization) "
         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
-        "if you need more context or need to build a post-mortem report."
+        "if you need more context or need to build a post-mortem report. "
+        "Call each tool at most once per trace: the system appends the full cascade table and "
+        "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
     model="gemini-3.8-flash",
@@ -200,12 +202,27 @@ async def _run_adk_diagnostics(
             return "cloudsql_database"
 
         services = topology.get("discovered_resources", {}).get("services", [])
-        for svc in services:
+        databases = topology.get("discovered_resources", {}).get("databases", [])
+
+        # One template lookup (an embedding + a vector query) per resource: run them
+        # concurrently instead of one after another.
+        import asyncio
+
+        lookups = [("cloud_run_revision", f"service: {svc.get('name')}, type: cloud_run_revision") for svc in services]
+        lookups += [
+            (
+                get_db_resource_type(d.get("type", "FIRESTORE")),
+                f"database: {d.get('name')}, type: {get_db_resource_type(d.get('type', 'FIRESTORE'))}",
+            )
+            for d in databases
+        ]
+        templates = await asyncio.gather(*(find_matching_template(db, rt, q) for rt, q in lookups))
+        service_templates = templates[: len(services)]
+        database_templates = templates[len(services) :]
+
+        for svc, template in zip(services, service_templates, strict=True):
             svc_name = svc.get("name")
             resource_type = "cloud_run_revision"
-            description_query = f"service: {svc_name}, type: {resource_type}"
-
-            template = await find_matching_template(db, resource_type, description_query)
             if template:
                 helpers = template.get("helpers", {})
                 metrics = helpers.get("metrics", "").replace("{service_name}", svc_name)
@@ -219,14 +236,9 @@ async def _run_adk_diagnostics(
                     }
                 )
 
-        databases = topology.get("discovered_resources", {}).get("databases", [])
-        for db_res in databases:
+        for db_res, template in zip(databases, database_templates, strict=True):
             db_name = db_res.get("name")
-            db_type = db_res.get("type", "FIRESTORE")
-            resource_type = get_db_resource_type(db_type)
-            description_query = f"database: {db_name}, type: {resource_type}"
-
-            template = await find_matching_template(db, resource_type, description_query)
+            resource_type = get_db_resource_type(db_res.get("type", "FIRESTORE"))
             if template:
                 helpers = template.get("helpers", {})
                 metrics = helpers.get("metrics", "").replace("{database_id}", db_name)

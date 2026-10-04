@@ -5,11 +5,15 @@ It features an automatic local simulation fallback when real GCP credentials
 or projects are not configured.
 """
 
+import asyncio
 import datetime
+import functools
 import json
 import logging
 import os
 import re
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -46,6 +50,37 @@ IS_MOCK = (
 
 # Path to the mock telemetry data
 MOCK_DATA_DIR = os.getenv("MOCK_DATA_DIR", "mock_telemetry_data")
+
+# How many recent traces query_traces scans for incidents (one API page).
+TRACE_SCAN_SIZE = 50
+
+# A finished trace and its logs don't change, yet one diagnosis reads the same trace
+# up to five times (the model's tool calls plus the appended cascade and post-mortem).
+# Real-mode reads are kept this long, so repeats cost nothing.
+TELEMETRY_CACHE_SECONDS = float(os.getenv("SRE_TELEMETRY_CACHE_SECONDS", "120"))
+_telemetry_cache: dict[tuple[str, ...], tuple[float, str]] = {}
+
+
+def _cached_telemetry(func: Callable[..., Awaitable[str]]) -> Callable[..., Awaitable[str]]:
+    """Caches a real-mode `(trace_id, project_id, ...)` lookup for TELEMETRY_CACHE_SECONDS.
+
+    Error results are not cached, and mock mode (local files) is never cached.
+    """
+
+    @functools.wraps(func)
+    async def wrapper(trace_id: str, project_id: str | None = None, *args: Any, **kwargs: Any) -> str:
+        if IS_MOCK:
+            return await func(trace_id, project_id, *args, **kwargs)
+        key = (func.__name__, trace_id, project_id or "", *map(str, args), *map(str, sorted(kwargs.items())))
+        hit = _telemetry_cache.get(key)
+        if hit and time.monotonic() - hit[0] < TELEMETRY_CACHE_SECONDS:
+            return hit[1]
+        result = await func(trace_id, project_id, *args, **kwargs)
+        if '"error"' not in result[:200]:
+            _telemetry_cache[key] = (time.monotonic(), result)
+        return result
+
+    return wrapper
 
 
 def _load_mock_file(filename: str) -> Any:
@@ -304,17 +339,20 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
         client = trace_v1.TraceServiceClient()
         now = datetime.datetime.now(datetime.UTC)
         start = now - datetime.timedelta(hours=2)
+        # Newest first, root spans only, one page: the root span carries everything a
+        # summary needs (name, duration, HTTP status, service), and full span trees for
+        # dozens of traces made this the slowest step of a diagnosis (~6 s -> ~1.3 s).
         req = trace_v1.ListTracesRequest(
             project_id=resolved_project,
             start_time=start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            view=trace_v1.ListTracesRequest.ViewType.COMPLETE,
+            view=trace_v1.ListTracesRequest.ViewType.ROOTSPAN,
+            order_by="start desc",
+            page_size=TRACE_SCAN_SIZE,
         )
-        pager = client.list_traces(request=req)
+        page = await asyncio.to_thread(lambda: next(iter(client.list_traces(request=req).pages), None))
 
         traces_list = []
-        for trace_item in pager:
-            if len(traces_list) >= 100:
-                break
+        for trace_item in page.traces if page else []:
             trace_dict = trace_v1.Trace.to_dict(trace_item)
             t_id = trace_dict.get("trace_id", "")
             spans = trace_dict.get("spans", [])
@@ -357,6 +395,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
 @register_tool
 @retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("get_trace_details")
+@_cached_telemetry
 async def get_trace_details(trace_id: str, project_id: str | None = None) -> str:
     """Retrieves full span details for a specific trace ID from Cloud Trace.
 
@@ -466,6 +505,7 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
 @register_tool
 @retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_logs_by_trace")
+@_cached_telemetry
 async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limit: int = 50) -> str:
     """Queries GCP Cloud Logging for logs correlated with a specific trace ID.
 
