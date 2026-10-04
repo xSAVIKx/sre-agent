@@ -1,9 +1,10 @@
 """FastAPI Route Definitions for Orchestrator Agent.
 
-Exposes endpoints forhealth check, session management, trace proxy, and stateful A2A chat orchestration.
+Exposes endpoints for health check, session management, trace proxy, and stateful A2A chat orchestration.
 """
 
 import asyncio
+import contextlib
 import datetime
 import json
 import logging
@@ -19,6 +20,9 @@ from agent.a2ui_translator import translate_markdown_to_a2ui
 from agent.config import (
     HAS_ANTIGRAVITY,
     Agent,
+    DiagnosisSink,
+    diagnose_sre,
+    diagnosis_sink,
     load_firestore_agent_config,
 )
 from sre_common import otel_trace, retry_async
@@ -75,33 +79,12 @@ async def favicon() -> Response:
 @router.post("/diagnose")
 @otel_trace("routes.diagnose")
 async def diagnose(request: DiagnoseRequest) -> DiagnoseResponse:
-    """Trigger SRE diagnostics (delegates to SRE agent via A2A)."""
+    """Non-interactive diagnostics: runs the Orchestrator's one allowed tool, `diagnose_sre`."""
     logger.info(f"Received SRE diagnostics request: {request.prompt}")
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
-    url = f"{sre_agent_url}/v1/agents/sre/messages"
-    payload = {"prompt": request.prompt, "project_id": request.project_id}
-
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, timeout=300.0)
-            if response.status_code != 200:
-                raise HTTPException(status_code=response.status_code, detail=f"SRE Sub-Agent Error: {response.text}")
-
-            result = ""
-            for line in response.iter_lines():
-                if line.startswith("data: "):
-                    try:
-                        event = json.loads(line[6:])
-                        if event.get("type") == "done":
-                            result = event.get("response", "")
-                            break
-                    except Exception:
-                        pass
-
-            return DiagnoseResponse(status="success", result=result)
-    except Exception as e:
-        logger.exception("Failed SRE diagnostics proxy.")
-        raise HTTPException(status_code=500, detail=str(e)) from e
+    result = await diagnose_sre(request.prompt, project_id=request.project_id)
+    if result.startswith("Error:"):
+        raise HTTPException(status_code=502, detail=result)
+    return DiagnoseResponse(status="success", result=result)
 
 
 @router.get("/sessions")
@@ -252,198 +235,29 @@ async def get_chat_ui() -> HTMLResponse:
 @router.post("/chat")
 @otel_trace("routes.chat")
 async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
-    """Trigger stateful A2A chat routing or general orchestrator chat."""
+    """Stream a chat turn through the policy-gated Orchestrator agent.
+
+    Every prompt goes to the Antigravity agent. Diagnostics happen only when the
+    agent calls `diagnose_sre`, the single tool its deny-by-default policy allows.
+    """
     logger.info(f"Received chat request (conversation_id={request.conversation_id}): {request.prompt}")
-
-    # 1. Infer if the request is an SRE diagnostics command
-    # SRE-related keywords trigger direct A2A SRE streaming proxy
-    is_sre_prompt = any(
-        x in request.prompt.lower() for x in ("diagnose", "latency", "error", "trace", "sre", "monkey", "scan")
-    )
-    is_refresh = request.refresh or any(
-        x in request.prompt.lower() for x in ("rescan", "refresh", "re-discover", "re-scan")
-    )
-
-    # 2. Check if this conversation was already an SRE session
-    is_sre_session = False
-    conv_id = request.conversation_id
-    if conv_id:
-        try:
-            from google.cloud import firestore
-
-            db = firestore.AsyncClient()
-            doc = await db.collection("agent_sessions").document(conv_id).get()
-            if doc.exists:
-                # If there are tool calls to diagnose_sre, it is an SRE session
-                history = doc.to_dict().get("history", [])
-                for step in history:
-                    for tc in step.get("tool_calls", []):
-                        if tc.get("name") == "diagnose_sre":
-                            is_sre_session = True
-                            break
-        except Exception:
-            pass
-
-    if is_sre_prompt or is_sre_session or is_refresh:
-        logger.info("Routing request to A2A SRE Sub-Agent...")
-        return await _stream_sre_agent_a2a(request, fastapi_request, is_refresh)
-
-    # 3. Fallback to normal Orchestrator LLM chat for general conversation
     return await _stream_orchestrator_chat(request, fastapi_request)
 
 
-async def _stream_sre_agent_a2a(request: ChatRequest, fastapi_request: Request, is_refresh: bool) -> StreamingResponse:
-    """Invokes SRE sub-agent directly via A2A HTTP/SSE and forwards stream to the browser."""
-    sre_agent_url = os.getenv("SRE_AGENT_URL", "http://sre-agent:8080")
-    url = f"{sre_agent_url}/v1/agents/sre/messages"
-
-    # Resolve or create conversation ID
-    conv_id = request.conversation_id
-    if not conv_id:
-        import uuid
-
-        conv_id = f"sre-{uuid.uuid4().hex}"
-
-    payload = {
-        "prompt": request.prompt,
-        "conversation_id": conv_id,
-        "project_id": request.project_id,
-        "refresh": is_refresh,
-    }
-
-    async def event_generator():
-        yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
-
-        accumulated_text = ""
-        client = None
-        response = None
-        try:
-            from sre_common import is_transient_error
-
-            max_retries = 3
-            initial_delay = 1.0
-            backoff_factor = 2.0
-
-            for attempt in range(max_retries + 1):
-                try:
-                    client = httpx.AsyncClient()
-                    await client.__aenter__()
-                    response = await client.stream("POST", url, json=payload, timeout=300.0).__aenter__()
-                    if response.status_code == 200:
-                        break
-
-                    response.raise_for_status()
-                except Exception as e:
-                    if response:
-                        await response.__aexit__(None, None, None)
-                        response = None
-                    if client:
-                        await client.__aexit__(None, None, None)
-                        client = None
-
-                    is_transient = is_transient_error(e) or (
-                        hasattr(e, "response") and e.response.status_code in (429, 500, 502, 503, 504)
-                    )
-                    if attempt == max_retries or not is_transient:
-                        raise
-
-                    delay = initial_delay * (backoff_factor**attempt)
-                    logger.warning(
-                        f"Transient SRE agent connection error on attempt {attempt + 1}/{max_retries + 1}. "
-                        f"Retrying in {delay:.2f}s... Error: {e}"
-                    )
-                    yield f"data: {json.dumps({'type': 'thought', 'text': f'⚠️ Connection failed. Retrying in {delay:.1f}s...'})}\n\n"
-                    await asyncio.sleep(delay)
-
-            async for line in response.aiter_lines():
-                if await fastapi_request.is_disconnected():
-                    logger.info("Client disconnected. Aborting SRE A2A stream.")
-                    break
-
-                if line.startswith("data: "):
-                    try:
-                        event_data = json.loads(line[6:])
-                        ev_type = event_data.get("type")
-                        if ev_type == "chunk":
-                            accumulated_text += event_data.get("text", "")
-                            yield f"data: {line[6:]}\n\n"
-                        elif ev_type == "thought":
-                            yield f"data: {line[6:]}\n\n"
-                        elif ev_type == "error":
-                            yield f"data: {line[6:]}\n\n"
-                            return
-                    except Exception:
-                        pass
-
-            # Translate Markdown to A2UI component payload
-            response_a2ui = translate_markdown_to_a2ui(accumulated_text)
-
-            # Persist Orchestrator user session in Firestore
-            user_step = {
-                "step_index": 0,
-                "type": "TEXT",
-                "source": "USER",
-                "target": "MODEL",
-                "status": "SUCCESS",
-                "content": request.prompt,
-            }
-
-            model_step = {
-                "step_index": 1,
-                "type": "TEXT_RESPONSE",
-                "source": "MODEL",
-                "target": "TARGET_USER",
-                "status": "DONE",
-                "content": accumulated_text,
-                "thinking": "Delegated SRE diagnostics to sub-agent.",
-                "response_a2ui": response_a2ui,
-                "tool_calls": [{"name": "diagnose_sre", "args": {"prompt": request.prompt}}],
-            }
-
-            history = [user_step, model_step]
-
-            # Save history
-            try:
-                from google.cloud import firestore
-
-                db = firestore.AsyncClient()
-                doc_ref = db.collection("agent_sessions").document(conv_id)
-                doc = await doc_ref.get()
-                existing_prompt = doc.to_dict().get("prompt") if doc.exists else None
-
-                update_data = {"history": history, "updated_at": firestore.SERVER_TIMESTAMP}
-                if not existing_prompt or existing_prompt == "Untitled Session":
-                    update_data["prompt"] = request.prompt
-
-                await doc_ref.set(update_data, merge=True)
-            except Exception as e:
-                logger.warning(f"Using mock session persistence fallback: {e}")
-                from agent.config import MOCK_HISTORY_DB
-
-                MOCK_HISTORY_DB[conv_id] = history
-
-            yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
-
-        except Exception as e:
-            logger.exception("Error in SRE streaming proxy.")
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
-        finally:
-            if response:
-                await response.__aexit__(None, None, None)
-            if client:
-                await client.__aexit__(None, None, None)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
-    )
+def _sse(event: dict[str, Any]) -> str:
+    return f"data: {json.dumps(event)}\n\n"
 
 
 async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
-    """Invokes local Orchestrator agent reasoning loop (standard conversation)."""
+    """Invokes the Orchestrator agent reasoning loop and streams it as SSE."""
 
     async def event_generator():
+        # Progress from diagnose_sre and chunks from the agent share one queue,
+        # so sub-agent progress shows up while the tool call is still running.
+        queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+        sink = DiagnosisSink(on_progress=lambda text: queue.put_nowait(("progress", text)))
+        # Set before the agent starts so tasks the SDK spawns inherit it.
+        sink_token = diagnosis_sink.set(sink)
         response = None
         try:
             config = load_firestore_agent_config(conversation_id=request.conversation_id)
@@ -475,25 +289,73 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
 
                 response = await agent.chat(request.prompt)
 
-                yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id})}\n\n"
+                yield _sse({"type": "start", "conversation_id": conv_id})
 
+                async def pump_chunks() -> None:
+                    try:
+                        async for chunk in response.chunks:
+                            await queue.put(("chunk", chunk))
+                    except Exception as exc:
+                        await queue.put(("error", exc))
+                    finally:
+                        await queue.put(("end", None))
+
+                pump = asyncio.create_task(pump_chunks())
                 accumulated_text = ""
-                async for chunk in response.chunks:
-                    if await fastapi_request.is_disconnected():
-                        logger.info("Client disconnected. Aborting orchestrator chat stream.")
-                        await response.cancel()
-                        break
+                disconnected = False
+                finished = False
+                try:
+                    while True:
+                        try:
+                            # Wake up regularly so a long, silent tool call still
+                            # notices a client that went away.
+                            kind, item = await asyncio.wait_for(queue.get(), timeout=1.0)
+                        except TimeoutError:
+                            if await fastapi_request.is_disconnected():
+                                disconnected = True
+                                break
+                            continue
+                        if kind == "end":
+                            finished = True
+                            break
+                        if kind == "error":
+                            raise item
+                        if await fastapi_request.is_disconnected():
+                            disconnected = True
+                            break
+                        if kind == "progress":
+                            yield _sse({"type": "thought", "text": item})
+                            continue
 
-                    cls_name = chunk.__class__.__name__
-                    if cls_name == "Thought":
-                        yield f"data: {json.dumps({'type': 'thought', 'text': chunk.text})}\n\n"
-                    elif cls_name == "Text":
-                        accumulated_text += chunk.text
-                        yield f"data: {json.dumps({'type': 'chunk', 'text': chunk.text})}\n\n"
+                        cls_name = item.__class__.__name__
+                        if cls_name == "Thought":
+                            yield _sse({"type": "thought", "text": item.text})
+                        elif cls_name == "ToolCall":
+                            yield _sse({"type": "thought", "text": f"🔧 Calling tool `{item.name}`..."})
+                        elif cls_name == "Text":
+                            accumulated_text += item.text
+                            yield _sse({"type": "chunk", "text": item.text})
+                finally:
+                    # Runs on normal exit, errors, and when Starlette cancels the
+                    # stream because the client disconnected: stop the agent turn
+                    # and the pump instead of leaving them running.
+                    if not finished:
+                        logger.info("Chat stream ended early (client gone or error). Cancelling the agent turn.")
+                        with contextlib.suppress(Exception, asyncio.CancelledError):
+                            await asyncio.shield(response.cancel())
+                    if not pump.done():
+                        pump.cancel()
+                    with contextlib.suppress(Exception, asyncio.CancelledError):
+                        await pump
 
                 # Stream complete
-                if not await fastapi_request.is_disconnected():
-                    response_a2ui = translate_markdown_to_a2ui(accumulated_text)
+                if not disconnected and not await fastapi_request.is_disconnected():
+                    # The model may summarize the tool output; render the full
+                    # sub-agent report when the reply lost the post-mortem.
+                    rendered = accumulated_text
+                    if sink.report and "Incident Post-Mortem" in sink.report and "Incident Post-Mortem" not in rendered:
+                        rendered = sink.report
+                    response_a2ui = translate_markdown_to_a2ui(rendered)
 
                     steps = []
                     for step in agent.conversation.history:
@@ -519,11 +381,14 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
 
                         MOCK_HISTORY_DB[conv_id] = steps
 
-                    yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text, 'response_a2ui': response_a2ui})}\n\n"
+                    yield _sse({"type": "done", "response": accumulated_text, "response_a2ui": response_a2ui})
 
         except Exception as e:
             logger.exception("Failed inside Orchestrator chat stream.")
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"
+            yield _sse({"type": "error", "detail": str(e) or e.__class__.__name__})
+        finally:
+            with contextlib.suppress(ValueError):  # reset from a different context
+                diagnosis_sink.reset(sink_token)
 
     return StreamingResponse(
         event_generator(),

@@ -23,7 +23,19 @@ target-version = "py311"
 # The existing code runs long; 88 would turn every commit into a reflow.
 line-length = 120
 # BLOGPOST.md mirrors a published post; its code samples stay as published.
-extend-exclude = ["mock_telemetry_data", "scratch_save_dir", "BLOGPOST.md"]
+# The skill modules are generated from sre_agent/ by scripts/sync_skill.py (the
+# source is linted; the copy only differs in its relative imports).
+extend-exclude = [
+    "mock_telemetry_data",
+    "scratch_save_dir",
+    "BLOGPOST.md",
+    "skills/sre_incident_solver/config.py",
+    "skills/sre_incident_solver/firestore_strategy.py",
+    "skills/sre_incident_solver/gcp_tools.py",
+    "skills/sre_incident_solver/itinerary.py",
+    "skills/sre_incident_solver/registry.py",
+    "skills/sre_incident_solver/sre_workflow.py",
+]
 
 [tool.ruff.lint]
 select = [
