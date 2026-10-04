@@ -49,6 +49,8 @@ services:
     environment:
       - FIRESTORE_EMULATOR_HOST=firestore-emulator:8080
       - INVENTORY_AGENT_URL=http://inventory-agent:8080
+      # Advertised in the A2A agent card at /.well-known/agent-card.json.
+      - A2A_PUBLIC_URL=http://sre-agent:8080
       - GCP_PROJECT=${GCP_PROJECT:-local-dev}
       # Optional: with a key the sub-agent runs the real ADK + Gemini tier.
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}

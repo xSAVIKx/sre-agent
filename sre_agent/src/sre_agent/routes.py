@@ -1,22 +1,14 @@
 """API Route definitions for the SRE Diagnostics Agent."""
 
-import asyncio
-import datetime
 import json
 import logging
-from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sre_common.middleware import target_project_contextvar
 
-from sre_agent.config import INVENTORY_AGENT_URL, PROJECT_ID
-from sre_agent.firestore_strategy import get_sre_session, save_sre_session
-from sre_agent.gcp_tools import query_traces
-from sre_agent.sre_workflow import run_sre_diagnostics
-from sre_common import otel_trace, retry_async
+from sre_agent.diagnosis import Report, run_diagnosis
+from sre_common import otel_trace
 
 logger = logging.getLogger("sre_agent.routes")
 
@@ -30,15 +22,6 @@ class SreMessageRequest(BaseModel):
     conversation_id: str | None = None
     project_id: str | None = None
     refresh: bool = False
-
-
-@retry_async(max_retries=3, initial_delay=1.0)
-async def _fetch_topology(inv_url: str, params: dict[str, Any]) -> dict[str, Any]:
-    """Helper to query the Inventory Agent topology cache with retries."""
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(inv_url, params=params, timeout=15.0)
-        resp.raise_for_status()
-        return resp.json()
 
 
 @router.get("/health")
@@ -78,95 +61,26 @@ async def get_trace_query(trace_id: str, project_id: str | None = None):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve trace: {e!s}") from e
 
 
-@router.post("/v1/agents/sre/messages")
+@router.post("/v1/agents/sre/messages", deprecated=True)
 @otel_trace("sre_agent.sre_message")
 async def sre_message(request: SreMessageRequest, fastapi_request: Request):
-    """A2A HTTP streaming endpoint for SRE diagnostics.
-
-    Runs SRE trace-log correlation and streams thoughts and final reports via SSE.
-    """
-    logger.info(
-        f"Received SRE diagnostics request for project={request.project_id} (conversation_id={request.conversation_id})"
-    )
-
-    resolved_project = request.project_id or PROJECT_ID
-    # Set target project ContextVar for this request execution task context
-    target_project_contextvar.set(resolved_project)
+    """Legacy SSE endpoint, kept until the Orchestrator speaks A2A. Use the A2A agent at "/"."""
+    logger.info(f"Received legacy SRE request for project={request.project_id}")
 
     async def event_generator():
         try:
-            # 1. Fetch project topology cache from Inventory Agent (A2A call)
-            yield f"data: {json.dumps({'type': 'thought', 'text': f'🔧 Contacting Inventory Agent to fetch topology for project `{resolved_project}`...'})}\n\n"
-
-            topology = {}
-            try:
-                inv_url = f"{INVENTORY_AGENT_URL}/v1/agents/inventory"
-                params = {"project_id": resolved_project, "refresh": request.refresh}
-                topology = await _fetch_topology(inv_url, params)
-                status = topology.get("status")
-                if status == "DISCOVERING":
-                    yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Target project infrastructure discovery in progress. Diagnostic run may use cached or incomplete topology data.'})}\n\n"
-                else:
-                    svc_count = len(topology.get("discovered_resources", {}).get("services", []))
-                    topo_msg = f"✅ Topology cached successfully. Resolved {svc_count} active compute services."
-                    yield f"data: {json.dumps({'type': 'thought', 'text': topo_msg})}\n\n"
-            except Exception as e:
-                logger.error(f"Failed to query Inventory Agent after retries: {e}")
-                yield f"data: {json.dumps({'type': 'thought', 'text': '⚠️ Inventory Agent query failed. Proceeding with default service topology parameters.'})}\n\n"
-
-            # 2. Retrieve recent traces
-            yield f"data: {json.dumps({'type': 'thought', 'text': f'🔍 Fetching recent traces from project `{resolved_project}`...'})}\n\n"
-
-            try:
-                traces_json = await query_traces(project_id=resolved_project, limit=10)
-            except Exception as e:
-                logger.error(f"Failed to query traces: {e}")
-                yield f"data: {json.dumps({'type': 'error', 'detail': f'Trace API query failed: {e!s}'})}\n\n"
-                return
-
-            # 3. Run SRE ADK Multi-Agent Diagnostics
-            yield f"data: {json.dumps({'type': 'thought', 'text': '🧠 Running multi-agent ADK correlation workflow (TraceAnalyzer + LogCorrelator)...'})}\n\n"
-
-            # Execute workflow
-            report = await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
-
-            # 4. Stream final report to Orchestrator chunk-by-chunk
-            # Yield thoughts complete
-            yield f"data: {json.dumps({'type': 'thought', 'text': '✅ Diagnostics complete. Generating Markdown report...'})}\n\n"
-
-            # Stream the report text
-            words = report.split(" ")
-            accumulated_text = ""
-            for i, word in enumerate(words):
+            async for update in run_diagnosis(
+                prompt=request.prompt,
+                project_id=request.project_id,
+                refresh=request.refresh,
+                conversation_id=request.conversation_id,
+            ):
                 if await fastapi_request.is_disconnected():
-                    logger.info("Orchestrator client disconnected. Aborting stream.")
                     return
-                space = " " if i < len(words) - 1 else ""
-                chunk = word + space
-                accumulated_text += chunk
-                yield f"data: {json.dumps({'type': 'chunk', 'text': chunk})}\n\n"
-                await asyncio.sleep(0.01)
-
-            # 5. Persist private SRE session history
-            if request.conversation_id:
-                history_record = {
-                    "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
-                    "prompt": request.prompt,
-                    "traces_analyzed": traces_json,
-                    "topology": topology,
-                    "report": accumulated_text,
-                }
-
-                # Retrieve existing history
-                sess = await get_sre_session(request.conversation_id) or {}
-                history = sess.get("history", [])
-                history.append(history_record)
-
-                await save_sre_session(request.conversation_id, history)
-
-            # Done event
-            yield f"data: {json.dumps({'type': 'done', 'response': accumulated_text})}\n\n"
-
+                if isinstance(update, Report):
+                    yield f"data: {json.dumps({'type': 'done', 'response': update.text})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type': 'thought', 'text': update.text})}\n\n"
         except Exception as e:
             logger.exception("Failed inside SRE Agent messages stream.")
             yield f"data: {json.dumps({'type': 'error', 'detail': str(e)})}\n\n"

@@ -116,7 +116,7 @@ steps:
       - --region=${_GCP_REGION}
       - --service-account=sre-agent-sa@${PROJECT_ID}.iam.gserviceaccount.com
       - --port=8080
-      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},INVENTORY_AGENT_URL=${_URL_INVENTORY}
+      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},INVENTORY_AGENT_URL=${_URL_INVENTORY},A2A_PUBLIC_URL=${_URL_SRE}
       - --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest
       - --allow-unauthenticated
       - --labels=demo=sre-agent-codelab
