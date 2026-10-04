@@ -179,8 +179,10 @@ tool that is **gated behind explicit human confirmation**, exercising Antigravit
 policy hook rather than the blanket `deny`/`allow`.
 
 **Start here.** [`agent/src/agent/config.py`](agent/src/agent/config.py). `ask_user` is already
-imported. Add the tool, then add `ask_user("restart_service")` to `safety_policies` — and *
-*leave `deny("*")` in place**.
+imported. Add the tool, then add an `ask_user("restart_service", handler=...)` rule in
+`build_safety_policies()` — and **leave `deny("*")` in place**. The real SDK refuses an `ask_user`
+policy without a `handler`: a function that receives the pending `ToolCall` and returns `True` to
+approve. Start with one that logs the request and returns `False`, then wire it to the chat UI.
 
 **Done when.** The tool cannot run without confirmation, and you can explain (in a comment or PR
 note) why deny-by-default + `ask_user` is safer than simply `allow`-ing it. *This is the most
