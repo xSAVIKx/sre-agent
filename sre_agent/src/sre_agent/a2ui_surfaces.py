@@ -193,8 +193,9 @@ def incident_list_surface(project_id: str, incidents: list[dict[str, Any]]) -> l
         _text("title", f"📋 Recent incidents in {project_id}", "h3"),
         _text("detail", f"{failing} failing and {len(incidents) - failing} slow request(s), most important first."),
         {"id": "incidents", "component": "List", "children": {"componentId": "row", "path": "/incidents"}},
-        {"id": "row", "component": "Row", "align": "center", "children": ["row-text", "diagnose", "post-mortem"]},
-        {"id": "row-text", "component": "Column", "weight": 1, "children": ["row-summary", "row-details"]},
+        # Text above, buttons below: side by side, a row does not fit a phone screen.
+        {"id": "row", "component": "Column", "children": ["row-summary", "row-details", "row-actions"]},
+        {"id": "row-actions", "component": "Row", "children": ["diagnose", "post-mortem"]},
         # Paths without a leading slash are relative to the current list item.
         _text("row-summary", {"path": "summary"}),
         _text("row-details", {"path": "details"}, "caption"),
@@ -240,11 +241,11 @@ def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float
         },
         *(_text(f"tab-{n}", markdown) for n, (_, markdown) in enumerate(tabs)),
         {"id": "actions", "component": "Row", "children": ["post-mortem", "download"]},
-        *_button("post-mortem", "Write the post-mortem", "write_post_mortem", trace_id),
+        *_button("post-mortem", "Post-mortem", "write_post_mortem", trace_id),
         {
             "id": "download",
             "component": "Download",
-            "label": "Download report",
+            "label": "Download",
             "filename": f"diagnosis-{trace_id[:8]}.md",
             "content": report,
         },
@@ -277,7 +278,7 @@ def post_mortem_surface(report: str, trace_id: str | None, bottleneck_share: flo
         {
             "id": "download",
             "component": "Download",
-            "label": "Download post-mortem",
+            "label": "Download",
             "filename": f"post-mortem-{trace_id[:8]}.md",
             "content": report,
         },

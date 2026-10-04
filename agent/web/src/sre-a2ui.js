@@ -140,7 +140,8 @@ export const sreCatalog = new Catalog(
 const SURFACE_SHEET = new CSSStyleSheet();
 SURFACE_SHEET.replaceSync(`
   pre { white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
-  table { border-collapse: collapse; margin: 8px 0; font-size: 0.9em; }
+  code { overflow-wrap: anywhere; }
+  table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; margin: 8px 0; font-size: 0.9em; }
   th, td { border: 1px solid var(--a2ui-color-border, #444); padding: 4px 8px; text-align: left; }
 `);
 

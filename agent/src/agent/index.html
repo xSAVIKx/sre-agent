@@ -47,6 +47,7 @@
             background-color: var(--bg-primary);
             color: var(--text-main);
             height: 100vh;
+            height: 100dvh; /* the visible height on mobile, below the browser toolbar */
             display: flex;
             justify-content: center;
             align-items: center;
@@ -214,6 +215,13 @@
 
         /* A2UI surfaces (@a2ui/lit): the basic catalog is themed through these variables,
            which reach into the surface's shadow root. */
+        /* A rendered turn is HTML, not streamed text: without this, .agent-text-stream's
+           pre-wrap turns every newline in the markup (and, inherited through the shadow
+           root, in the A2UI renderer's templates) into a blank line. */
+        .agent-turn {
+            white-space: normal;
+        }
+
         .sre-surface {
             color-scheme: dark;
             --a2ui-color-background: var(--bg-primary);
@@ -651,6 +659,7 @@
             left: 0;
             width: 100vw;
             height: 100vh;
+            height: 100dvh; /* the visible height on mobile, below the browser toolbar */
             background: rgba(5, 7, 12, 0.6);
             backdrop-filter: blur(4px);
             -webkit-backdrop-filter: blur(4px);
@@ -683,6 +692,7 @@
         @media (max-width: 1024px) {
             .app-container {
                 height: 100vh;
+                height: 100dvh; /* the visible height on mobile, below the browser toolbar */
                 width: 100vw;
                 max-width: 100%;
                 border-radius: 0;
@@ -835,7 +845,7 @@
         // its A2UI surface (rendered by @a2ui/lit, see /static/sre-a2ui.js), or its Markdown.
         function renderTurn(turn) {
             const container = document.createElement('div');
-            container.className = 'a2ui-container';
+            container.className = 'a2ui-container agent-turn';
             if (turn.response) {
                 const reply = document.createElement('div');
                 reply.className = 'a2ui-text';
