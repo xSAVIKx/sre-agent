@@ -1,61 +1,156 @@
+# Builds and deploys all four services in one Cloud Build run, in parallel.
+#
+#   base ──┬─ build-app ──────── deploy-app
+#          ├─ build-inventory ── deploy-inventory, deploy-scanner-job
+#          ├─ build-sre ──────── deploy-sre
+#          └─ build-agent ────── deploy-agent
+#
+# Every service image is `FROM` the shared dependency image (docker/base.Dockerfile),
+# so each build only copies source code. deploy.sh decides where that image comes
+# from: the published GHCR copy for the current uv.lock, a copy already cached in
+# this project's Artifact Registry, or (_BUILD_BASE=true) a fresh build here.
+#
+# Cloud Run gives every service a deterministic URL,
+# https://<service>-<project number>.<region>.run.app, so the services can be wired
+# together before any of them exists and nothing has to wait for another deploy.
+#
+# Run through ./deploy.sh, which computes the substitutions.
+
 steps:
-  # 1. Build SRE Chaos Monkey (Target App)
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'build-chaos-monkey'
-    waitFor: ['-']
-    entrypoint: 'bash'
+  - id: base
+    name: gcr.io/cloud-builders/docker
+    entrypoint: bash
     args:
-      - '-c'
+      - -c
       - |
-        gcloud builds submit --config=app/cloudbuild.yaml \
-          --region=${_GCP_REGION} \
-          --substitutions=_GCP_REGION=${_GCP_REGION} .
+        set -euo pipefail
+        if [ "${_BUILD_BASE}" = "true" ]; then
+          docker build -f docker/base.Dockerfile -t "${_BASE_IMAGE}" .
+          docker push "${_BASE_IMAGE}"
+        else
+          docker pull "${_BASE_IMAGE}"
+        fi
 
-  # 2. Build Inventory Agent
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'build-inventory-agent'
-    waitFor: ['-']
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        gcloud builds submit --config=inventory_agent/cloudbuild.yaml \
-          --region=${_GCP_REGION} \
-          --substitutions=_GCP_REGION=${_GCP_REGION} .
-        INVENTORY_AGENT_URL=$$(gcloud run services describe inventory-agent --region=${_GCP_REGION} --format="value(status.url)")
-        gcloud run services update inventory-agent \
-          --region=${_GCP_REGION} \
-          --update-env-vars=INVENTORY_AGENT_URL="$$INVENTORY_AGENT_URL"
+  - id: build-app
+    name: gcr.io/cloud-builders/docker
+    waitFor: [base]
+    entrypoint: bash
+    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f app/Dockerfile -t ${_IMAGE_PREFIX}/sre-chaos-monkey . && docker push ${_IMAGE_PREFIX}/sre-chaos-monkey']
 
-  # 3. Build SRE Diagnostics Sub-Agent
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'build-sre-subagent'
-    waitFor: ['build-inventory-agent']
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        INVENTORY_AGENT_URL=$$(gcloud run services describe inventory-agent --region=${_GCP_REGION} --format="value(status.url)")
-        gcloud builds submit --config=sre_agent/cloudbuild.yaml \
-          --region=${_GCP_REGION} \
-          --substitutions=_GCP_REGION=${_GCP_REGION},_INVENTORY_AGENT_URL="$$INVENTORY_AGENT_URL" .
+  - id: build-inventory
+    name: gcr.io/cloud-builders/docker
+    waitFor: [base]
+    entrypoint: bash
+    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f inventory_agent/Dockerfile -t ${_IMAGE_PREFIX}/inventory-agent . && docker push ${_IMAGE_PREFIX}/inventory-agent']
 
-  # 4. Build SRE Orchestrator Agent
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    id: 'build-orchestrator'
-    waitFor: ['build-chaos-monkey', 'build-sre-subagent']
-    entrypoint: 'bash'
+  - id: build-sre
+    name: gcr.io/cloud-builders/docker
+    waitFor: [base]
+    entrypoint: bash
+    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f sre_agent/Dockerfile -t ${_IMAGE_PREFIX}/sre-sub-agent . && docker push ${_IMAGE_PREFIX}/sre-sub-agent']
+
+  - id: build-agent
+    name: gcr.io/cloud-builders/docker
+    waitFor: [base]
+    entrypoint: bash
+    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f agent/Dockerfile -t ${_IMAGE_PREFIX}/sre-agent . && docker push ${_IMAGE_PREFIX}/sre-agent']
+
+  - id: deploy-app
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [build-app]
+    entrypoint: gcloud
     args:
-      - '-c'
-      - |
-        TARGET_APP_URL=$$(gcloud run services describe sre-chaos-monkey --region=${_GCP_REGION} --format="value(status.url)")
-        SRE_SUB_AGENT_URL=$$(gcloud run services describe sre-sub-agent --region=${_GCP_REGION} --format="value(status.url)")
-        gcloud builds submit --config=agent/cloudbuild.yaml \
-          --region=${_GCP_REGION} \
-          --substitutions=_GCP_REGION=${_GCP_REGION},_TARGET_APP_URL="$$TARGET_APP_URL",_SRE_AGENT_URL="$$SRE_SUB_AGENT_URL" .
+      - run
+      - deploy
+      - sre-chaos-monkey
+      - --image=${_IMAGE_PREFIX}/sre-chaos-monkey
+      - --region=${_GCP_REGION}
+      - --service-account=sre-chaos-monkey-sa@${PROJECT_ID}.iam.gserviceaccount.com
+      - --port=8080
+      - --set-env-vars=GCP_PROJECT=${PROJECT_ID},MOCK_GCP=false
+      - --allow-unauthenticated
+      - --labels=demo=sre-agent-codelab
+
+  - id: deploy-inventory
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [build-inventory]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - inventory-agent
+      - --image=${_IMAGE_PREFIX}/inventory-agent
+      - --region=${_GCP_REGION}
+      - --service-account=inventory-agent-sa@${PROJECT_ID}.iam.gserviceaccount.com
+      - --port=8080
+      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},SCANNER_JOB_NAME=${_JOB_NAME},SCANNER_JOB_REGION=${_GCP_REGION},INVENTORY_AGENT_URL=${_URL_INVENTORY}
+      - --allow-unauthenticated
+      - --labels=demo=sre-agent-codelab
+
+  - id: deploy-scanner-job
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [build-inventory]
+    entrypoint: gcloud
+    args:
+      - run
+      - jobs
+      - deploy
+      - ${_JOB_NAME}
+      - --image=${_IMAGE_PREFIX}/inventory-agent
+      - --region=${_GCP_REGION}
+      - --service-account=inventory-agent-sa@${PROJECT_ID}.iam.gserviceaccount.com
+      - --command=python
+      - --args=-m,inventory_agent.discovery
+      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID}
+      - --labels=demo=sre-agent-codelab
+
+  - id: deploy-sre
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [build-sre]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - sre-sub-agent
+      - --image=${_IMAGE_PREFIX}/sre-sub-agent
+      - --region=${_GCP_REGION}
+      - --service-account=sre-agent-sa@${PROJECT_ID}.iam.gserviceaccount.com
+      - --port=8080
+      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},INVENTORY_AGENT_URL=${_URL_INVENTORY}
+      - --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest
+      - --allow-unauthenticated
+      - --labels=demo=sre-agent-codelab
+
+  - id: deploy-agent
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    waitFor: [build-agent]
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - sre-agent
+      - --image=${_IMAGE_PREFIX}/sre-agent
+      - --region=${_GCP_REGION}
+      - --service-account=sre-agent-sa@${PROJECT_ID}.iam.gserviceaccount.com
+      - --port=8080
+      - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},BACKEND_SERVICE_URL=${_URL_APP},SRE_AGENT_URL=${_URL_SRE}
+      - --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest
+      - --allow-unauthenticated
+      - --labels=demo=sre-agent-codelab
 
 substitutions:
-  _GCP_REGION: 'us-central1'
+  _GCP_REGION: us-central1
+  _REPO_NAME: sre-repo
+  _JOB_NAME: inventory-scanner-job
+  _BASE_IMAGE: ''
+  _BUILD_BASE: 'false'
+  _PROJECT_NUMBER: ''
+  _IMAGE_PREFIX: ${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}
+  _URL_APP: https://sre-chaos-monkey-${_PROJECT_NUMBER}.${_GCP_REGION}.run.app
+  _URL_INVENTORY: https://inventory-agent-${_PROJECT_NUMBER}.${_GCP_REGION}.run.app
+  _URL_SRE: https://sre-sub-agent-${_PROJECT_NUMBER}.${_GCP_REGION}.run.app
 
 options:
   logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
+  substitutionOption: ALLOW_LOOSE

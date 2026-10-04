@@ -1,0 +1,69 @@
+name: Base image
+
+# Publishes the shared dependency image (docker/base.Dockerfile) to GHCR as
+# ghcr.io/<owner>/sre-agent-base:lock-<hash>, where the hash covers uv.lock, every
+# pyproject.toml and the base Dockerfile (scripts/base-image.sh). deploy.sh pulls it
+# instead of installing the dependencies on every deploy; when no image exists for
+# the current lock it builds one itself, so a lock change can never ship stale
+# dependencies - this workflow only makes the common case fast.
+#
+# amd64 for Cloud Run and Intel laptops, arm64 for Apple Silicon.
+
+on:
+  push:
+    branches: [master, perf/fast-deploy]
+    paths:
+      - uv.lock
+      - "**/pyproject.toml"
+      - docker/base.Dockerfile
+      - scripts/base-image.sh
+      - .github/workflows/base-image.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Compute the image reference
+        id: ref
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/sre-agent-base"
+          tag=$(scripts/base-image.sh tag)
+          echo "image=${repo}:${tag}" >> "$GITHUB_OUTPUT"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v4.4.0
+
+      - uses: docker/setup-buildx-action@v4.4.1
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          file: docker/base.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.ref.outputs.image }}
+            ${{ github.ref == 'refs/heads/master' && format('{0}:latest', steps.ref.outputs.repo) || '' }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Shared Python dependency image for the SRE agent services
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
