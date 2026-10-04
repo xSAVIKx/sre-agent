@@ -87,9 +87,10 @@ class TestDiagnosis(unittest.TestCase):
         self.assertEqual(
             [t["title"] for t in components["sections"]["tabs"]], ["Analysis", "Bottleneck", "Post-mortem"]
         )
-        # Report headings sit two levels under the card's h2 title.
-        self.assertTrue(components["tab-1"]["text"].startswith("#### ⛓️ Multi-Service Cascade"))
-        self.assertTrue(components["tab-0"]["text"].startswith("##### Root cause"))
+        # Each section's top heading becomes h3, under the card's h2 title.
+        self.assertTrue(components["tab-1"]["text"].startswith("### ⛓️ Multi-Service Cascade"))
+        self.assertTrue(components["tab-0"]["text"].startswith("### Root cause"))
+        self.assertIn("\n#### 📝 Incident Overview", components["tab-2"]["text"])
         self.assertEqual(components["download"]["content"], DIAGNOSIS)
         self.assertEqual(components["post-mortem"]["action"]["event"]["context"], {"traceId": TRACE})
 

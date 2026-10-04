@@ -120,13 +120,18 @@ def _text(component_id: str, text: str | dict[str, str], variant: str = "body") 
     return {"id": component_id, "component": "Text", "text": text, "variant": variant}
 
 
-_HEADING = re.compile(r"(?m)^(#{1,4}) ")
+_HEADING = re.compile(r"(?m)^(#{1,6}) ")
 
 
 def _report_text(component_id: str, markdown: str) -> dict[str, Any]:
-    """A report section as Markdown text, its headings two levels down (# -> ###):
-    on the page they sit under the card's h2 title, inside the chat's h1."""
-    return _text(component_id, _HEADING.sub(lambda m: "##" + m.group(1) + " ", markdown))
+    """A report section as Markdown text, its top heading moved to h3.
+
+    On the page the section sits under the card's h2 title, inside the chat's h1, so
+    its headings must start at h3. Model-written sections may start at any level.
+    """
+    levels = [len(m.group(1)) for m in _HEADING.finditer(markdown)]
+    shift = 3 - min(levels) if levels else 0
+    return _text(component_id, _HEADING.sub(lambda m: "#" * min(len(m.group(1)) + shift, 6) + " ", markdown))
 
 
 def _button(component_id: str, label: str, action: str, trace_id: str | dict[str, str]) -> list[dict[str, Any]]:
