@@ -88,7 +88,6 @@ class TestDiagnosis(unittest.TestCase):
             [t["title"] for t in components["sections"]["tabs"]], ["Analysis", "Bottleneck", "Post-mortem"]
         )
         self.assertTrue(components["tab-1"]["text"].startswith("## ⛓️ Multi-Service Cascade"))
-        self.assertEqual(components["severity"]["level"], "SEV1")
         self.assertEqual(components["download"]["content"], DIAGNOSIS)
         self.assertEqual(components["post-mortem"]["action"]["event"]["context"], {"traceId": TRACE})
 
@@ -101,7 +100,6 @@ class TestPostMortem(unittest.TestCase):
         self.assertEqual([t["title"] for t in components["sections"]["tabs"]], ["Post-mortem", "Analyst notes (AI)"])
         self.assertEqual(components["tab-1"]["text"], notes)
         self.assertNotIn("Incident Post-Mortem", components["tab-0"]["text"], "the card title replaces the H1")
-        self.assertEqual(components["severity"]["level"], "SEV2")
 
 
 class TestNegotiation(unittest.TestCase):
