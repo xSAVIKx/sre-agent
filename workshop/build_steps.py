@@ -142,10 +142,10 @@ STEPS: tuple[Step, ...] = (
         (
             Edit(
                 "agent/src/agent/config.py",
-                solution="""    return [deny("*"), allow("diagnose_sre")]
+                solution="""    return [deny("*"), allow("list_incidents"), allow("diagnose_sre"), allow("write_post_mortem")]
 """,
                 starter="""    # TODO(step-4): Everything is denied, so the Orchestrator cannot even delegate. Keep the
-    #   deny-by-default rule and add one `allow(...)` for the single tool it needs.
+    #   deny-by-default rule and add one `allow(...)` per tool it needs: one per SRE agent skill.
     return [deny("*")]
 """,
             ),

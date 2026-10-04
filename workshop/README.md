@@ -77,8 +77,8 @@ MOCK_GCP=true uv run uvicorn agent.main:app --port 8080
 
 ```mermaid
 flowchart LR
-    User(["👤 You"]) -->|/chat| ORCH["🛡️ Orchestrator<br/>Antigravity agent<br/>deny('*') + allow('diagnose_sre')"]
-    ORCH -->|diagnose_sre| SRE["🔬 SRE engine<br/>ADK: TraceAnalyzer → LogCorrelator"]
+    User(["👤 You"]) -->|/chat| ORCH["🛡️ Orchestrator<br/>Antigravity agent<br/>deny('*') + allow one tool per SRE skill"]
+    ORCH -->|"list_incidents · diagnose_sre · write_post_mortem"| SRE["🔬 SRE engine<br/>ADK: TraceAnalyzer → LogCorrelator"]
     SRE -->|tools| T["query_metrics · analyze_trace_cascade<br/>generate_post_mortem"]
     APP["🐒 Target app"] -->|traces · logs · metrics| DATA[("mock_telemetry_data/")]
     T --> DATA

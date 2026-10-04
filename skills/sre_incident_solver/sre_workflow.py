@@ -110,7 +110,7 @@ log_correlator = AdkAgent(
 @retry_async(max_retries=3, initial_delay=2.0)
 @otel_trace("_run_adk_diagnostics")
 async def _run_adk_diagnostics(
-    traces_json: str, project_id: str | None = None, incident: dict[str, Any] | None = None
+    traces_json: str, project_id: str | None = None, incident: dict[str, Any] | None = None, question: str = ""
 ) -> str:
     """Runs the real multi-agent ADK reasoning workflow.
 
@@ -120,7 +120,8 @@ async def _run_adk_diagnostics(
     Args:
         traces_json: The ranked incident candidates the TraceAnalyzer chooses from.
         project_id: Optional GCP project identifier.
-        incident: The best candidate; its cascade and post-mortem are appended.
+        incident: The best candidate, used when the TraceAnalyzer's pick is not a candidate.
+        question: The user's request, so the TraceAnalyzer can pick the incident it is about.
 
     Returns:
         The markdown diagnosis report from the Log Correlator agent.
@@ -130,6 +131,10 @@ async def _run_adk_diagnostics(
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
+
+    candidate_ids = {c.get("traceId") for c in json.loads(traces_json) if isinstance(c, dict)}
+    # The trace the TraceAnalyzer picked; its cascade and post-mortem are appended to the report.
+    chosen: dict[str, str] = {}
 
     @node(name="fetch_telemetry")
     async def fetch_telemetry(ctx: Context, node_input: Any) -> str:
@@ -144,7 +149,11 @@ async def _run_adk_diagnostics(
         elif isinstance(node_input, dict) and "output" in node_input:
             trace_id = str(node_input["output"])
 
-        trace_id = trace_id.strip()
+        trace_id = trace_id.strip().strip("`")
+        if trace_id not in candidate_ids and incident:
+            logger.warning(f"TraceAnalyzer picked {trace_id!r}, not a candidate; using {incident.get('traceId')}")
+            trace_id = incident.get("traceId", "")
+        chosen["trace_id"] = trace_id
         logger.info(f"Workflow: Fetching telemetry for trace ID '{trace_id}'")
 
         # Load project ID
@@ -291,9 +300,10 @@ async def _run_adk_diagnostics(
             user_id="sre_user",
         )
 
-        msg = types.Content(
-            parts=[types.Part.from_text(text=f"Find the failing trace ID in these traces:\n{traces_json}")]
-        )
+        request = f"Find the failing trace ID in these traces:\n{traces_json}"
+        if question:
+            request = f"The user asked: {question}\n\n{request}"
+        msg = types.Content(parts=[types.Part.from_text(text=request)])
         diagnosis = ""
         async for event in runner.run_async(user_id="sre_user", session_id=session.id, new_message=msg):
             # Only the Log Correlator writes the report. The Trace Analyzer's output is the
@@ -303,7 +313,7 @@ async def _run_adk_diagnostics(
                     if part.text:
                         diagnosis += part.text
 
-        trace_id = incident.get("traceId") if incident else None
+        trace_id = chosen.get("trace_id") or (incident.get("traceId") if incident else None)
 
         if trace_id:
             logger.info(f"ADK Workflow completed. Appending cascade analysis and post-mortem for trace: {trace_id}")
@@ -436,7 +446,9 @@ async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str |
 
 
 @otel_trace("run_sre_diagnostics")
-async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -> str:
+async def run_sre_diagnostics(
+    traces_json: str, project_id: str | None = None, question: str = "", trace_id: str | None = None
+) -> str:
     """Executes the SRE diagnostic workflow using ADK agents.
 
     Delegates to the real ADK multi-agent workflow if ADK is installed and an API
@@ -445,6 +457,8 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     Args:
         traces_json: A JSON string containing recent trace summaries.
         project_id: The GCP Project ID. If None, uses default configuration.
+        question: The user's request; the TraceAnalyzer uses it to pick the incident.
+        trace_id: Diagnose this trace instead of picking one.
 
     Returns:
         A markdown-formatted SRE incident diagnosis report.
@@ -455,7 +469,14 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     #    own traffic; error logs point at a trace when no trace looks bad (incidents.py).
     from .incidents import find_incident
 
-    incident, candidates = await find_incident(traces_json, project_id)
+    if trace_id:
+        from .incidents import parse_traces
+
+        known = next((t for t in parse_traces(traces_json) if t.get("traceId") == trace_id), {})
+        incident = {"traceId": trace_id, "incident": "requested", **known}
+        candidates = [incident]
+    else:
+        incident, candidates = await find_incident(traces_json, project_id)
     if incident is None:
         logger.info("Diagnostics workflow found no anomalous traces or error logs. All systems healthy.")
         return (
@@ -466,5 +487,5 @@ async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -
     import os
 
     if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
-        return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident)
+        return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)
     return await _run_simulated_diagnostics(incident, project_id)

@@ -1,23 +1,28 @@
 """The SRE diagnostics engine as an A2A agent.
 
-`SreDiagnosticsAgent` is a custom ADK agent that runs the diagnosis pipeline
+`SreDiagnosticsAgent` is a custom ADK agent that runs one of the engine's skills
 (`sre_agent.diagnosis`) and reports it as ADK events. ADK's `to_a2a()` serves it
 over the Agent2Agent protocol (A2A v1.0):
 
-* the agent card is published at ``/.well-known/agent-card.json``;
+* the agent card at ``/.well-known/agent-card.json`` lists the skills:
+  ``list_incidents``, ``diagnose_incident`` and ``write_post_mortem``;
 * each progress step arrives as a ``TASK_STATE_WORKING`` status update;
-* the Markdown report is the task's artifact, followed by ``TASK_STATE_COMPLETED``.
+* the result is the task's artifact - a Markdown text part, plus a data part with
+  the same result as JSON when the skill has one - then ``TASK_STATE_COMPLETED``.
 
-Callers pass the target project and a topology-refresh flag as request metadata:
-``{"project_id": "...", "refresh": true}``. The A2A ``contextId`` identifies the
-conversation, so repeated diagnoses in one chat share a session history.
+A2A messages do not name a skill, so callers pass it as request metadata, next to
+its parameters: ``{"skill": "list_incidents", "project_id": "..."}``. Without one
+the agent diagnoses. The A2A ``contextId`` identifies the conversation, so repeated
+diagnoses in one chat share a session history.
 """
 
 from collections.abc import AsyncGenerator
 from typing import Any
 
+from a2a.helpers import new_data_part
 from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
 from a2a.utils.constants import PROTOCOL_VERSION_CURRENT
+from google.adk.a2a.converters.part_converter import convert_a2a_part_to_genai_part
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import BaseAgent
 from google.adk.agents.invocation_context import InvocationContext
@@ -25,10 +30,44 @@ from google.adk.events import Event
 from google.genai import types
 from starlette.applications import Starlette
 
-from sre_agent.diagnosis import run_diagnosis
+from sre_agent.diagnosis import Report, run_diagnosis, run_list_incidents, run_post_mortem
 
 # Where ADK's A2A request converter puts the request metadata in the run config.
 A2A_METADATA_KEY = "a2a_metadata"
+
+LIST_INCIDENTS = "list_incidents"
+DIAGNOSE_INCIDENT = "diagnose_incident"
+WRITE_POST_MORTEM = "write_post_mortem"
+
+
+def _skill_run(skill: str, prompt: str, metadata: dict[str, Any], conversation_id: str) -> AsyncGenerator:
+    """The pipeline for the requested skill, called with its parameters from the metadata."""
+    project_id = metadata.get("project_id") or None
+    trace_id = metadata.get("trace_id") or None
+    if skill == LIST_INCIDENTS:
+        return run_list_incidents(project_id=project_id)
+    if skill == WRITE_POST_MORTEM:
+        return run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id)
+    if skill not in ("", DIAGNOSE_INCIDENT):
+        raise ValueError(
+            f"Unknown skill {skill!r}: expected one of {LIST_INCIDENTS}, {DIAGNOSE_INCIDENT}, {WRITE_POST_MORTEM}"
+        )
+    return run_diagnosis(
+        prompt=prompt,
+        project_id=project_id,
+        refresh=bool(metadata.get("refresh", False)),
+        conversation_id=conversation_id,
+        trace_id=trace_id,
+    )
+
+
+def _parts(update: Any) -> list[types.Part]:
+    """The update as genai parts: its text, plus its structured data as an A2A data part."""
+    parts = [types.Part(text=update.text)]
+    if isinstance(update, Report) and update.data is not None:
+        # ADK's own converter, so the executor turns it back into an A2A data part.
+        parts.append(convert_a2a_part_to_genai_part(new_data_part(update.data)))
+    return parts
 
 
 class SreDiagnosticsAgent(BaseAgent):
@@ -39,26 +78,22 @@ class SreDiagnosticsAgent(BaseAgent):
         metadata: dict[str, Any] = custom_metadata.get(A2A_METADATA_KEY) or {}
         prompt = "".join(p.text or "" for p in (ctx.user_content.parts if ctx.user_content else []))
 
-        async for update in run_diagnosis(
-            prompt=prompt,
-            project_id=metadata.get("project_id"),
-            refresh=bool(metadata.get("refresh", False)),
-            conversation_id=ctx.session.id,
-        ):
+        skill = str(metadata.get("skill") or "")
+        async for update in _skill_run(skill, prompt, metadata, ctx.session.id):
             # Every event becomes a WORKING status update. ADK's A2A executor turns the
             # last one - the Report, always yielded last - into the task artifact.
             yield Event(
                 author=self.name,
                 invocation_id=ctx.invocation_id,
-                content=types.Content(role="model", parts=[types.Part(text=update.text)]),
+                content=types.Content(role="model", parts=_parts(update)),
             )
 
 
 sre_diagnostics_agent = SreDiagnosticsAgent(
     name="sre_diagnostics",
     description=(
-        "SRE diagnostics engine: analyzes the distributed traces, logs and metrics of a GCP project "
-        "and returns a root-cause report with an incident post-mortem."
+        "SRE diagnostics engine: lists the recent incidents of a GCP project, diagnoses their root cause "
+        "from distributed traces, logs and metrics, and writes incident post-mortems."
     ),
 )
 
@@ -86,17 +121,47 @@ def build_agent_card(public_url: str) -> AgentCard:
         default_output_modes=["text/markdown"],
         skills=[
             AgentSkill(
-                id="diagnose_incident",
+                id=LIST_INCIDENTS,
+                name="List recent incidents",
+                description=(
+                    "Lists the recent failing and slow requests in Cloud Trace, most important first, ignoring "
+                    "the agents' own traffic. Fast: no model calls. Returns a Markdown table and the same list "
+                    'as data. Request metadata: skill="list_incidents", project_id.'
+                ),
+                tags=["sre", "observability", "cloud-trace"],
+                examples=["What are the latest failures?", "Is anything broken right now?"],
+                output_modes=["text/markdown", "application/json"],
+            ),
+            AgentSkill(
+                id=DIAGNOSE_INCIDENT,
                 name="Diagnose an incident",
                 description=(
-                    "Finds the slowest or failing request in recent Cloud Trace data, isolates the bottleneck "
-                    "span (inclusive vs. exclusive time), correlates Cloud Logging entries and metrics, and "
-                    "writes an incident post-mortem. Request metadata: project_id (GCP project to diagnose), "
+                    "Finds the root cause of one incident: picks the request the user asks about (or the most "
+                    "important one), isolates the bottleneck span (inclusive vs. exclusive time), correlates "
+                    "Cloud Logging entries and metrics with ADK agents, and appends a post-mortem. Request "
+                    'metadata: skill="diagnose_incident" (the default), project_id, trace_id (optional), '
                     "refresh (rescan the project topology)."
                 ),
-                tags=["sre", "observability", "cloud-trace", "post-mortem"],
-                examples=["Diagnose the recent latency spikes and generate a post-mortem."],
-            )
+                tags=["sre", "observability", "cloud-trace", "root-cause"],
+                examples=[
+                    "Diagnose the recent latency spikes.",
+                    "Why did trace 1c65bf87e4be434ea6d6d7edc1ef8c97 fail?",
+                ],
+                output_modes=["text/markdown"],
+            ),
+            AgentSkill(
+                id=WRITE_POST_MORTEM,
+                name="Write a post-mortem",
+                description=(
+                    "Writes the incident post-mortem of one trace from its spans and logs: overview, timeline, "
+                    "root cause and next steps. With a Gemini key, adds AI-generated analyst notes. Request "
+                    'metadata: skill="write_post_mortem", project_id, trace_id (optional: defaults to the most '
+                    "important recent incident)."
+                ),
+                tags=["sre", "post-mortem"],
+                examples=["Write the post-mortem for trace 1c65bf87e4be434ea6d6d7edc1ef8c97."],
+                output_modes=["text/markdown", "application/json"],
+            ),
         ],
     )
 

@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from agent.a2ui_translator import translate_markdown_to_a2ui
+from agent.a2ui_translator import compose_reply_a2ui
 from agent.config import (
     HAS_ANTIGRAVITY,
     Agent,
@@ -187,8 +187,8 @@ def _turn_entries(
 
     Only what the UI replays is kept. The raw SDK steps are far too large to store
     (one diagnosis is ~90 streamed steps), and the A2UI payload is rebuilt on read.
-    `rendered` is the Markdown the UI rendered when it differs from the reply (the
-    full sub-agent report when the model only summarized it).
+    `rendered` is the SRE skill's full result, shown as a card under the reply; it is
+    stored only when it differs from the reply.
     """
     user = {"source": "USER", "content": prompt}
     model: dict[str, Any] = {"source": "MODEL", "content": reply}
@@ -271,10 +271,9 @@ def _with_a2ui(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result = []
     for entry in entries:
         entry = dict(entry)
-        if entry.get("source") == "MODEL" and not entry.get("response_a2ui"):
-            markdown = entry.get("rendered") or entry.get("content") or ""
-            if markdown:
-                entry["response_a2ui"] = translate_markdown_to_a2ui(markdown)
+        has_text = entry.get("content") or entry.get("rendered")
+        if entry.get("source") == "MODEL" and has_text and not entry.get("response_a2ui"):
+            entry["response_a2ui"] = compose_reply_a2ui(entry.get("content") or "", entry.get("rendered"))
         result.append(entry)
     return result
 
@@ -461,12 +460,12 @@ async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Reque
 
                 # Stream complete
                 if not disconnected and not await fastapi_request.is_disconnected():
-                    # The model may summarize the tool output; render the full
-                    # sub-agent report when the reply lost the post-mortem.
+                    # The model replies with a short summary; the SRE skill's full
+                    # result is rendered as a card under it.
                     rendered = accumulated_text
-                    if sink.report and "Incident Post-Mortem" in sink.report and "Incident Post-Mortem" not in rendered:
+                    if sink.report and not sink.report.startswith("Error:"):
                         rendered = sink.report
-                    response_a2ui = translate_markdown_to_a2ui(rendered)
+                    response_a2ui = compose_reply_a2ui(accumulated_text, rendered)
 
                     user_entry, model_entry = _turn_entries(
                         request.prompt, accumulated_text, thinking, tool_calls, rendered

@@ -29,8 +29,10 @@ MOCK_DATA_DIR = os.getenv("MOCK_DATA_DIR", "mock_telemetry_data")
 try:
     from opentelemetry import trace
     from opentelemetry.exporter.cloud_trace import CloudTraceSpanExporter
+    from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    from opentelemetry.sdk.trace.sampling import ALWAYS_ON
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 
     HAS_OTEL = True
@@ -41,7 +43,9 @@ except ImportError:
 # Initialize OpenTelemetry if available and not in mock mode
 if HAS_OTEL and not IS_MOCK:
     try:
-        provider = TracerProvider()
+        # ALWAYS_ON: Cloud Run's front end often forwards "not sampled", and the default
+        # parent-based sampler would then drop exactly the spans the SRE agent diagnoses.
+        provider = TracerProvider(resource=Resource.create({"service.name": "sre-chaos-monkey"}), sampler=ALWAYS_ON)
         # Export traces directly to GCP Cloud Trace
         exporter = CloudTraceSpanExporter()
         processor = BatchSpanProcessor(exporter)
@@ -350,7 +354,9 @@ async def gateway(request: Request, trigger_error: bool = Query(default=False)) 
 
     # Real OTEL tracing (if active)
     if tracer:
-        with tracer.start_as_current_span("/api/gateway") as span:
+        # Join the caller's trace (Cloud Run's front end starts one per request), so a
+        # request is one trace, not a load-balancer trace plus a separate app trace.
+        with tracer.start_as_current_span("/api/gateway", context=_span_context(request)) as span:
             span.set_attribute("http.method", "GET")
             otel_trace_id = f"{span.get_span_context().trace_id:032x}"
             # Call downstream backend service using httpx (injecting trace context headers)

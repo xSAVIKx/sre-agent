@@ -1,4 +1,4 @@
-"""Tests for policy-gated chat routing and the diagnose_sre A2A stream."""
+"""Tests for policy-gated chat routing and the Orchestrator's SRE skill tools over A2A."""
 
 import functools
 import json
@@ -22,11 +22,12 @@ def _sse_events(body: str) -> list[dict]:
 class TestMockPolicyEvaluation(unittest.TestCase):
     """The simulation-mode policy check must match the SDK's precedence rules."""
 
-    def test_orchestrator_policy_allows_only_diagnose_sre(self) -> None:
+    def test_orchestrator_policy_allows_only_the_sre_skill_tools(self) -> None:
         if config.HAS_ANTIGRAVITY:
             self.skipTest("Real SDK policies; covered by test_sdk_contract.")
         policies = config.build_safety_policies()
-        self.assertEqual(config.evaluate_mock_policy(policies, "diagnose_sre"), "allow")
+        for tool in ("list_incidents", "diagnose_sre", "write_post_mortem"):
+            self.assertEqual(config.evaluate_mock_policy(policies, tool), "allow")
         self.assertEqual(config.evaluate_mock_policy(policies, "run_command"), "deny")
 
     def test_specific_deny_beats_specific_allow(self) -> None:
@@ -54,16 +55,29 @@ class TestDiagnoseSreOverA2A(unittest.IsolatedAsyncioTestCase):
         self.calls: list[dict] = []
         self.fail = False
 
-        async def fake_run_diagnosis(prompt, project_id=None, refresh=False, conversation_id=None):
+        async def fake_run_diagnosis(prompt, project_id=None, refresh=False, conversation_id=None, trace_id=None):
             self.calls.append({"project_id": project_id, "refresh": refresh, "conversation_id": conversation_id})
             yield Progress("Fetching traces")
             if self.fail:
                 raise RuntimeError("Trace API query failed: 503")
             yield Report(POST_MORTEM)
 
-        patcher = mock.patch.object(a2a_agent, "run_diagnosis", fake_run_diagnosis)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        async def fake_list_incidents(project_id=None):
+            self.calls.append({"skill": "list_incidents", "project_id": project_id})
+            yield Report("| incident table |", {"kind": "incident_list", "incidents": []})
+
+        async def fake_post_mortem(prompt="", project_id=None, trace_id=None):
+            self.calls.append({"skill": "write_post_mortem", "project_id": project_id, "trace_id": trace_id})
+            yield Report(POST_MORTEM)
+
+        for name, fake in (
+            ("run_diagnosis", fake_run_diagnosis),
+            ("run_list_incidents", fake_list_incidents),
+            ("run_post_mortem", fake_post_mortem),
+        ):
+            patcher = mock.patch.object(a2a_agent, name, fake)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
         app = a2a_agent.build_a2a_app(self.BASE_URL)
         lifespan = app.router.lifespan_context(app)
@@ -100,6 +114,24 @@ class TestDiagnoseSreOverA2A(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Fetching traces", sink.progress)
         self.assertNotIn(POST_MORTEM, sink.progress, "the report is the artifact, not a progress line")
         self.assertEqual(self.calls, [{"project_id": "demo", "refresh": True, "conversation_id": "conversation-7"}])
+
+    async def test_each_tool_calls_its_own_skill(self) -> None:
+        sink = config.DiagnosisSink()
+        token = config.diagnosis_sink.set(sink)
+        try:
+            self.assertEqual(await config.list_incidents(project_id="demo"), "| incident table |")
+            self.assertEqual(sink.skill, "list_incidents")
+            self.assertEqual(await config.write_post_mortem("write it up", trace_id="t" * 32), POST_MORTEM)
+            self.assertEqual(sink.skill, "write_post_mortem")
+        finally:
+            config.diagnosis_sink.reset(token)
+        self.assertEqual(
+            self.calls,
+            [
+                {"skill": "list_incidents", "project_id": "demo"},
+                {"skill": "write_post_mortem", "project_id": os.environ.get("GCP_PROJECT"), "trace_id": "t" * 32},
+            ],
+        )
 
     async def test_failed_task_becomes_an_error_report(self) -> None:
         self.fail = True
@@ -153,12 +185,52 @@ class TestChatRouting(unittest.TestCase):
         called.assert_not_awaited()
         self.assertIn("blocked by the safety policy", events[-1]["response"])
 
+    def test_failure_question_lists_incidents_and_replies_with_summary_and_card(self) -> None:
+        table = "## 📋 Recent incidents\n\n1 failing request.\n\n| # | Trace ID |\n|---|---|\n| 1 | `abc` |"
+
+        async def fake_list(project_id: str | None = None) -> str:
+            config.diagnosis_sink.get().report = table
+            return table
+
+        with mock.patch.object(config, "list_incidents", fake_list):
+            events = self._chat("What are the latest failures?")
+
+        thoughts = [e["text"] for e in events if e["type"] == "thought"]
+        self.assertIn("🔧 Calling tool `list_incidents`...", thoughts)
+        done = events[-1]
+        self.assertEqual(done["response"], "1 failing request. The full result is below.")
+        summary, card = done["response_a2ui"]["components"]
+        self.assertEqual(summary, {"type": "text", "content": done["response"]})
+        self.assertEqual(card["content"], table)
+
     def test_general_prompt_does_not_call_diagnose_sre(self) -> None:
         called = mock.AsyncMock(return_value=POST_MORTEM)
         with mock.patch.object(config, "diagnose_sre", called):
             events = self._chat("hello")
         called.assert_not_awaited()
         self.assertEqual(events[-1]["type"], "done")
+
+
+class TestMockRoute(unittest.TestCase):
+    """Simulation mode's stand-in for the model choosing among the SRE skill tools."""
+
+    def test_routes(self) -> None:
+        trace = "1c65bf87e4be434ea6d6d7edc1ef8c97"
+        cases = {
+            "What are the latest failures?": ("list_incidents", {}),
+            "is anything broken?": ("list_incidents", {}),
+            f"Write the post-mortem for {trace}": (
+                "write_post_mortem",
+                {"prompt": f"Write the post-mortem for {trace}", "trace_id": trace},
+            ),
+            f"why did {trace} fail?": ("diagnose_sre", {"prompt": f"why did {trace} fail?", "trace_id": trace}),
+            "Diagnose the latest failure": ("diagnose_sre", {"prompt": "Diagnose the latest failure"}),
+            "latency is spiking": ("diagnose_sre", {"prompt": "latency is spiking"}),
+            "hello": None,
+        }
+        for prompt, expected in cases.items():
+            with self.subTest(prompt=prompt):
+                self.assertEqual(config.mock_route(prompt), expected)
 
 
 class TestDiagnoseSreModeSelection(unittest.IsolatedAsyncioTestCase):
@@ -171,6 +243,7 @@ class TestDiagnoseSreModeSelection(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await config.diagnose_sre("diagnose"), "report")
         call.assert_awaited_once()
         self.assertEqual(call.await_args.args[0], "http://sre-agent:8080")
+        self.assertEqual(call.await_args.args[2]["skill"], "diagnose_incident")
 
 
 if __name__ == "__main__":

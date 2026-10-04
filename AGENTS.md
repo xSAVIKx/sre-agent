@@ -56,7 +56,8 @@ async def query_my_new_observability_metric(param: str) -> str:
 ```
 
 The config loader dynamically gathers all decorated tools at startup. (The Orchestrator's own
-`diagnose_sre` tool is registered the same way via `agent/src/agent/config.py`.)
+tools are registered the same way via `agent/src/agent/config.py`: one per skill on the SRE
+agent's card - `list_incidents`, `diagnose_sre` and `write_post_mortem`.)
 
 ### 2. Mandatory Docstrings & Types
 
@@ -82,9 +83,10 @@ if IS_MOCK:
 ## 🔒 Safety Policies & Hooks
 
 * **Least-Privilege**: The Orchestrator enforces a deny-by-default posture via the Antigravity
-  policies in `agent/src/agent/config.py` — `[deny("*"), allow("diagnose_sre")]`. Its only
-  capability is to delegate to the read-only SRE sub-agent; it cannot read files, run commands, or
-  call arbitrary URLs.
+  policies in `agent/src/agent/config.py` — `deny("*")` plus one `allow(...)` per SRE skill tool
+  (`list_incidents`, `diagnose_sre`, `write_post_mortem`). Its only capability is to delegate to
+  the read-only SRE sub-agent; it cannot read files, run commands, or call arbitrary URLs. A new
+  SRE skill needs its own tool and its own explicit `allow`.
 * **Modification Warning**: Do not relax this policy (e.g. adding `allow(...)` entries for write,
   terminal, or arbitrary-URL tools) unless explicitly requested by the human developer.
 * **Hooks**: Customize the `SreToolErrorHook` in `agent/src/agent/config.py` to handle specific API

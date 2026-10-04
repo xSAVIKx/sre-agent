@@ -9,6 +9,7 @@ import asyncio
 import contextvars
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -71,6 +72,44 @@ def evaluate_mock_policy(policies: list[Any], tool_name: str) -> str:
             if any(p.tool == target and p.decision == decision for p in rules):
                 return decision
     return "deny"
+
+
+_TRACE_ID = re.compile(r"\b[0-9a-f]{32}\b")
+_NUMBERED = re.compile(r"\d+\.\s")
+
+
+def mock_route(prompt: str) -> tuple[str, dict[str, Any]] | None:
+    """Simulation mode's stand-in for the model choosing a tool: (tool name, arguments) or None.
+
+    Keyword rules in the order a person would mean them: an explicit post-mortem, an
+    explicit diagnosis, a question about what is failing, then anything diagnostic.
+    """
+    text = prompt.lower()
+    trace = _TRACE_ID.search(text)
+    trace_args = {"trace_id": trace.group(0)} if trace else {}
+    if any(x in text for x in ("post-mortem", "postmortem", "post mortem")):
+        return "write_post_mortem", {"prompt": prompt, **trace_args}
+    if trace or any(x in text for x in ("diagnose", "root cause", "why")):
+        return "diagnose_sre", {"prompt": prompt, **trace_args}
+    if any(x in text for x in ("list", "latest", "recent", "failing", "broken")):
+        return "list_incidents", {}
+    if any(x in text for x in ("error", "trace", "latency", "sre", "slow", "fail")):
+        return "diagnose_sre", {"prompt": prompt}
+    return None
+
+
+def summarize_report(report: str) -> str:
+    """Simulation mode's stand-in for the model's short reply: the report's opening lines.
+
+    The real model writes the summary itself (see SYSTEM_INSTRUCTIONS); either way the
+    UI shows the full report as a card under the reply.
+    """
+    if report.startswith("Error:") or "blocked by the safety policy" in report:
+        return report
+    # The first line of plain prose: not a heading, list item, table row or code fence.
+    prose = (line.strip() for line in report.splitlines())
+    first = next((line for line in prose if line and line[0] not in "#*-|`>" and not _NUMBERED.match(line)), "")
+    return f"{first} The full result is below." if first else report
 
 
 # Global database to persist mock session history in local simulation mode
@@ -148,8 +187,10 @@ if not HAS_ANTIGRAVITY:
             }
 
     class MockResponse:
-        def __init__(self, is_diag: bool, prompt: str, conversation: Any, policies: list[Any]) -> None:
-            self._is_diag = is_diag
+        def __init__(
+            self, route: tuple[str, dict[str, Any]] | None, prompt: str, conversation: Any, policies: list[Any]
+        ) -> None:
+            self._route = route
             self.prompt = prompt
             self.conversation = conversation
             self.policies = policies
@@ -158,22 +199,24 @@ if not HAS_ANTIGRAVITY:
         @property
         def chunks(self) -> Any:
             async def _gen():
-                if self._is_diag:
-                    # Stand-in for the model deciding to call `diagnose_sre`. The call
-                    # still goes through the configured policies, exactly as it would
-                    # in the real Antigravity harness.
-                    yield ToolCall(name="diagnose_sre", args={"prompt": self.prompt})
-                    decision = evaluate_mock_policy(self.policies, "diagnose_sre")
+                if self._route:
+                    # Stand-in for the model picking a tool. The call still goes through
+                    # the configured policies, exactly as it would in the real harness.
+                    tool_name, args = self._route
+                    yield ToolCall(name=tool_name, args=args)
+                    decision = evaluate_mock_policy(self.policies, tool_name)
                     if decision == "allow":
                         try:
-                            diagnosis = await diagnose_sre(self.prompt)
+                            # Looked up at call time, so tests can patch the tool.
+                            result = await globals()[tool_name](**args)
+                            diagnosis = summarize_report(result)
                         except Exception as diag_err:
-                            logger.error(f"Mock orchestrator failed to run diagnose_sre: {diag_err}")
-                            diagnosis = f"Error: diagnose_sre failed: {diag_err!s}"
+                            logger.error(f"Mock orchestrator failed to run {tool_name}: {diag_err}")
+                            diagnosis = f"Error: {tool_name} failed: {diag_err!s}"
                     else:
-                        logger.warning(f"Policy decision for diagnose_sre is '{decision}'. Tool call blocked.")
+                        logger.warning(f"Policy decision for {tool_name} is '{decision}'. Tool call blocked.")
                         diagnosis = (
-                            f"The `diagnose_sre` tool call was blocked by the safety policy (decision: {decision})."
+                            f"The `{tool_name}` tool call was blocked by the safety policy (decision: {decision})."
                         )
                     self._text = diagnosis
 
@@ -189,8 +232,8 @@ if not HAS_ANTIGRAVITY:
                         target="TARGET_USER",
                         status="DONE",
                         content=self._text,
-                        thinking="Delegated SRE diagnostics to the diagnose_sre tool.",
-                        tool_calls=[{"name": "diagnose_sre", "args": {"prompt": self.prompt}}],
+                        thinking=f"Delegated to the {tool_name} tool.",
+                        tool_calls=[{"name": tool_name, "args": args}],
                     )
                     self.conversation._steps.append(model_step)
                 else:
@@ -236,8 +279,7 @@ if not HAS_ANTIGRAVITY:
             pass
 
         async def chat(self, prompt: str) -> Any:
-            # Check if SRE diagnostics keyword is present
-            is_diag = any(x in prompt.lower() for x in ("diagnose", "error", "trace", "latency", "sre"))
+            route = mock_route(prompt)
 
             # Setup session in database
             conv_id = self.conversation_id
@@ -256,8 +298,8 @@ if not HAS_ANTIGRAVITY:
             self.conversation._steps.append(user_step)
 
             class MockResponseWrapper:
-                def __init__(self, is_diag: bool, prompt: str, conversation: Any, policies: list[Any]) -> None:
-                    self.response = MockResponse(is_diag, prompt, conversation, policies)
+                def __init__(self, route: Any, prompt: str, conversation: Any, policies: list[Any]) -> None:
+                    self.response = MockResponse(route, prompt, conversation, policies)
 
                 @property
                 def chunks(self):
@@ -272,7 +314,7 @@ if not HAS_ANTIGRAVITY:
                 async def cancel(self):
                     pass
 
-            return MockResponseWrapper(is_diag, prompt, self.conversation, self.config.policies)
+            return MockResponseWrapper(route, prompt, self.conversation, self.config.policies)
 
         @property
         def conversation_id(self) -> str | None:
@@ -355,6 +397,8 @@ class DiagnosisSink:
 
     on_progress: Callable[[str], None] = lambda _text: None
     report: str = ""
+    # The SRE skill that produced `report`, e.g. "list_incidents".
+    skill: str = ""
     # The A2A contextId for this chat, so the SRE agent keeps one session per conversation.
     context_id: str = ""
     progress: list[str] = field(default_factory=list)
@@ -373,49 +417,76 @@ def _emit_progress(text: str) -> None:
         sink.emit(text)
 
 
-@register_tool
-async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool = False) -> str:
-    """Delegates complex SRE diagnostics, trace correlation, and log analysis to the SRE Sub-Agent.
+SIMULATION_PROJECT = "simulation-project-123"
 
-    Args:
-        prompt: The SRE diagnostic prompt explaining the issue or symptoms.
-        project_id: The GCP Project ID. If None, uses default project.
-        refresh: Set True to force a fresh infrastructure rescan/discovery.
 
-    Returns:
-        A markdown-formatted SRE incident diagnosis report.
+async def _run_in_process(skill: str, prompt: str, project_id: str | None, trace_id: str | None) -> str:
+    """Runs an SRE skill in this process (standalone simulation: no SRE service is running)."""
+    resolved_project = project_id or os.environ.get("GCP_PROJECT") or SIMULATION_PROJECT
+    if skill == "diagnose_incident":
+        from sre_agent.gcp_tools import TRACE_SCAN_SIZE, query_traces
+        from sre_agent.sre_workflow import run_sre_diagnostics
+
+        traces_json = await query_traces(project_id=resolved_project, limit=TRACE_SCAN_SIZE)
+        return await run_sre_diagnostics(traces_json, resolved_project, question=prompt, trace_id=trace_id)
+
+    from sre_agent.diagnosis import Progress, run_list_incidents, run_post_mortem
+
+    run = (
+        run_list_incidents(project_id=resolved_project)
+        if skill == "list_incidents"
+        else run_post_mortem(prompt=prompt, project_id=resolved_project, trace_id=trace_id)
+    )
+    report = ""
+    async for update in run:
+        if isinstance(update, Progress):
+            _emit_progress(update.text)
+        else:
+            report = update.text
+    return report
+
+
+async def _call_sre_skill(
+    skill: str, prompt: str, project_id: str | None = None, trace_id: str | None = None, refresh: bool = False
+) -> str:
+    """Runs one of the SRE agent's A2A skills and returns its Markdown result.
+
+    The SRE engine's agent card (/.well-known/agent-card.json) lists the skills; the
+    request metadata names the one to run. Progress arrives as task status updates
+    (forwarded to the chat), the result as the task artifact. The result is also left
+    in the request's `DiagnosisSink`, so the UI can show it in full as a card.
     """
     sre_agent_url = os.getenv("SRE_AGENT_URL")
     mock_mode = os.getenv("MOCK_GCP", "false").lower() == "true"
 
     # Standalone simulation (simulate_incident.py): no sub-agent service is
-    # running, so run the same workflow in-process. When SRE_AGENT_URL is set
+    # running, so run the same pipelines in-process. When SRE_AGENT_URL is set
     # (docker-compose, Cloud Run) always delegate over A2A.
     if mock_mode and not sre_agent_url:
-        logger.info("MOCK_GCP is true and SRE_AGENT_URL is unset. Running SRE workflow in-process.")
-        _emit_progress("Running the SRE diagnostics workflow in-process (simulation mode)...")
+        logger.info(f"MOCK_GCP is true and SRE_AGENT_URL is unset. Running {skill} in-process.")
+        _emit_progress(f"Running the SRE skill `{skill}` in-process (simulation mode)...")
         try:
-            from sre_agent.gcp_tools import query_traces
-            from sre_agent.sre_workflow import run_sre_diagnostics
-
-            resolved_project = project_id or os.environ.get("GCP_PROJECT") or "simulation-project-123"
-            traces_json = await query_traces(project_id=resolved_project, limit=10)
-            report = await run_sre_diagnostics(traces_json=traces_json, project_id=resolved_project)
+            report = await _run_in_process(skill, prompt, project_id, trace_id)
         except Exception as mock_err:
-            logger.error(f"Failed to run in-process mock diagnostics: {mock_err}")
-            report = f"Error: in-process SRE diagnostics failed: {mock_err!s}"
+            logger.error(f"Failed to run {skill} in-process: {mock_err}")
+            report = f"Error: in-process SRE skill {skill} failed: {mock_err!s}"
     else:
-        # The SRE engine is an A2A agent: its card at /.well-known/agent-card.json says how
-        # to reach it. Progress arrives as task status updates, the report as the artifact.
         base_url = sre_agent_url or "http://sre-agent:8080"
         sink = diagnosis_sink.get()
-        logger.info(f"Delegating to the SRE agent over A2A: {base_url}")
-        _emit_progress("Contacting the SRE diagnostics sub-agent over A2A...")
+        logger.info(f"Calling the SRE agent's {skill} skill over A2A: {base_url}")
+        _emit_progress(f"Contacting the SRE diagnostics sub-agent over A2A (skill `{skill}`)...")
+        metadata: dict[str, Any] = {
+            "skill": skill,
+            "project_id": project_id or os.environ.get("GCP_PROJECT", ""),
+            "refresh": refresh,
+        }
+        if trace_id:
+            metadata["trace_id"] = trace_id
         try:
             result = await call_agent(
                 base_url,
                 prompt,
-                {"project_id": project_id or os.environ.get("GCP_PROJECT", ""), "refresh": refresh},
+                metadata,
                 context_id=sink.context_id if sink else "",
                 on_progress=_emit_progress,
             )
@@ -426,23 +497,84 @@ async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool
 
     sink = diagnosis_sink.get()
     if sink is not None:
-        sink.report = report
+        sink.report, sink.skill = report, skill
     return report
 
 
+@register_tool
+async def list_incidents(project_id: str | None = None) -> str:
+    """Lists the recent failing and slow requests in the project, most important first.
+
+    Fast (no deep analysis). Use it for questions like "what is failing?", "any recent
+    errors?" or "what are the latest incidents?".
+
+    Args:
+        project_id: The GCP Project ID. If None, uses the default project.
+
+    Returns:
+        A Markdown table of incidents with their trace IDs.
+    """
+    return await _call_sre_skill("list_incidents", "List the recent incidents.", project_id)
+
+
+@register_tool
+async def diagnose_sre(
+    prompt: str, project_id: str | None = None, refresh: bool = False, trace_id: str | None = None
+) -> str:
+    """Delegates root-cause diagnosis of an incident to the SRE Sub-Agent.
+
+    It picks the request the prompt is about (or the most important recent one),
+    finds the bottleneck span, correlates logs and metrics, and appends a post-mortem.
+    Takes 20-30 seconds.
+
+    Args:
+        prompt: The user's question, explaining the issue or symptoms.
+        project_id: The GCP Project ID. If None, uses default project.
+        refresh: Set True to force a fresh infrastructure rescan/discovery.
+        trace_id: The 32-character trace ID to diagnose, when the user names one.
+
+    Returns:
+        A markdown-formatted SRE incident diagnosis report.
+    """
+    return await _call_sre_skill("diagnose_incident", prompt, project_id, trace_id, refresh)
+
+
+@register_tool
+async def write_post_mortem(prompt: str, trace_id: str | None = None, project_id: str | None = None) -> str:
+    """Writes the incident post-mortem for one trace: overview, timeline, root cause, next steps.
+
+    Args:
+        prompt: The user's request, for context.
+        trace_id: The 32-character trace ID of the incident. If None, the most important
+            recent incident is written up.
+        project_id: The GCP Project ID. If None, uses the default project.
+
+    Returns:
+        A Markdown post-mortem document.
+    """
+    return await _call_sre_skill("write_post_mortem", prompt, project_id, trace_id)
+
+
 SYSTEM_INSTRUCTIONS = (
-    "You are a user-facing Orchestrator agent.\n"
-    "Your role is to assist the user. If the user requests SRE incident diagnostics, "
-    "trace analysis, error log reviews, or database debugging, delegate the task "
-    "immediately to the SRE diagnostics agent using the 'diagnose_sre' tool and present "
-    "the final report to the user verbatim, including any post-mortem section. "
-    "Do not attempt to run diagnostics yourself."
+    "You are a user-facing Orchestrator agent for SRE questions. You never investigate yourself: "
+    "you delegate to the SRE diagnostics agent through exactly one of these tools.\n"
+    "- 'list_incidents': what is failing or slow right now (fast). Use it for 'what are the latest "
+    "failures?', 'is anything broken?'.\n"
+    "- 'diagnose_sre': the root cause of an incident (slower). Pass the user's question as `prompt`, "
+    "and `trace_id` when they name a trace.\n"
+    "- 'write_post_mortem': the post-mortem of an incident. Pass `trace_id` when known.\n"
+    "Pick the cheapest tool that answers the question. Answer follow-up questions about a result "
+    "already in this conversation (a trace ID, a service, a timestamp) from the conversation, "
+    "without calling a tool again.\n"
+    "After a tool call, reply with a short summary of 2-4 sentences: what is wrong, where, and the "
+    "trace ID, plus the natural next step. The user interface shows the tool's full result as a "
+    "card under your reply, so do not repeat tables or reports."
 )
 
 
 def build_safety_policies() -> list[Any]:
     """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""
-    return [deny("*"), allow("diagnose_sre")]
+    return [deny("*"), allow("list_incidents"), allow("diagnose_sre"), allow("write_post_mortem")]
 
 
 def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:

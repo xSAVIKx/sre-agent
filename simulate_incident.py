@@ -92,9 +92,13 @@ async def run_simulation() -> None:
     # 2. Boot the SRE agent
     logger.info("Booting Antigravity SRE Agent...")
     try:
-        from agent.config import Agent, load_agent_config
+        from agent.config import Agent, DiagnosisSink, diagnosis_sink, load_agent_config
 
         config = load_agent_config()
+        # The Orchestrator replies with a short summary; the tool's full report lands here
+        # (the chat UI shows it as a card under the reply).
+        sink = DiagnosisSink()
+        diagnosis_sink.set(sink)
 
         logger.info("Invoking agent diagnosis loop...")
         async with Agent(config) as agent:
@@ -102,9 +106,11 @@ async def run_simulation() -> None:
             response = await agent.chat(
                 "Gateway service is throwing errors and latency is spiking. Find the root cause."
             )
-            report = await response.text()
+            reply = await response.text()
 
-            _print_report("AGENT DIAGNOSIS REPORT", report)
+            if sink.report:
+                _print_report("AGENT REPLY", reply)
+            _print_report("AGENT DIAGNOSIS REPORT", sink.report or reply)
 
     except Exception as e:
         logger.exception(f"Failed to run SRE Agent diagnostics: {e}")

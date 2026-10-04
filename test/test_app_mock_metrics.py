@@ -63,5 +63,31 @@ class TestMockMetrics(unittest.TestCase):
         self.assertEqual(len(db), 1)
 
 
+class TestGatewayTrace(unittest.TestCase):
+    """Deployed, the gateway joins the trace Cloud Run's front end started for the request."""
+
+    def test_gateway_span_continues_the_callers_trace(self) -> None:
+        from fastapi.testclient import TestClient
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+        from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+
+        exporter = InMemorySpanExporter()
+        provider = TracerProvider(sampler=ALWAYS_ON)  # as app/main.py configures it
+        provider.add_span_processor(SimpleSpanProcessor(exporter))
+        caller = "00-" + "ab" * 16 + "-" + "cd" * 8 + "-00"  # "not sampled", as Cloud Run often sends
+        with (
+            mock.patch.object(chaos_monkey, "IS_MOCK", False),
+            mock.patch.object(chaos_monkey, "tracer", provider.get_tracer("test")),
+            mock.patch.dict("os.environ", {"BACKEND_SERVICE_URL": "http://127.0.0.1:9"}),
+        ):
+            TestClient(chaos_monkey.app).get("/api/gateway", headers={"traceparent": caller})
+
+        (span,) = [s for s in exporter.get_finished_spans() if s.name == "/api/gateway"]
+        self.assertEqual(format(span.context.trace_id, "032x"), "ab" * 16)
+        self.assertEqual(format(span.parent.span_id, "016x"), "cd" * 8)
+
+
 if __name__ == "__main__":
     unittest.main()
