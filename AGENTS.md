@@ -96,11 +96,22 @@ To synchronize dependencies locally, run:
 uv sync --all-packages
 ```
 
-### 2. Multi-Stage Docker Optimization
-Container setups utilize multi-stage builds to optimize image size and security:
-* **Builder Stage**: Installs `uv` to resolve and build the Python virtual environment (`.venv`) cleanly.
-* **Runner Stage**: Copies only the pre-compiled `.venv` and source code. `uv` is **not** included in the final runtime container.
-* When editing Dockerfiles, preserve this multi-stage separation.
+### 2. Docker Images: Shared Dependency Base
+All four services run on one shared dependency image, `docker/base.Dockerfile`:
+* **Base image**: a multi-stage build. The builder stage installs `uv` and runs
+  `uv sync --all-packages --no-install-workspace`; the runtime stage copies only the `.venv`.
+  `uv` is **not** included in any runtime image.
+* **Service images** (`<service>/Dockerfile`) are `FROM ${BASE_IMAGE}` and only copy source code.
+  Never install dependencies in a service Dockerfile: add them to the package's `pyproject.toml`
+  and `uv.lock`, which changes the base image's tag.
+* **Tags** are content-addressed: `scripts/base-image.sh tag` hashes `uv.lock`, every
+  `pyproject.toml` and the base Dockerfile. `.github/workflows/base-image.yml` publishes
+  `ghcr.io/xsavikx/sre-agent-base:lock-<hash>` (amd64 + arm64). `deploy.sh` uses the published
+  image when it exists and builds it in the pipeline when it doesn't, so a lock change never ships
+  stale dependencies.
+* **Cloud Build**: the root `cloudbuild.yaml` builds and deploys all services in parallel, wired
+  together through Cloud Run's deterministic `https://<service>-<project number>.<region>.run.app`
+  URLs. docker-compose builds the base locally (`additional_contexts: base: service:base`).
 
 ### 3. Running Tests
 Each package follows the `src/` + `test/` layout, so put its `src` on `PYTHONPATH` when running its

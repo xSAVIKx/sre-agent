@@ -1,4 +1,13 @@
 services:
+  # Shared dependency image (docker/base.Dockerfile). Built once and reused by the
+  # four services below through `additional_contexts`; it never runs on its own.
+  base:
+    build:
+      context: .
+      dockerfile: docker/base.Dockerfile
+    image: sre-agent-base:local
+    scale: 0
+
   firestore-emulator:
     image: google/cloud-sdk:emulators
     container_name: firestore-emulator
@@ -15,6 +24,8 @@ services:
     build:
       context: .
       dockerfile: inventory_agent/Dockerfile
+      additional_contexts:
+        base: service:base
     container_name: inventory-agent
     ports:
       - "8083:8080"
@@ -30,6 +41,8 @@ services:
     build:
       context: .
       dockerfile: sre_agent/Dockerfile
+      additional_contexts:
+        base: service:base
     container_name: sre-agent
     ports:
       - "8082:8080"
@@ -50,6 +63,8 @@ services:
     build:
       context: .
       dockerfile: agent/Dockerfile
+      additional_contexts:
+        base: service:base
     container_name: orchestrator-agent
     ports:
       - "8080:8080"
@@ -69,6 +84,8 @@ services:
     build:
       context: .
       dockerfile: app/Dockerfile
+      additional_contexts:
+        base: service:base
     container_name: target-app
     ports:
       - "8081:8080"

@@ -98,3 +98,15 @@ jobs:
           uv run python simulate_incident.py | tee simulation.log
           grep -q "Identified Bottleneck" simulation.log
           grep -q "Incident Post-Mortem" simulation.log
+
+  docker:
+    name: docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # Builds the shared base and all four service images exactly as
+      # docker-compose does, so a broken Dockerfile fails the PR instead of the
+      # next deploy. Nothing is pushed.
+      - name: Build every image
+        run: docker compose build
