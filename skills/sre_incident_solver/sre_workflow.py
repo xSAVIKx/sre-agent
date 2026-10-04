@@ -41,10 +41,13 @@ except ImportError as e:
     class AdkAgent:  # type: ignore
         """Mock ADK Agent for resilience."""
 
-        def __init__(self, name: str, instruction: str, model: str = "gemini-3.8-flash") -> None:
+        def __init__(
+            self, name: str, instruction: str, model: str = "gemini-3.8-flash", tools: list[Any] | None = None
+        ) -> None:
             self.name = name
             self.instruction = instruction
             self.model = model
+            self.tools = tools or []
 
         async def chat(self, prompt: str) -> Any:
             """Mock chat method."""

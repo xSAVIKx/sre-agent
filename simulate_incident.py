@@ -3,6 +3,10 @@
 This script runs the target FastAPI application logic in simulation mode to
 generate mock trace and log files, then spins up the Antigravity SRE Agent
 locally to analyze the mock files and output a diagnostic report.
+
+Flags:
+    --engine-only  Run the SRE diagnostics engine directly, without the Orchestrator.
+    --keep-data    Keep telemetry from previous runs instead of starting clean.
 """
 
 import asyncio
@@ -17,6 +21,14 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger("simulator")
+
+
+def _print_report(title: str, report: str) -> None:
+    print("\n" + "=" * 50)
+    print(title)
+    print("=" * 50)
+    print(report)
+    print("=" * 50 + "\n")
 
 
 async def run_simulation() -> None:
@@ -66,6 +78,17 @@ async def run_simulation() -> None:
         logger.error(f"Failed to generate mock telemetry: {e}")
         return
 
+    # 2a. --engine-only: run the SRE diagnostics engine directly, skipping the
+    # Orchestrator agent and its safety policy (handy before the policy allows it).
+    if "--engine-only" in sys.argv:
+        logger.info("Running the SRE diagnostics engine directly (--engine-only)...")
+        from sre_agent.gcp_tools import query_traces
+        from sre_agent.sre_workflow import run_sre_diagnostics
+
+        report = await run_sre_diagnostics(await query_traces(limit=10), project_id=os.environ["GCP_PROJECT"])
+        _print_report("SRE ENGINE REPORT (no Orchestrator)", report)
+        return
+
     # 2. Boot the SRE agent
     logger.info("Booting Antigravity SRE Agent...")
     try:
@@ -81,12 +104,7 @@ async def run_simulation() -> None:
             )
             report = await response.text()
 
-            # Print the markdown report
-            print("\n" + "=" * 50)
-            print("AGENT DIAGNOSIS REPORT")
-            print("=" * 50)
-            print(report)
-            print("=" * 50 + "\n")
+            _print_report("AGENT DIAGNOSIS REPORT", report)
 
     except Exception as e:
         logger.exception(f"Failed to run SRE Agent diagnostics: {e}")

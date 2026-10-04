@@ -842,6 +842,25 @@
             padding: 0;
         }
 
+        /* Incident severity badge (A2UI `severity_badge`) */
+        .severity-badge {
+            display: inline-flex;
+            align-self: flex-start;
+            width: fit-content;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 13px;
+            letter-spacing: 0.04em;
+            color: #fff;
+        }
+        .severity-badge.sev1 { background: var(--danger); }
+        .severity-badge.sev2 { background: var(--warning); color: #111827; }
+        .severity-badge.sev3 { background: var(--success); }
+
         /* PM download button styles */
         .download-pm-btn {
             margin-top: 12px;
@@ -1175,6 +1194,14 @@
 
                         list.appendChild(listItems);
                         containerDiv.appendChild(list);
+                        break;
+
+                    case 'severity_badge':
+                        const badge = document.createElement('div');
+                        const level = String(comp.level || 'SEV3');
+                        badge.className = `severity-badge ${level.toLowerCase()}`;
+                        badge.textContent = `${level} · bottleneck owns ${comp.contribution}% of the request`;
+                        containerDiv.appendChild(badge);
                         break;
 
                     case 'download_button':

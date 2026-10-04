@@ -1,0 +1,13 @@
+--- a/agent/src/agent/config.py
++++ b/agent/src/agent/config.py
+@@ -480,9 +480,7 @@
+ 
+ def build_safety_policies() -> list[Any]:
+     """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""
+-    # TODO(step-4): Everything is denied, so the Orchestrator cannot even delegate. Keep the
+-    #   deny-by-default rule and add one `allow(...)` for the single tool it needs.
+-    return [deny("*")]
++    return [deny("*"), allow("diagnose_sre")]
+ 
+ 
+ def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:
