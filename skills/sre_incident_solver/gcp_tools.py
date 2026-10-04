@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import urllib.parse
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -506,6 +507,34 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
         return json.dumps({"error": f"GCP Trace API Error: {e!s}"}, indent=2)
 
 
+# Cloud Logging's httpRequest fields that describe a request, by the names the tools use.
+_HTTP_REQUEST_FIELDS = (
+    ("method", "requestMethod"),
+    ("url", "requestUrl"),
+    ("status", "status"),
+    ("latency", "latency"),
+)
+
+
+def _log_entry_dict(entry: Any) -> dict[str, Any]:
+    """A Cloud Logging entry as the tools return it."""
+    is_json = isinstance(entry.payload, dict)
+    log = {
+        "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
+        "severity": entry.severity,
+        "text_payload": entry.payload if not is_json else None,
+        "json_payload": entry.payload if is_json else None,
+        "resource": entry.resource.type if entry.resource else None,
+        "trace": entry.trace,
+        "service": (entry.resource.labels or {}).get("service_name") if entry.resource else None,
+    }
+    # Request logs (e.g. Cloud Run's) carry the request instead of a message.
+    if entry.http_request:
+        request = {name: entry.http_request.get(key) for name, key in _HTTP_REQUEST_FIELDS}
+        log["http_request"] = {name: value for name, value in request.items() if value is not None}
+    return log
+
+
 @register_tool
 @retry_async(max_retries=3, initial_delay=1.0)
 @otel_trace("query_logs_by_trace")
@@ -579,20 +608,7 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
         logger.info(f"[GCP Observability] Running list_entries with filter: {filter_str}")
         entries = client.list_entries(filter_=filter_str, max_results=limit)
 
-        logs_list = []
-        for entry in entries:
-            is_json = isinstance(entry.payload, dict)
-            logs_list.append(
-                {
-                    "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
-                    "severity": entry.severity,
-                    "text_payload": entry.payload if not is_json else None,
-                    "json_payload": entry.payload if is_json else None,
-                    "resource": entry.resource.type if entry.resource else None,
-                    "trace": entry.trace,
-                    "service": (entry.resource.labels or {}).get("service_name") if entry.resource else None,
-                }
-            )
+        logs_list = [_log_entry_dict(entry) for entry in entries]
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
         return json.dumps(logs_list, indent=2)
     except Exception as e:
@@ -719,22 +735,10 @@ async def query_logs(query: str, project_id: str | None = None, limit: int = 50)
     try:
         client = cloud_logging.Client(project=resolved_project)
         logger.info(f"[GCP Observability] Running list_entries with query filter: {query}")
-        entries = client.list_entries(filter_=query, max_results=limit)
+        # Newest first: callers look for the latest errors (the API default is oldest first).
+        entries = client.list_entries(filter_=query, max_results=limit, order_by=cloud_logging.DESCENDING)
 
-        logs_list = []
-        for entry in entries:
-            is_json = isinstance(entry.payload, dict)
-            logs_list.append(
-                {
-                    "timestamp": entry.timestamp.isoformat() if entry.timestamp else None,
-                    "severity": entry.severity,
-                    "text_payload": entry.payload if not is_json else None,
-                    "json_payload": entry.payload if is_json else None,
-                    "resource": entry.resource.type if entry.resource else None,
-                    "trace": entry.trace,
-                    "service": (entry.resource.labels or {}).get("service_name") if entry.resource else None,
-                }
-            )
+        logs_list = [_log_entry_dict(entry) for entry in entries]
         logger.info(f"[GCP Observability] Retrieved {len(logs_list)} log entries from GCP Cloud Logging")
         return json.dumps(logs_list, indent=2)
     except Exception as e:
@@ -1122,11 +1126,19 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
 
 
 def _log_message(log: dict[str, Any]) -> str:
-    """A log entry's message, whichever payload it came in (may be empty)."""
+    """A log entry's message, whichever payload it came in (may be empty).
+
+    Request logs (e.g. Cloud Run's) have no message, only the request: it is the message.
+    """
     payload = log.get("json_payload")
-    if isinstance(payload, dict):
-        return str(payload.get("message") or "")
-    return str(log.get("text_payload") or log.get("message") or "")
+    message = str(payload.get("message") or "") if isinstance(payload, dict) else ""
+    message = message or str(log.get("text_payload") or log.get("message") or "")
+    request = log.get("http_request") or {}
+    if not message and request:
+        message = f"{request.get('method', '')} {request.get('url', '')} -> HTTP {request.get('status', '?')}"
+        if request.get("latency"):
+            message += f" after {request['latency']}"
+    return message.strip()
 
 
 _TIMEOUT_MARKERS = ("timeout", "timed out", "deadline exceeded")
@@ -1147,12 +1159,30 @@ def _event_time(ts: str) -> datetime.datetime:
     return parsed
 
 
-def _render_post_mortem(trace_id: str, data: dict[str, Any], logs: list[dict[str, Any]]) -> str:
+# The console links a post-mortem lists, in order: (links key, label).
+_LINK_LABELS = (("trace", "Trace in Cloud Trace"), ("logs", "Logs in Cloud Logging"))
+
+
+def console_links(trace_id: str, project_id: str | None = None) -> dict[str, str]:
+    """Google Cloud console links to a trace and to its logs ({} in mock mode: no real project)."""
+    if IS_MOCK:
+        return {}
+    project = _get_project_id(project_id)
+    logs_query = urllib.parse.quote(f'trace="projects/{project}/traces/{trace_id}"', safe="")
+    return {
+        "trace": f"https://console.cloud.google.com/traces/list?project={project}&tid={trace_id}",
+        "logs": f"https://console.cloud.google.com/logs/query;query={logs_query}?project={project}",
+    }
+
+
+def _render_post_mortem(
+    trace_id: str, data: dict[str, Any], logs: list[dict[str, Any]], links: dict[str, str] | None = None
+) -> str:
     """Builds the post-mortem from what the trace and its logs actually show.
 
     Nothing in it is assumed: the bottleneck and its share of the request come from
     the cascade, errors from the spans and logs, and the status stays OPEN until a
-    human confirms the fix.
+    human confirms the fix. `links` (from `console_links`) point to the raw telemetry.
     """
     spans = data.get("spans", [])
     duration_ms = data.get("durationMs", 0) or 0
@@ -1242,6 +1272,7 @@ def _render_post_mortem(trace_id: str, data: dict[str, Any], logs: list[dict[str
         ]
     actions.append("Confirm the fix, then mark this post-mortem RESOLVED.")
 
+    link_lines = "".join(f"*   **{label}**: {links[key]}\n" for key, label in _LINK_LABELS if key in (links or {}))
     return (
         f"# 🚨 Incident Post-Mortem\n\n"
         f"## 📝 Incident Overview\n"
@@ -1251,7 +1282,8 @@ def _render_post_mortem(trace_id: str, data: dict[str, Any], logs: list[dict[str
         f"*   **Impact Duration**: `{duration_ms} ms` (Total request execution)\n"
         f"*   **Outcome**: {outcome}\n"
         f"*   **Bottleneck**: {bottleneck_line}\n"
-        f"*   **Status**: `OPEN` (generated from telemetry; confirm before closing)\n\n"
+        f"*   **Status**: `OPEN` (generated from telemetry; confirm before closing)\n"
+        f"{link_lines}\n"
         f"## 🔍 Incident Timeline\n{timeline or 'No span or log events recorded.'}\n\n"
         f"## 🎯 Root Cause Analysis (RCA)\n{rca}\n\n"
         f"## 🛠️ Next Steps\n" + "\n".join(f"{n}.  {a}" for n, a in enumerate(actions, 1))
@@ -1282,4 +1314,6 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
         # No trace, no evidence: say so instead of writing a post-mortem full of "unknown".
         return f"Error: No spans found for trace {trace_id}: {data.get('error', 'the trace is empty')}"
 
-    return _render_post_mortem(trace_id, data, logs if isinstance(logs, list) else [])
+    return _render_post_mortem(
+        trace_id, data, logs if isinstance(logs, list) else [], console_links(trace_id, project_id)
+    )

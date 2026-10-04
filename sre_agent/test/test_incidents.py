@@ -109,6 +109,32 @@ class TestPostMortem(unittest.TestCase):
             self.assertNotIn(claim, report)
         self.assertIn("**Status**: `OPEN`", report)
 
+    def test_console_links_in_real_mode_only(self) -> None:
+        with mock.patch.object(gcp_tools, "IS_MOCK", False):
+            links = gcp_tools.console_links("t" * 32, "demo")
+            report = gcp_tools._render_post_mortem("t" * 32, self.SLOW, [], links)
+        self.assertEqual(links["trace"], f"https://console.cloud.google.com/traces/list?project=demo&tid={'t' * 32}")
+        self.assertIn("query=trace%3D%22projects%2Fdemo%2Ftraces%2F", links["logs"])
+        self.assertIn(f"*   **Logs in Cloud Logging**: {links['logs']}", report)
+        with mock.patch.object(gcp_tools, "IS_MOCK", True):
+            self.assertEqual(gcp_tools.console_links("t" * 32, "demo"), {})
+
+    def test_request_logs_have_a_message(self) -> None:
+        """Cloud Run request logs carry no payload, only the request."""
+        log = {"text_payload": None, "json_payload": None,
+               "http_request": {"method": "GET", "url": "https://x/api/gateway", "status": 500, "latency": "10.4s"}}  # fmt: skip
+        self.assertEqual(gcp_tools._log_message(log), "GET https://x/api/gateway -> HTTP 500 after 10.4s")
+
+    def test_error_logs_are_read_newest_first(self) -> None:
+        client = mock.Mock()
+        client.list_entries.return_value = []
+        with (
+            mock.patch.object(gcp_tools, "IS_MOCK", False),
+            mock.patch.object(gcp_tools.cloud_logging, "Client", return_value=client),
+        ):
+            asyncio.run(gcp_tools.query_logs("severity>=ERROR", project_id="demo"))
+        self.assertEqual(client.list_entries.call_args.kwargs["order_by"], gcp_tools.cloud_logging.DESCENDING)
+
     def test_missing_trace_is_an_error_not_an_empty_post_mortem(self) -> None:
         missing = json.dumps({"error": "Trace ID t not found in mock data."})
         with (

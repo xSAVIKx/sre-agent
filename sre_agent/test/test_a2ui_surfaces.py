@@ -20,6 +20,10 @@ INCIDENTS = [
     {"traceId": "b" * 32, "incident": "slow", "service": "sre-chaos-monkey", "name": "/api/gateway",
      "durationMs": 9000, "startTime": "2026-10-04T17:40:00Z"},
 ]  # fmt: skip
+LINKS = {
+    "trace": f"https://console.cloud.google.com/traces/list?project=demo&tid={TRACE}",
+    "logs": "https://console.cloud.google.com/logs/query;query=x?project=demo",
+}
 POST_MORTEM = "# 🚨 Incident Post-Mortem\n\n## 📝 Incident Overview\n*   **Trace ID**: `x`"
 DIAGNOSIS = (
     "### Root cause\nThe database timed out.\n\n"
@@ -50,6 +54,8 @@ class TestSurfacesAreValidA2ui(unittest.TestCase):
             "healthy diagnosis": a2ui_surfaces.diagnosis_surface("All systems are healthy.", None, None),
             "post-mortem": a2ui_surfaces.post_mortem_surface(POST_MORTEM, TRACE, 64.0),
             "nothing to write up": a2ui_surfaces.post_mortem_surface("Nothing.", None, None),
+            "diagnosis with links": a2ui_surfaces.diagnosis_surface(DIAGNOSIS, TRACE, 97.5, LINKS),
+            "post-mortem with links": a2ui_surfaces.post_mortem_surface(POST_MORTEM, TRACE, 64.0, LINKS),
         }
         for name, messages in surfaces.items():
             with self.subTest(name):
@@ -93,6 +99,19 @@ class TestDiagnosis(unittest.TestCase):
         self.assertIn("\n#### 📝 Incident Overview", components["tab-2"]["text"])
         self.assertEqual(components["download"]["content"], DIAGNOSIS)
         self.assertNotIn("post-mortem", components, "the post-mortem is a tab, not a second button")
+
+
+class TestConsoleLinks(unittest.TestCase):
+    def test_link_buttons_open_the_trace_and_its_logs(self) -> None:
+        components = _components(a2ui_surfaces.post_mortem_surface(POST_MORTEM, TRACE, 64.0, LINKS))
+        self.assertEqual(components["actions"]["children"], ["open-trace", "open-logs", "download"])
+        self.assertEqual(
+            components["open-logs"]["action"], {"functionCall": {"call": "openUrl", "args": {"url": LINKS["logs"]}}}
+        )
+
+    def test_no_links_no_link_buttons(self) -> None:
+        components = _components(a2ui_surfaces.diagnosis_surface(DIAGNOSIS, TRACE, 97.5))
+        self.assertEqual(components["actions"]["children"], ["download"])
 
 
 class TestPostMortem(unittest.TestCase):

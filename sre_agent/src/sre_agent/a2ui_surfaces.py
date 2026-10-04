@@ -185,6 +185,30 @@ def _tabs(tabs: list[tuple[str, str]]) -> list[dict[str, Any]]:
     ]
 
 
+def _link_button(component_id: str, label: str, url: str) -> list[dict[str, Any]]:
+    """A button that opens `url` in the browser (the basic catalog's openUrl function)."""
+    return [
+        {
+            "id": component_id,
+            "component": "Button",
+            "child": f"{component_id}-label",
+            "action": {"functionCall": {"call": "openUrl", "args": {"url": url}}},
+        },
+        _text(f"{component_id}-label", label),
+    ]
+
+
+def _actions(filename: str, report: str, links: dict[str, str] | None) -> list[dict[str, Any]]:
+    """The card's action row ("actions"): links to the raw telemetry, and a download."""
+    buttons = []
+    if links and links.get("trace"):
+        buttons += _link_button("open-trace", "Open trace", links["trace"])
+    if links and links.get("logs"):
+        buttons += _link_button("open-logs", "Open logs", links["logs"])
+    children = [c["id"] for c in buttons if c["component"] == "Button"] + ["download"]
+    return [{"id": "actions", "component": "Row", "children": children}, *buttons, _download(filename, report)]
+
+
 def _download(filename: str, content: str) -> dict[str, Any]:
     """A Download component ("download") that saves `content` as `filename`."""
     return {"id": "download", "component": "Download", "label": "Download", "filename": filename, "content": content}
@@ -254,8 +278,11 @@ def _split_report(report: str) -> list[tuple[str, str]]:
     return [(t, markdown.strip()) for t, markdown in sections if markdown.strip()]
 
 
-def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float | None) -> list[dict[str, Any]]:
-    """A diagnosis: severity, the report in tabs (its post-mortem is the last tab), and a download."""
+def diagnosis_surface(
+    report: str, trace_id: str | None, bottleneck_share: float | None, links: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """A diagnosis: severity, the report in tabs (its post-mortem is the last tab), console links
+    (`gcp_tools.console_links`) and a download."""
     if not trace_id:
         return _message_card("✅ All clear", report)
 
@@ -265,14 +292,17 @@ def diagnosis_surface(report: str, trace_id: str | None, bottleneck_share: float
         _text("title", "🔬 Incident diagnosis", "h2"),
         _text("trace", f"Trace {trace_id}", "caption"),
         *_tabs(_split_report(report)),
-        _download(f"diagnosis-{trace_id[:8]}.md", report),
+        *_actions(f"diagnosis-{trace_id[:8]}.md", report, links),
     ]
-    children = [*(c["id"] for c in badge), "title", "trace", "sections", "download"]
+    children = [*(c["id"] for c in badge), "title", "trace", "sections", "actions"]
     return _messages(_card(children, components))
 
 
-def post_mortem_surface(report: str, trace_id: str | None, bottleneck_share: float | None) -> list[dict[str, Any]]:
-    """A post-mortem: severity, the document (and AI analyst notes in their own tab), and a download."""
+def post_mortem_surface(
+    report: str, trace_id: str | None, bottleneck_share: float | None, links: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
+    """A post-mortem: severity, the document (and AI analyst notes in their own tab), console
+    links (`gcp_tools.console_links`) and a download."""
     if not trace_id:
         return _message_card("✅ Nothing to write up", report)
 
@@ -287,7 +317,7 @@ def post_mortem_surface(report: str, trace_id: str | None, bottleneck_share: flo
         _text("title", "🚨 Incident post-mortem", "h2"),
         _text("trace", f"Trace {trace_id} · status OPEN until a fix is confirmed", "caption"),
         *_tabs(tabs),
-        _download(f"post-mortem-{trace_id[:8]}.md", report),
+        *_actions(f"post-mortem-{trace_id[:8]}.md", report, links),
     ]
-    children = [*(c["id"] for c in badge), "title", "trace", "sections", "download"]
+    children = [*(c["id"] for c in badge), "title", "trace", "sections", "actions"]
     return _messages(_card(children, components))

@@ -24,7 +24,7 @@ from sre_common.middleware import target_project_contextvar
 from sre_agent import a2ui_surfaces
 from sre_agent.config import PROJECT_ID
 from sre_agent.firestore_strategy import get_sre_session, save_sre_session
-from sre_agent.gcp_tools import TRACE_SCAN_SIZE, find_bottleneck, generate_post_mortem, query_traces
+from sre_agent.gcp_tools import TRACE_SCAN_SIZE, console_links, find_bottleneck, generate_post_mortem, query_traces
 from sre_agent.incidents import find_incident
 from sre_agent.inventory_client import fetch_topology
 from sre_agent.post_mortem_analysis import analysis_enabled, analyze_post_mortem
@@ -140,7 +140,8 @@ async def diagnosis_surface(diagnosis: Diagnosis, project_id: str) -> list[dict[
     if diagnosis.failed:
         return None
     share = await _bottleneck_share(diagnosis.trace_id, project_id)
-    return a2ui_surfaces.diagnosis_surface(diagnosis.report, diagnosis.trace_id, share)
+    links = console_links(diagnosis.trace_id, project_id) if diagnosis.trace_id else None
+    return a2ui_surfaces.diagnosis_surface(diagnosis.report, diagnosis.trace_id, share, links)
 
 
 def _incident_table_row(n: int, incident: dict[str, Any]) -> str:
@@ -243,7 +244,8 @@ async def run_post_mortem(
     surface = None
     if ui and not report.startswith("Error:"):
         share = await _bottleneck_share(trace_id, resolved_project)
-        surface = a2ui_surfaces.post_mortem_surface(report, trace_id, share)
+        links = console_links(trace_id, resolved_project)
+        surface = a2ui_surfaces.post_mortem_surface(report, trace_id, share, links)
     yield Report(
         report,
         {"kind": "post_mortem", "project_id": resolved_project, "trace_id": trace_id, "llm_analysis": bool(analysis)},
