@@ -1,8 +1,8 @@
 name: Base image
 
 # Publishes the shared dependency image (docker/base.Dockerfile) to GHCR as
-# ghcr.io/<owner>/sre-agent-base:lock-<hash>, where the hash covers uv.lock, every
-# pyproject.toml and the base Dockerfile (scripts/base-image.sh). deploy.sh pulls it
+# ghcr.io/<owner>/sre-agent-base:lock-<hash>, where the hash covers uv.lock and the
+# base Dockerfile (scripts/base-image.sh). deploy.sh pulls it
 # instead of installing the dependencies on every deploy; when no image exists for
 # the current lock it builds one itself, so a lock change can never ship stale
 # dependencies - this workflow only makes the common case fast.
@@ -14,7 +14,6 @@ on:
     branches: [master, perf/fast-deploy]
     paths:
       - uv.lock
-      - "**/pyproject.toml"
       - docker/base.Dockerfile
       - scripts/base-image.sh
       - .github/workflows/base-image.yml
