@@ -4,9 +4,10 @@ Each step has a small set of tests that are red while its `TODO(step-N)` is open
 and green once it is solved. Step 0 checks your environment instead.
 """
 
-import importlib.util
+import importlib
 import os
 import shutil
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -47,7 +48,12 @@ STEP_TESTS: dict[int, tuple[str, list[tuple[list[str], str, list[str]]]]] = {
     5: ("Show the severity", [(["sre_agent/src"], "sre_agent/test", ["test_severity_badge"])]),
 }
 
-GREEN, RED, YELLOW, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[0m"
+if sys.stdout.isatty():
+    if os.name == "nt":
+        os.system("")  # turns on ANSI colors in the Windows console
+    GREEN, RED, YELLOW, RESET = "\033[32m", "\033[31m", "\033[33m", "\033[0m"
+else:
+    GREEN = RED = YELLOW = RESET = ""
 
 
 def check_environment() -> bool:
@@ -55,9 +61,18 @@ def check_environment() -> bool:
     ok = True
     print(f"Python {sys.version.split()[0]}: {GREEN}ok{RESET}")
     for module in ("fastapi", "google.adk", "google.antigravity", "sre_common", "sre_agent", "agent"):
-        found = importlib.util.find_spec(module) is not None
-        print(f"import {module}: {GREEN + 'ok' if found else RED + 'missing - run: uv sync --all-packages'}{RESET}")
-        ok &= found
+        # A real import, not only a lookup: it finds broken installs, and the first
+        # (slow) import happens now instead of during a step.
+        try:
+            importlib.import_module(module)
+            print(f"import {module}: {GREEN}ok{RESET}")
+        except Exception as exc:  # any failure has the same fix
+            print(f"import {module}: {RED}failed ({exc}) - run: uv sync --all-packages{RESET}")
+            ok = False
+    ok &= check_git()
+    with socket.socket() as probe:
+        if probe.connect_ex(("127.0.0.1", 8080)) == 0:
+            print(f"port 8080: {YELLOW}in use{RESET} - stop that program, or use: uv run workshop/chat.py --port 8090")
     if os.environ.get("GEMINI_API_KEY"):
         print(f"GEMINI_API_KEY: {GREEN}set{RESET} - the agents will use Gemini")
     else:
@@ -65,6 +80,19 @@ def check_environment() -> bool:
     if shutil.which("docker") is None:
         print(f"docker: {YELLOW}not found{RESET} - optional, only needed for the multi-container stack")
     return ok
+
+
+def check_git() -> bool:
+    """The workshop steps are git tags: git and the tag `step-00` must be there."""
+    if shutil.which("git") is None:
+        print(f"git: {RED}not found{RESET} - install it: https://git-scm.com/downloads")
+        return False
+    tags = subprocess.run(["git", "tag", "-l", "step-*"], cwd=REPO_ROOT, capture_output=True, text=True)
+    if "step-00" in tags.stdout.split():
+        print(f"git: {GREEN}ok{RESET} - workshop steps found")
+    else:
+        print(f"git: {YELLOW}no workshop steps{RESET} - for the workshop, run: git fetch origin --tags")
+    return True
 
 
 def run_step(step: int) -> bool:

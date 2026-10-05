@@ -176,6 +176,7 @@ flowchart LR
 
 | Document | Content |
 | :--- | :--- |
+| [`INSTALL.md`](INSTALL.md) | Install on macOS, Linux or Windows with one command, or let an Antigravity agent do it. |
 | [`CODELAB.md`](CODELAB.md) | A step-by-step tutorial that builds the agent from the start. |
 | [`BLOGPOST.md`](BLOGPOST.md) | The architecture and the design decisions. |
 | [`AGENTS.md`](AGENTS.md) | Rules for AI agents and human contributors. |
@@ -189,16 +190,16 @@ flowchart LR
 Run the full diagnosis workflow on your computer with **`uv`**. You do not need a GCP account,
 project or credentials.
 
-1. Clone the repository:
+1. Install the repository and its dependencies. The installer gets uv and, if necessary, Python.
+   See [`INSTALL.md`](INSTALL.md) for the options and for an agent-guided setup.
    ```bash
-   git clone https://github.com/xSAVIKx/sre-agent.git
-   cd sre-agent
+   # macOS and Linux
+   curl -LsSf https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.sh | sh
+   # Windows (PowerShell)
+   powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.ps1 | iex"
    ```
-2. Install the dependencies:
-   ```bash
-   pip install uv
-   uv sync --all-packages
-   ```
+   If you have a clone and uv: `uv sync --all-packages`.
+2. Go to the repository: `cd sre-agent`.
 3. Run the incident simulation:
    ```bash
    uv run simulate_incident.py

@@ -17,19 +17,38 @@ A `GEMINI_API_KEY` is optional:
 
 ## Before the workshop (10 minutes, at home)
 
-Install these tools: **git**, **Python 3.11+** and [**uv**](https://docs.astral.sh/uv/getting-started/installation/).
+You need **git** and a terminal. Do the installation at home: it downloads a few hundred megabytes, and
+the wifi at events is often slow.
 
-Then do these commands:
+Run this command. It installs uv (and Python, if necessary), clones the repository, creates your
+own branch `my-work` at the tag `step-00`, installs the dependencies and checks your setup:
 
 ```bash
-git clone https://github.com/xSAVIKx/sre-agent.git
-cd sre-agent
+# macOS and Linux
+curl -LsSf https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.sh | sh -s -- --workshop
+```
+
+```powershell
+# Windows (PowerShell)
+$env:SRE_AGENT_WORKSHOP = "1"
+powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.ps1 | iex"
+```
+
+When all lines of the check say `ok`, you are ready. Yellow lines are optional. If a line is red,
+see [Problems and fixes](../INSTALL.md#problems-and-fixes), or open the repository in Antigravity
+and ask: "Prepare my computer for the SRE agent workshop."
+
+If you already have the repository and uv:
+
+```bash
+git fetch origin --tags
 git switch -c my-work step-00      # your own branch, starting at step 0
-uv sync --all-packages             # downloads the dependencies (do this on good wifi)
+uv sync --all-packages             # downloads the dependencies
 uv run workshop/check.py 0         # checks your setup
 ```
 
-Optional: `export GEMINI_API_KEY=...` ([get a key](https://aistudio.google.com/apikey)).
+Optional: set `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/apikey)):
+`export GEMINI_API_KEY=...` (macOS, Linux) or `$env:GEMINI_API_KEY = "..."` (PowerShell).
 
 ## Agenda
 
@@ -83,7 +102,7 @@ uv run simulate_incident.py                 # through the Orchestrator agent (th
 uv run simulate_incident.py --engine-only   # straight to the SRE engine (skips the Orchestrator)
 
 # The web chat (no Docker needed), then open http://localhost:8080/chat:
-MOCK_GCP=true uv run uvicorn agent.main:app --port 8080
+uv run workshop/chat.py
 ```
 
 ## Architecture

@@ -60,7 +60,7 @@ The diagnosis card and the post-mortem card put the return value of `_badge` fir
    uv run workshop/check.py 5
 
    uv run simulate_incident.py                                 # fresh incident telemetry
-   MOCK_GCP=true uv run uvicorn agent.main:app --port 8080     # the web chat
+   uv run workshop/chat.py                                     # the web chat
    ```
 
 2. Open <http://localhost:8080/chat>.
