@@ -139,4 +139,5 @@ The deployment scripts (`bootstrap.sh`, `deploy.sh`, `cleanup.sh`) need bash and
 | `port 8080: in use` | Stop the other program, or use `uv run workshop/chat.py --port 8090`. |
 | `git: no workshop steps` | Run `git fetch origin --tags`. |
 | `The workshop needs git` | Install git: `xcode-select --install` (macOS), `winget install --id Git.Git -e` (Windows) or your package manager (Linux). Then open a new terminal. |
+| Windows on arm64 (for example Snapdragon laptops): `Failed to build grpcio` | Use x64 Python. Windows runs it with emulation: `uv sync --all-packages --python cpython-3.13-windows-x86_64-none`. The installer does this for you. |
 | Windows: `running scripts is disabled on this system` | Use the `powershell -ExecutionPolicy ByPass ...` command above. |

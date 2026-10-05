@@ -74,6 +74,14 @@ if (-not (Has "uv")) {
 }
 Ok (uv --version)
 
+# Some dependencies (grpcio, cryptography, watchdog) have no Windows arm64 wheels, and grpcio
+# cannot be built there. On arm64, use x64 Python: Windows runs it with its built-in emulation.
+# uv creates .venv with it, so later `uv run` and `uv sync` commands keep it.
+if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64" -or $env:PROCESSOR_ARCHITEW6432 -eq "ARM64") {
+    $env:UV_PYTHON = "cpython-3.13-windows-x86_64-none"
+    Ok "Windows on arm64: using x64 Python (some dependencies have no arm64 version)"
+}
+
 # 2. The repository
 Step "Getting the repository"
 if (-not $Dir -and (Test-Checkout ".")) {

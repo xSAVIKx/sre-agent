@@ -131,6 +131,12 @@ jobs:
         shell: bash
         run: echo "${{ runner.os }} ${{ runner.arch }}"
 
+      # The runners have a Python; a new laptop often has none. Make uv ignore it and
+      # download its own, as it does on such a laptop.
+      - name: Use only the Python that uv downloads
+        shell: bash
+        run: echo "UV_PYTHON_PREFERENCE=only-managed" >> "$GITHUB_ENV"
+
       - name: install.sh
         if: runner.os != 'Windows'
         run: |
