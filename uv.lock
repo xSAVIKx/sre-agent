@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -686,7 +686,7 @@ wheels = [
 
 [[package]]
 name = "google-cloud-firestore"
-version = "2.28.1"
+version = "2.34.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -696,14 +696,14 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a0/8a/cf7722ce8dec68f7ad67d47fb7696301c7b7635f73d291f57e76c0a0a2b2/google_cloud_firestore-2.28.1.tar.gz", hash = "sha256:833fefd9a8b9c68c750da1c0fdd93e4ca1a3ab728081c7d6c57c362e06accf8b", size = 651748, upload-time = "2026-08-06T06:24:23.639Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/88/a0767470a92ec7a3820a7c3222ff5e14d2e456a49684838a6e18deeaa731/google_cloud_firestore-2.34.0.tar.gz", hash = "sha256:c5dc34c1abab2b2a25bc613e5dae1d2e47ee987e8c0a8c9901b20bde0767052d", size = 672074, upload-time = "2026-10-01T18:16:35.326Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/95/b774e13e1cf8a1b9f24e453ae7968cfc9566e266a6eb88cd583c92fa5e4b/google_cloud_firestore-2.28.1-py3-none-any.whl", hash = "sha256:972ac92717c8c0c1ead18c28a3d6f739253cdf0940039bc172d5cbbbb399c6fd", size = 431872, upload-time = "2026-08-06T06:23:15.367Z" },
+    { url = "https://files.pythonhosted.org/packages/85/1c/e309d4d636ee0362ed6f50846716d651c37b1d5637a983641ccc9e4025d2/google_cloud_firestore-2.34.0-py3-none-any.whl", hash = "sha256:a75ae79cb2567daae417538dfbfe5d56404754f51483083e43d995b25947d5eb", size = 443714, upload-time = "2026-10-01T18:10:17.877Z" },
 ]
 
 [[package]]
 name = "google-cloud-logging"
-version = "3.16.2"
+version = "3.17.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -717,14 +717,14 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6d/65/d7dd485edea0ff3b403c680675042fd999dbe8ee6bc881d2248dfbc609ea/google_cloud_logging-3.16.2.tar.gz", hash = "sha256:d65044004d3a2ae6eced1f0118f0c44dc551872ddb837ba815f75d159ca148c8", size = 294046, upload-time = "2026-08-06T06:24:27.714Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/5b/fbb367f8bb05b3e968048686f440181765a8681c3a07cfa901814f9280e1/google_cloud_logging-3.17.0.tar.gz", hash = "sha256:d7343f2b82b4f9e9244bfc8aba7ad034c415f9bbb405ed28d1125aa37d270b72", size = 292071, upload-time = "2026-10-01T18:17:01.302Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/88/2f/a5cd299307ab1fa8fa67be540cdea5a377947120bb6a072bfdb52928ad73/google_cloud_logging-3.16.2-py3-none-any.whl", hash = "sha256:797d4d50dd1c0fea6a851a911bbaa092e3690b45786fd8ea438ef762eeeb8f35", size = 233852, upload-time = "2026-08-06T06:23:20.089Z" },
+    { url = "https://files.pythonhosted.org/packages/35/53/911cbf97517123350292ac6edba7d130ee44acccfd3e2a36f6807f32da14/google_cloud_logging-3.17.0-py3-none-any.whl", hash = "sha256:da2819da683a5135e21c2853ff2c86040786cd5521c3f71424755c110cf36fe2", size = 234020, upload-time = "2026-10-01T18:10:50.73Z" },
 ]
 
 [[package]]
 name = "google-cloud-monitoring"
-version = "2.31.0"
+version = "2.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -733,9 +733,9 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/84/9d/9522e169db3887e7f354bb9aa544a6e26c435ce19337e32432598db18c6f/google_cloud_monitoring-2.31.0.tar.gz", hash = "sha256:b4c9d3528c8643d4eb4b9d688cbb3c5914bc5f69b314ff7c5e1b47bdc073a9ae", size = 404747, upload-time = "2026-06-03T15:28:24.938Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/94/68b1d25f99f8e61c8d4d4403caab3746c9e4aa629e1a8aef22f7f099c95c/google_cloud_monitoring-2.32.0.tar.gz", hash = "sha256:507501ce1c39161c071754f7ed14cd527788b4ea44a1d052bd815c115a70ea48", size = 388895, upload-time = "2026-10-01T18:17:17.249Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/30/aa6635296da9c1c14d2e64f64e1cacd4f4debf8ab7e646c0559545f0f70d/google_cloud_monitoring-2.31.0-py3-none-any.whl", hash = "sha256:64f3d56ead48f0a0674f650cb2828c47b936582a02a27c55f2836681a86281c3", size = 391010, upload-time = "2026-06-03T15:27:39.536Z" },
+    { url = "https://files.pythonhosted.org/packages/89/97/86870c4f046bba0dcd5ca2099f30413653b84d0fbef611e5f39f8a94e3a8/google_cloud_monitoring-2.32.0-py3-none-any.whl", hash = "sha256:b6c026a5780330aa26c6151279194daa241369b324c96fd6c52c703137bc6b5b", size = 384477, upload-time = "2026-10-01T18:11:09.382Z" },
 ]
 
 [[package]]
@@ -789,7 +789,7 @@ wheels = [
 
 [[package]]
 name = "google-cloud-trace"
-version = "1.20.0"
+version = "1.21.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "google-api-core", extra = ["grpc"] },
@@ -798,9 +798,9 @@ dependencies = [
     { name = "proto-plus" },
     { name = "protobuf" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/63/18e4cfbd48ec1de3b39a3fba5500c12c7b38f14356b1b534db8b95063338/google_cloud_trace-1.20.0.tar.gz", hash = "sha256:f5a6f9b8da530b76c452163b83e5081c1696f1b4f67290c878b0e7370f1e910a", size = 103594, upload-time = "2026-06-22T23:22:39.56Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ff/cf/e9000f42609f834812063ce632a3e9d7ef34df6ccaf818c97a51ff187572/google_cloud_trace-1.21.0.tar.gz", hash = "sha256:5e0e02b51db9def0bed2f83627fa5043a8eecd00e477a7fb98d1e04c31a713c0", size = 103182, upload-time = "2026-10-01T18:18:34.842Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cb/fb/e071b9a2a0370c50bed53292c567093b77f5db15dea4642dbc8f18d7793f/google_cloud_trace-1.20.0-py3-none-any.whl", hash = "sha256:88527c02948f410ed62ceaac5c960597a4143e3c11ce62273143f11aa388f564", size = 108134, upload-time = "2026-06-22T23:20:40.235Z" },
+    { url = "https://files.pythonhosted.org/packages/41/83/0f297a29c96976d9c6fe4dc5f5f0e7e6ebcd1af08860ad0ef6faa92d47ec/google_cloud_trace-1.21.0-py3-none-any.whl", hash = "sha256:6522ac906d6d4b84443bb9e84edc2360db2010645916e8fb778227faefa3d2c8", size = 109513, upload-time = "2026-10-01T18:12:48.774Z" },
 ]
 
 [[package]]
