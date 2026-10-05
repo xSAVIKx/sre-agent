@@ -97,23 +97,34 @@ def check_git() -> bool:
     return True
 
 
-def run_step(step: int) -> bool:
-    title, suites = STEP_TESTS[step]
-    print(f"\n== Step {step}: {title}")
+def test_step(step: int) -> tuple[bool, str]:
+    """Runs the tests of a step. Returns whether they pass, and the output of the failed tests."""
+    _, suites = STEP_TESTS[step]
     env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     # The step tests exercise the deterministic simulation path; a key would switch
     # the Orchestrator to the real SDK and skip them.
     env.pop("GEMINI_API_KEY", None)
-    ok = True
+    failures = []
     for roots, test_dir, ids in suites:
         paths = [str(REPO_ROOT / root) for root in roots] + [str(REPO_ROOT / test_dir)]
-        env["PYTHONPATH"] = os.pathsep.join([*paths, env.get("PYTHONPATH", "")])
+        suite_env = {**env, "PYTHONPATH": os.pathsep.join([*paths, env.get("PYTHONPATH", "")])}
         result = subprocess.run(
-            [sys.executable, "-m", "unittest", *ids], cwd=REPO_ROOT, env=env, capture_output=True, encoding="utf-8"
+            [sys.executable, "-m", "unittest", *ids],
+            cwd=REPO_ROOT,
+            env=suite_env,
+            capture_output=True,
+            encoding="utf-8",
         )
         if result.returncode != 0:
-            ok = False
-            print(result.stderr[-3000:])
+            failures.append(result.stderr[-3000:])
+    return not failures, "\n".join(failures)
+
+
+def run_step(step: int) -> bool:
+    print(f"\n== Step {step}: {STEP_TESTS[step][0]}")
+    ok, failures = test_step(step)
+    if failures:
+        print(failures)
     print(f"{GREEN}✅ Step {step} passes{RESET}" if ok else f"{RED}❌ Step {step} is not done yet{RESET}")
     return ok
 
