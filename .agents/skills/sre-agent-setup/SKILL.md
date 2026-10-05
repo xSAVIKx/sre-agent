@@ -1,6 +1,6 @@
 ---
 name: sre-agent-setup
-description: Sets up this repository (the SRE agent) on the user's computer for local use or for the workshop. It installs uv and the dependencies, checks the setup, runs the incident simulation and starts the web chat. Use when the user asks to install, set up, prepare or fix their environment for this project or its workshop, or when a setup command fails. For deployment to Google Cloud, use the sre-agent-deploy skill.
+description: Sets up this repository (the SRE agent) on the user's computer for local use or for the workshop. It installs uv and the dependencies, checks the setup, runs the incident simulation and starts the web chat. Use when the user asks to install, set up, prepare or fix their environment for this project or its workshop, or when a setup command fails. For deployment to Google Cloud, use the sre-agent-deploy skill. For help with the workshop steps, use the sre-workshop-coach skill.
 ---
 
 # Set up the SRE agent

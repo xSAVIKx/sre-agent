@@ -76,5 +76,7 @@ measurement. The code makes sure that the measurement is always correct.
 
 **Stuck?**
 
-* To show the solution, run `git diff step-00 step-01 -- sre_agent/`.
-* To apply the solution, run `git apply workshop/steps/01-find-the-bottleneck/solution.patch`.
+* To see what the tests expect, run `uv run workshop/step.py hint 1`, or ask the workshop coach
+  in Antigravity.
+* To show the solution, run `uv run workshop/step.py solution 1`.
+* To apply the solution, run `uv run workshop/step.py solve 1`.

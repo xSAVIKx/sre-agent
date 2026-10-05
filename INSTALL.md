@@ -77,13 +77,14 @@ To use Gemini instead of the deterministic simulation, set `GEMINI_API_KEY`
 
 ## Let an agent set it up (optional)
 
-This repository has two [Antigravity](https://antigravity.google) skills in `.agents/skills/`.
+This repository has three [Antigravity](https://antigravity.google) skills in `.agents/skills/`.
 The Antigravity app and the Antigravity CLI (`agy`) find them automatically when you open the
 repository:
 
 | Skill | What the agent does |
 |:--|:--|
 | `sre-agent-setup` | Installs uv and the dependencies, checks the setup, prepares the workshop branch, runs the simulation, explains the result and fixes common problems. |
+| `sre-workshop-coach` | Shows your workshop progress, explains the next step, gives hints one level at a time, checks your code, and skips or jumps steps when you ask. |
 | `sre-agent-deploy` | Guides you through `bootstrap.sh`, `deploy.sh`, the verification and `cleanup.sh`. It asks for your approval before each step that costs money. |
 
 The agent never asks for your API key: you set it yourself.

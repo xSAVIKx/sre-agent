@@ -62,5 +62,7 @@ tool calls. You fix this in step 4. Until then, use `--engine-only`.
 | A2UI surfaces | `sre_agent/src/sre_agent/a2ui_surfaces.py` | Makes an A2UI v0.9 surface for each result. A surface contains catalog components, not HTML. |
 | Chat UI | `agent/src/agent/routes.py`, `index.html`, `static/sre-a2ui.js` | Streams the agent output over SSE. Shows the replies and the A2UI surfaces with `@a2ui/lit`. |
 
+To see your progress at any time, run `uv run workshop/step.py status`.
+
 ✅ **Done when:** `uv run workshop/check.py 0` shows `ok` for all lines, and you read the two
 reports.

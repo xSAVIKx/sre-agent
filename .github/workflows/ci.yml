@@ -136,7 +136,9 @@ jobs:
           "$env:USERPROFILE\.local\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
 
       - name: Workshop step checks
-        run: uv run workshop/check.py all
+        run: |
+          uv run workshop/check.py all
+          uv run workshop/step.py status
 
       - name: Local incident simulation
         shell: bash

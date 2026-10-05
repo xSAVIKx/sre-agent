@@ -41,6 +41,11 @@ def git(*args: str) -> str:
     return result.stdout.strip()
 
 
+def git_config(key: str) -> str:
+    result = subprocess.run(["git", "config", key], cwd=REPO_ROOT, capture_output=True, encoding="utf-8")
+    return result.stdout.strip()
+
+
 def tag(solved: int) -> str:
     """The tag where steps 1 to `solved` are solved."""
     return f"step-{solved:02d}"
@@ -210,16 +215,21 @@ def goto(arg: str) -> int:
                 "You have changes that are not on a branch. Run: git switch -c my-save, then try again."
             )
         git("add", "--all")
-        git("commit", "--quiet", "--no-verify", "-m", f"workshop: my work before the jump to step {step}")
+        # A new laptop often has no git identity, and then git refuses to commit.
+        identity = (
+            [] if git_config("user.email") else ["-c", "user.name=Workshop", "-c", "user.email=workshop@localhost"]
+        )
+        git(*identity, "commit", "--quiet", "--no-verify", "-m", f"workshop: my work before the jump to step {step}")
         print(f"Saved your changes in a commit on the branch {branch}.")
     existing = set(git("branch", "--format=%(refname:short)").split())
     base = "my-finished" if step == WRAP_UP else f"my-step-{step}"
     new = next(name for n in range(1, 100) if (name := base if n == 1 else f"{base}-{n}") not in existing)
     git("switch", "--quiet", "-c", new, tag(step - 1))
-    print(f"{GREEN}You are on the new branch {new}: the start of step {step}.{RESET}")
     if step == WRAP_UP:
-        print(f"All steps are solved here. Read {readme(WRAP_UP)}")
+        print(f"{GREEN}You are on the new branch {new}: the finished project, with all steps solved.{RESET}")
+        print(f"Read {readme(WRAP_UP)}")
     else:
+        print(f"{GREEN}You are on the new branch {new}: the start of step {step}.{RESET}")
         print(f"Read {readme(step)}, or run: uv run workshop/step.py task {step}")
     if branch:
         print(f"Your earlier work is on the branch {branch}. To go back: git switch {branch}")

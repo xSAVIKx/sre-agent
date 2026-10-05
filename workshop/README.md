@@ -77,19 +77,37 @@ Each step is a **git tag**:
 * `step-03` has the solutions for steps 1, 2 and 3.
 * `step-05` is the completed project.
 
-| Task                                     | Command                                                              |
-|:-----------------------------------------|:---------------------------------------------------------------------|
-| Check your work on step N                | `uv run workshop/check.py N` (red ❌ until you solve it, then green ✅) |
-| Check steps 1 to 5                       | `uv run workshop/check.py all`                                       |
-| Show the solution for step N             | `git diff step-0<N-1> step-0N -- ':!skills'`                         |
-| Apply only the solution for step N       | `git apply workshop/steps/0N-*/solution.patch`                       |
-| Go to the start of step N+1              | `git stash && git switch -C catch-up step-0N`                        |
-| Start again                              | `git switch -c fresh step-00`                                        |
+One command moves you through the workshop. It works on macOS, Linux and Windows:
 
-If you do not use git:
+| Task                                         | Command                              |
+|:---------------------------------------------|:-------------------------------------|
+| Show your progress and the next step         | `uv run workshop/step.py status`     |
+| Show the task of step N and its TODOs        | `uv run workshop/step.py task N`     |
+| Show what the tests of step N expect         | `uv run workshop/step.py hint N`     |
+| Check your work on step N (full test output) | `uv run workshop/check.py N`         |
+| Show the solution of step N                  | `uv run workshop/step.py solution N` |
+| Apply the solution of step N (if you are stuck) | `uv run workshop/step.py solve N` |
+| Jump to the start of step N                  | `uv run workshop/step.py goto N`     |
+| Start again                                  | `uv run workshop/step.py goto 1`     |
+| Get the finished project                     | `uv run workshop/step.py goto 6`     |
 
-1. Download the repository as a ZIP file from the `workshop` branch.
-2. To apply a solution, use `patch -p1 < workshop/steps/0N-*/solution.patch`.
+Without N, `task`, `hint`, `solution` and `solve` use your next step.
+
+`goto` loses nothing: it commits your changes on your current branch, then starts a new branch
+(for example `my-step-3`). To go back, use `git switch my-work`.
+
+### Ask an agent for help
+
+Open the repository in [Antigravity](https://antigravity.google), or run `agy` in it. The skill
+`sre-workshop-coach` uses the same command. Ask, for example:
+
+* "Where am I in the workshop?"
+* "I am stuck on step 2. Give me a hint." (Ask again for a bigger hint.)
+* "Check my code for step 1."
+* "I am behind. Skip to step 4."
+
+The coach explains and gives hints one level at a time. It changes your code only when you ask it
+to solve or skip a step.
 
 The `solution.patch` files also change `skills/sre_incident_solver/`. This directory is a generated
 copy of the SRE agent (see [step 6](steps/06-wrap-up/README.md)). Do not edit it.

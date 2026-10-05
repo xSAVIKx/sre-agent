@@ -101,4 +101,5 @@ The Orchestrator sends a request to the SRE agent only when it is necessary.
   over HTTP. To make an incident, run
   `curl "http://localhost:8081/api/gateway?trigger_error=true"`.
 
-**Stuck?** `git apply workshop/steps/05-show-the-severity/solution.patch`
+**Stuck?** Run `uv run workshop/step.py hint 5`, or ask the workshop coach in Antigravity. To apply the
+solution: `uv run workshop/step.py solve 5`.

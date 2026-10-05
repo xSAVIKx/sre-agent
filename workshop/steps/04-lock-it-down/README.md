@@ -87,4 +87,5 @@ SDK harness receives your policy as
 The handler receives the pending `ToolCall`. It returns `True` to approve the call. This task is
 Exercise 7 in [`EXERCISES.md`](../../../EXERCISES.md).
 
-**Stuck?** `git apply workshop/steps/04-lock-it-down/solution.patch`
+**Stuck?** Run `uv run workshop/step.py hint 4`, or ask the workshop coach in Antigravity. To apply the
+solution: `uv run workshop/step.py solve 4`.

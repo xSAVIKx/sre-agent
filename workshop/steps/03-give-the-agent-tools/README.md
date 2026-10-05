@@ -68,4 +68,5 @@ Why do you not give the tools to `trace_analyzer` too?
 Give each agent the smallest set of tools that it needs for its task. Step 4 applies the same
 least-privilege rule to the Orchestrator.
 
-**Stuck?** `git apply workshop/steps/03-give-the-agent-tools/solution.patch`
+**Stuck?** Run `uv run workshop/step.py hint 3`, or ask the workshop coach in Antigravity. To apply the
+solution: `uv run workshop/step.py solve 3`.
