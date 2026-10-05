@@ -48,6 +48,8 @@ STEP_TESTS: dict[int, tuple[str, list[tuple[list[str], str, list[str]]]]] = {
     5: ("Show the severity", [(["sre_agent/src"], "sre_agent/test", ["test_severity_badge"])]),
 }
 
+# The output has emoji. On Windows, a pipe (for example in Git Bash) is not UTF-8 by default.
+sys.stdout.reconfigure(encoding="utf-8")
 if sys.stdout.isatty():
     if os.name == "nt":
         os.system("")  # turns on ANSI colors in the Windows console
@@ -98,7 +100,7 @@ def check_git() -> bool:
 def run_step(step: int) -> bool:
     title, suites = STEP_TESTS[step]
     print(f"\n== Step {step}: {title}")
-    env = {**os.environ}
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
     # The step tests exercise the deterministic simulation path; a key would switch
     # the Orchestrator to the real SDK and skip them.
     env.pop("GEMINI_API_KEY", None)
@@ -107,7 +109,7 @@ def run_step(step: int) -> bool:
         paths = [str(REPO_ROOT / root) for root in roots] + [str(REPO_ROOT / test_dir)]
         env["PYTHONPATH"] = os.pathsep.join([*paths, env.get("PYTHONPATH", "")])
         result = subprocess.run(
-            [sys.executable, "-m", "unittest", *ids], cwd=REPO_ROOT, env=env, capture_output=True, text=True
+            [sys.executable, "-m", "unittest", *ids], cwd=REPO_ROOT, env=env, capture_output=True, encoding="utf-8"
         )
         if result.returncode != 0:
             ok = False

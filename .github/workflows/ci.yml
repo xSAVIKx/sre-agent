@@ -140,8 +140,6 @@ jobs:
 
       - name: Local incident simulation
         shell: bash
-        env:
-          PYTHONIOENCODING: utf-8  # the report has emoji; a Windows pipe is not UTF-8
         run: |
           uv run simulate_incident.py | tee simulation.log
           grep -q "Identified Bottleneck" simulation.log
