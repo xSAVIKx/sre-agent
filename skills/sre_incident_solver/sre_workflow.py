@@ -9,6 +9,7 @@ This module orchestrates two specialized ADK agents:
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from .gcp_tools import (
@@ -99,11 +100,29 @@ log_correlator = AdkAgent(
         "as well as trace cascade bottleneck analysis and incident post-mortem generation "
         "if you need more context or need to build a post-mortem report. "
         "Call each tool at most once per trace: the system appends the full cascade table and "
-        "post-mortem to your answer, so do not repeat them - write the root cause and mitigation."
+        "post-mortem to your answer, so do not repeat them - write the root cause and mitigation. "
+        "Base every claim on the spans, logs and metrics you were given. If they do not show why "
+        "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
+        "in the telemetry and what to check; do not infer one from service names."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
     model="gemini-3.8-flash",
 )
+
+
+@dataclass(frozen=True)
+class Diagnosis:
+    """A diagnosis report and the trace it diagnosed (None when nothing was wrong).
+
+    `failed` marks a report that only describes why the diagnosis could not run.
+    """
+
+    report: str
+    trace_id: str | None = None
+    failed: bool = False
+
+
+SIMULATION_FAILURE = "### Diagnostic Simulation Failure"
 
 
 # 2. Orchestrate the diagnostic workflow
@@ -111,7 +130,7 @@ log_correlator = AdkAgent(
 @otel_trace("_run_adk_diagnostics")
 async def _run_adk_diagnostics(
     traces_json: str, project_id: str | None = None, incident: dict[str, Any] | None = None, question: str = ""
-) -> str:
+) -> Diagnosis:
     """Runs the real multi-agent ADK reasoning workflow.
 
     Uses Trace Analyzer and Log Correlator agents to identify the anomalous
@@ -124,7 +143,7 @@ async def _run_adk_diagnostics(
         question: The user's request, so the TraceAnalyzer can pick the incident it is about.
 
     Returns:
-        The markdown diagnosis report from the Log Correlator agent.
+        The Log Correlator's report, with the cascade and post-mortem of the trace it diagnosed.
     """
     import os
 
@@ -321,10 +340,12 @@ async def _run_adk_diagnostics(
             post_mortem_report = await generate_post_mortem(trace_id, project_id)
             diagnosis = f"{diagnosis}\n\n{cascade_report}\n\n{post_mortem_report}"
 
-        return diagnosis
+        return Diagnosis(diagnosis, trace_id)
     except Exception as e:
         logger.error(f"Error during ADK execution: {e}")
-        return f"### Diagnostic Execution Failure\nAn error occurred while executing the ADK workflow: {e}"
+        return Diagnosis(
+            f"### Diagnostic Execution Failure\nAn error occurred while executing the ADK workflow: {e}", failed=True
+        )
 
 
 @otel_trace("_run_simulated_diagnostics")
@@ -421,8 +442,8 @@ async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str |
 
         report = (
             f"# 🚨 SRE Incident Diagnosis Report\n\n"
-            f"**Anomalous Trace ID**: `{trace_id}`\n"
-            f"**Root Service**: `{trace_data.get('root_span', 'gateway')}`\n\n"
+            f"- **Anomalous Trace ID**: `{trace_id}`\n"
+            f"- **Root Service**: `{trace_data.get('root_span', 'gateway')}`\n\n"
             f"## 🔍 Root Cause Analysis\n"
             f"A distributed trace scan identified elevated latencies in trace `{trace_id}`. "
             f"Further investigation into the span hierarchy reveals the child span "
@@ -433,22 +454,29 @@ async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str |
             f"- **CPU Utilization (sre-chaos-monkey)**: `{cpu_info}`\n"
             f"- **Database Connections (db-primary)**: `{db_conn_info}`\n\n"
             f"{catalog_md}"
-            f"{cascade_report}\n\n"
             f"## 🛠️ Recommended Mitigation\n"
             f"1. **Check Database Health**: Verify that the database instance `db-primary.gcp.internal` is running and accessible.\n"
             f"2. **Verify Firewall Rules**: Ensure VPC firewall settings allow ingress traffic from the backend service subnet on port 5432.\n"
             f"3. **Adjust Connection Pools**: Review backend service connection pool configurations to prevent pool exhaustion.\n\n"
+            f"{cascade_report}\n\n"
             f"{post_mortem_report}"
         )
         return report
     except Exception as e:
-        return f"### Diagnostic Simulation Failure\nFailed to parse telemetry during simulation: {e}"
+        return f"{SIMULATION_FAILURE}\nFailed to parse telemetry during simulation: {e}"
 
 
-@otel_trace("run_sre_diagnostics")
 async def run_sre_diagnostics(
     traces_json: str, project_id: str | None = None, question: str = "", trace_id: str | None = None
 ) -> str:
+    """Executes the SRE diagnostic workflow and returns its Markdown report (see `diagnose`)."""
+    return (await diagnose(traces_json, project_id, question, trace_id)).report
+
+
+@otel_trace("run_sre_diagnostics")
+async def diagnose(
+    traces_json: str, project_id: str | None = None, question: str = "", trace_id: str | None = None
+) -> Diagnosis:
     """Executes the SRE diagnostic workflow using ADK agents.
 
     Delegates to the real ADK multi-agent workflow if ADK is installed and an API
@@ -461,7 +489,7 @@ async def run_sre_diagnostics(
         trace_id: Diagnose this trace instead of picking one.
 
     Returns:
-        A markdown-formatted SRE incident diagnosis report.
+        The Markdown diagnosis report and the trace it diagnosed.
     """
     logger.info("Starting SRE diagnostics workflow...")
 
@@ -479,7 +507,7 @@ async def run_sre_diagnostics(
         incident, candidates = await find_incident(traces_json, project_id)
     if incident is None:
         logger.info("Diagnostics workflow found no anomalous traces or error logs. All systems healthy.")
-        return (
+        return Diagnosis(
             "Diagnostics completed. No anomalous traces or errors detected in the recent logs. All systems are healthy."
         )
     logger.info(f"Diagnosing {incident.get('incident')} trace {incident.get('traceId')} ({incident.get('name')})")
@@ -488,4 +516,5 @@ async def run_sre_diagnostics(
 
     if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
         return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)
-    return await _run_simulated_diagnostics(incident, project_id)
+    report = await _run_simulated_diagnostics(incident, project_id)
+    return Diagnosis(report, incident.get("traceId"), failed=report.startswith(SIMULATION_FAILURE))

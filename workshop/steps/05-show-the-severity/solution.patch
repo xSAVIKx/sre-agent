@@ -1,20 +1,28 @@
---- a/agent/src/agent/a2ui_translator.py
-+++ b/agent/src/agent/a2ui_translator.py
-@@ -32,11 +32,12 @@
-         A ``severity_badge`` A2UI component - ``{"type": "severity_badge", "level":
-         "SEV1", "contribution": 99.3}`` - or None when the report has no bottleneck.
+--- a/sre_agent/src/sre_agent/a2ui_surfaces.py
++++ b/sre_agent/src/sre_agent/a2ui_surfaces.py
+@@ -99,9 +99,7 @@
+     Returns:
+         "SEV1", "SEV2" or "SEV3".
      """
--    # TODO(step-5): Find the "(NN.N% of total trace)" figure in `text` with `re.search`, turn it
--    #   into a float, pick the first level in SEVERITY_THRESHOLDS whose threshold it reaches, and
--    #   return {"type": "severity_badge", "level": <level>, "contribution": <the float>}.
--    #   Return None when the report has no such figure.
--    return None
-+    match = re.search(r"\(([\d.]+)% of total trace\)", text)
-+    if not match:
-+        return None
-+    contribution = float(match.group(1))
-+    level = next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
-+    return {"type": "severity_badge", "level": level, "contribution": contribution}
+-    # TODO(step-5): Return the first level in SEVERITY_THRESHOLDS whose threshold `contribution`
+-    #   reaches. The thresholds go from the highest down.
+-    return "SEV3"
++    return next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
  
  
- def translate_markdown_to_a2ui(text: str) -> dict[str, Any]:
+ def _messages(components: list[dict[str, Any]], data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+@@ -155,10 +153,10 @@
+     A component is a JSON object: its ``id``, the catalog ``component`` it instantiates,
+     and that component's properties - here `SeverityBadge.level` and `.contribution`.
+     """
+-    # TODO(step-5): Without a bottleneck there is no badge: return []. Otherwise return one
+-    #   component: {"id": "severity", "component": "SeverityBadge", "level": <classify_severity>,
+-    #   "contribution": <the share>}. The cards list it first, and the browser draws it.
+-    return []
++    if bottleneck_share is None:
++        return []
++    level = classify_severity(bottleneck_share)
++    return [{"id": "severity", "component": "SeverityBadge", "level": level, "contribution": bottleneck_share}]
+ 
+ 
+ def _card(children: list[str], components: list[dict[str, Any]]) -> list[dict[str, Any]]:

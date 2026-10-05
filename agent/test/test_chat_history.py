@@ -11,6 +11,8 @@ Two regressions this pins (both found on the deployed demo):
   silently. The transcript is now one compact user/model pair per turn.
 """
 
+import asyncio
+import datetime
 import json
 import unittest
 from unittest import mock
@@ -23,6 +25,9 @@ from agent import config, routes
 
 def _events(body: str) -> list[dict]:
     return [json.loads(line[6:]) for line in body.splitlines() if line.startswith("data: ")]
+
+
+SURFACE = [{"version": "v0.9", "createSurface": {"surfaceId": "sre-1", "catalogId": config.SRE_CATALOG_ID}}]
 
 
 class _Chunk:
@@ -115,7 +120,8 @@ class TestChatSessions(unittest.TestCase):
         report = "# 🚨 Incident Post-Mortem\n\nRoot trace: abc123"
 
         async def fake_diagnose(prompt, project_id=None, refresh=False):
-            config.diagnosis_sink.get().report = report
+            sink = config.diagnosis_sink.get()
+            sink.report, sink.a2ui = report, SURFACE
             return report
 
         with mock.patch.object(config, "diagnose_sre", fake_diagnose):
@@ -127,10 +133,9 @@ class TestChatSessions(unittest.TestCase):
         self.assertEqual([e["source"] for e in history], ["USER", "MODEL", "USER", "MODEL"])
         self.assertEqual(history[0]["content"], "Diagnose the latency spike")
         self.assertEqual(history[1]["tool_calls"], [{"name": "diagnose_sre"}])
-        # The A2UI payload is rebuilt on read, not stored.
-        stored = config.MOCK_HISTORY_DB[conv_id][1]
-        self.assertNotIn("response_a2ui", stored)
-        self.assertIn("download_button", [c["type"] for c in history[1]["response_a2ui"]["components"]])
+        # The SRE agent's A2UI surface is replayed as it was sent.
+        self.assertEqual(history[1]["a2ui"], SURFACE)
+        self.assertNotIn("rendered", history[1], "the surface replaces the Markdown fallback")
 
     def test_turn_entries_keep_rendered_only_when_it_differs(self) -> None:
         _, same = routes._turn_entries("p", "reply", [], [], "reply")
@@ -138,6 +143,84 @@ class TestChatSessions(unittest.TestCase):
         self.assertNotIn("rendered", same)
         self.assertEqual(different["rendered"], "full report")
         self.assertEqual(different["thinking"], "step")
+
+    def test_turn_entries_prefer_the_surface_over_markdown(self) -> None:
+        _, model = routes._turn_entries("p", "summary", [], ["list_incidents"], "| table |", SURFACE)
+        self.assertEqual(model["a2ui"], SURFACE)
+        self.assertNotIn("rendered", model)
+
+
+class TestTurnsOutliveTheConnection(unittest.IsolatedAsyncioTestCase):
+    """A phone suspends the browser's connection when the user switches apps (found on
+    the demo): the turn must still finish and save its answer for the chat to load."""
+
+    def setUp(self) -> None:
+        if config.HAS_ANTIGRAVITY:
+            self.skipTest("Exercises the simulation-mode agent; unset GEMINI_API_KEY to run.")
+        config.MOCK_HISTORY_DB.clear()
+        self.release = asyncio.Event()
+
+        async def slow_diagnose(prompt, project_id=None, refresh=False, trace_id=None):
+            await self.release.wait()
+            config.diagnosis_sink.get().report = "# 🚨 Incident Post-Mortem\n\nfull report"
+            return "# 🚨 Incident Post-Mortem\n\nfull report"
+
+        patcher = mock.patch.object(config, "diagnose_sre", slow_diagnose)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    async def _start_and_leave(self) -> str:
+        """Starts a turn, reads its first event, and closes the stream like a suspended browser."""
+        request = routes.ChatRequest(prompt="Diagnose the latency spike")
+        client = mock.Mock(is_disconnected=mock.AsyncMock(return_value=True))
+        stream = (await routes._stream_orchestrator_chat(request, client)).body_iterator
+        start = json.loads((await anext(stream))[6:])
+        await stream.aclose()  # what Starlette does when the client goes away
+        return start["conversation_id"]
+
+    async def _history(self, conv_id: str) -> list[dict]:
+        return (await routes.get_session_history(conv_id))["history"]
+
+    async def test_the_answer_is_saved_after_the_client_left(self) -> None:
+        conv_id = await self._start_and_leave()
+        self.assertEqual((await self._history(conv_id))[-1], {"source": "MODEL", "pending": True})
+        self.release.set()
+        await routes._running_turns[conv_id]
+        answer = (await self._history(conv_id))[-1]
+        self.assertEqual(answer["tool_calls"], [{"name": "diagnose_sre"}])
+        self.assertEqual(answer["rendered"], "# 🚨 Incident Post-Mortem\n\nfull report")
+
+    async def test_stop_cancels_the_turn(self) -> None:
+        conv_id = await self._start_and_leave()
+        task = routes._running_turns[conv_id]
+        await asyncio.sleep(0.05)  # let the turn reach the tool call
+        self.assertEqual((await routes.cancel_turn(conv_id))["status"], "cancelled")
+        with self.assertRaises(asyncio.CancelledError):
+            await task
+        self.assertEqual((await self._history(conv_id))[-1]["content"], "Stopped.")
+        self.assertEqual((await routes.cancel_turn(conv_id))["status"], "idle")
+
+    async def test_one_turn_at_a_time(self) -> None:
+        conv_id = await self._start_and_leave()
+        request = routes.ChatRequest(prompt="hello", conversation_id=conv_id)
+        client = mock.Mock(is_disconnected=mock.AsyncMock(return_value=False))
+        events = [
+            json.loads(e[6:]) async for e in (await routes._stream_orchestrator_chat(request, client)).body_iterator
+        ]
+        self.assertEqual(events, [{"type": "error", "detail": "This chat is still working on the previous message."}])
+        self.release.set()
+        await routes._running_turns[conv_id]
+
+
+class TestStaleTurns(unittest.TestCase):
+    def test_a_turn_that_never_finished_shows_as_failed(self) -> None:
+        now = datetime.datetime.now(datetime.UTC)
+        running = {"user": {"source": "USER", "content": "hi"}, "status": "running"}
+        self.assertEqual(routes._model_entry({**running, "created_at": now}), {"source": "MODEL", "pending": True})
+        stale = routes._model_entry({**running, "created_at": now - routes.STALE_TURN * 2})
+        self.assertTrue(stale["error"])
+        done = {"model": {"source": "MODEL", "content": "ok"}, "status": "done"}
+        self.assertEqual(routes._model_entry(done), {"source": "MODEL", "content": "ok"})
 
 
 if __name__ == "__main__":

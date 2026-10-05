@@ -2,65 +2,75 @@
 
 ## One week before
 
-Send attendees the **"Before the workshop"** block from [README.md](README.md). The `uv sync`
-download is the biggest risk on venue wifi, and nothing else needs the network.
+Send the **"Before the workshop"** section of [README.md](README.md) to the attendees.
 
-Docker and a `GEMINI_API_KEY` are **optional** for attendees. Every step works offline in the
-deterministic simulation tier.
+The `uv sync` download is the largest risk on the venue wifi. No other task needs the network.
+
+Docker and a `GEMINI_API_KEY` are **optional** for attendees. All steps work offline in the
+deterministic simulation.
 
 ## The day before
 
-```bash
-uv run workshop/check.py 0
-git switch --detach step-00 && uv run workshop/check.py all   # 1-5 must all be ❌
-git switch --detach step-05 && uv run workshop/check.py all   # 1-5 must all be ✅
-```
+1. Do these commands:
 
-If you want the production demo in step 6, run `./bootstrap.sh && ./deploy.sh` **the day before**.
-A first deploy into a fresh project takes about 6 minutes, and a redeploy about 3. All four
-services build and deploy in parallel on the prebuilt dependency image. Keep the URLs that
-`deploy.sh` prints. Run `./cleanup.sh` after the session.
+   ```bash
+   uv run workshop/check.py 0
+   git switch --detach step-00 && uv run workshop/check.py all   # 1-5 must all be ❌
+   git switch --detach step-05 && uv run workshop/check.py all   # 1-5 must all be ✅
+   ```
 
-## Timeline (90 min)
+2. For the production demo in step 6, run `./bootstrap.sh && ./deploy.sh` **the day before**.
+3. Record the URLs that `deploy.sh` shows.
+4. After the session, run `./cleanup.sh`.
 
-| Time | What | Notes |
+The first deployment into a new project takes approximately 6 minutes. A redeployment takes
+approximately 3 minutes. All four services build and deploy in parallel on the prebuilt
+dependency image.
+
+## Timeline (90 minutes)
+
+| Time | Item | Notes |
 |:--|:--|:--|
-| 0:00 | Intro + demo | On `step-05`: run the chat UI and diagnose an incident, show the SEV1 badge and download the post-mortem. Then "let's build it". |
-| 0:10 | Step 0 | Everyone on `step-00` with `check.py 0` green. Walk the architecture table. Point out the "blocked by the safety policy" line and promise it for step 4. |
-| 0:20 | Step 1 | The core idea of the whole workshop: inclusive vs. exclusive time. Draw the three bars. |
-| 0:32 | Step 2 | Mock-mode convention: every tool reads local JSON when `MOCK_GCP=true`. |
-| 0:44 | Step 3 | Short coding, longer discussion: small toolbelts per agent. If someone has a key, put their log on screen. |
-| 0:54 | Step 4 | The safety story. Ask "what could the agent do with the SDK default policy?" before revealing it. |
-| 1:06 | Step 5 | Everyone opens the chat UI. Most visible payoff; leave time for it. |
-| 1:20 | Step 6 | Cloud Run demo (pre-deployed), IAM split, skill, exercises. |
+| 0:00 | Introduction and demo | Use `step-05`. Start the chat UI and diagnose an incident. Show the SEV1 badge. Download the post-mortem. Then start the build. |
+| 0:10 | Step 0 | All attendees are on `step-00`, and `check.py 0` shows `ok`. Explain the architecture table. Show the "blocked by the safety policy" line. Tell attendees that step 4 fixes it. |
+| 0:20 | Step 1 | This is the main idea of the workshop: inclusive time and exclusive time. Draw the three bars. |
+| 0:32 | Step 2 | Explain the mock-mode rule: when `MOCK_GCP=true`, each tool reads local JSON. |
+| 0:44 | Step 3 | The code change is small. Use more time for the discussion: each agent gets a small set of tools. If an attendee has a key, show the log of that attendee on the screen. |
+| 0:54 | Step 4 | This step is about safety. Before you show the answer, ask: "What can the agent do with the default SDK policy?" |
+| 1:06 | Step 5 | All attendees open the chat UI. This step has the most visible result. Keep sufficient time for it. |
+| 1:20 | Step 6 | Show the Cloud Run demo (deployed before). Explain the IAM split, the skill and the exercises. |
 
-**Running late?** Steps 2 and 3 are the cheapest to skip:
-`git apply workshop/steps/02-*/solution.patch workshop/steps/03-*/solution.patch`, and explain them
-instead.
+**If you are late:** steps 2 and 3 are the easiest to skip. Apply the two solutions, then explain
+them:
+
+```bash
+git apply workshop/steps/02-*/solution.patch workshop/steps/03-*/solution.patch
+```
 
 ## Common problems
 
 | Symptom | Fix |
 |:--|:--|
-| `check.py 0` says an import is missing | `uv sync --all-packages` (note `--all-packages`). |
-| `The diagnose_sre tool call was blocked by the safety policy` | Expected before step 4. Use `simulate_incident.py --engine-only`. |
-| Port 8080 busy | `--port 8081` and open `http://localhost:8081/chat`. |
-| Cloud demo finds no anomalous trace | Cloud Trace ingests spans with a delay. Wait ~2 minutes after `curl .../api/gateway?trigger_error=true` before asking the agent. |
-| Chat says "All systems are healthy" | No incident telemetry yet. Run `uv run simulate_incident.py` first (from the repo root). |
-| Attendee with a key sees different wording | Expected: Gemini writes the prose; the cascade table and post-mortem are generated by tools and match. |
-| Local edits block switching steps | `git stash`, then `git switch -C catch-up step-0N`; or `git apply` the step's `solution.patch`. |
+| `check.py 0` shows that an import is missing | Run `uv sync --all-packages`. The `--all-packages` flag is necessary. |
+| `The diagnose_sre tool call was blocked by the safety policy` | This is correct before step 4. Use `simulate_incident.py --engine-only`. |
+| Port 8080 is in use | Use `--port 8081` and open `http://localhost:8081/chat`. |
+| The cloud demo finds no anomalous trace | Cloud Trace receives spans with a delay. After `curl .../api/gateway?trigger_error=true`, wait approximately 2 minutes. Then ask the agent. |
+| The chat shows "All systems are healthy" | There is no incident telemetry. From the repository root, run `uv run simulate_incident.py` first. |
+| An attendee with a key gets different text | This is correct. Gemini writes the text. The tools make the cascade table and the post-mortem, so these are the same. |
+| Local changes prevent a step change | Run `git stash`, then `git switch -C catch-up step-0N`. Or use `git apply` with the `solution.patch` file of the step. |
 
 ## Maintaining the steps
 
-The finished code is the source of truth, and steps are *derived* from it:
+The completed code is the source of truth. The steps come from the completed code:
 
-* [`build_steps.py`](build_steps.py) holds, for each step, the solution code and the TODO that
-  replaces it.
-* `uv run python workshop/build_steps.py` rewrites `steps/*/solution.patch` (commit them).
-* `uv run python workshop/build_steps.py --branch` rebuilds the linear `workshop` branch and the
-  local `step-00`…`step-05` tags from `HEAD`, without touching your working tree.
-* Publish with `git push -f origin workshop` and `git push -f origin 'refs/tags/step-*'`.
+* [`build_steps.py`](build_steps.py) contains two items for each step: the solution code and the
+  TODO code that replaces it.
+* `uv run python workshop/build_steps.py` writes the `steps/*/solution.patch` files again. Commit
+  them.
+* `uv run python workshop/build_steps.py --branch` builds the linear `workshop` branch and the
+  local `step-00`…`step-05` tags again from `HEAD`. It does not change your working tree.
+* To publish, run `git push -f origin workshop` and `git push -f origin 'refs/tags/step-*'`.
 
-CI regenerates the patches and fails if they're stale, so a refactor that moves a step's code is
-caught before it breaks the workshop. Then update that step's `solution` string in
-`build_steps.py`.
+CI generates the patches again. If a patch is out of date, CI fails. Thus, CI finds a refactor
+that moves the code of a step before the refactor breaks the workshop. If this occurs, update the
+`solution` string of that step in `build_steps.py`.

@@ -5,6 +5,7 @@ own 44 s chat request - the slowest trace in the project, which had not failed -
 and wrote a post-mortem about a database timeout that never happened.
 """
 
+import asyncio
 import json
 import unittest
 from typing import ClassVar
@@ -70,6 +71,12 @@ class TestServiceName(unittest.TestCase):
         )
         self.assertEqual(f({"labels": {"/http/host": "inventory-agent-oeglp6ptnq-uc.a.run.app"}}), "inventory-agent")
         self.assertEqual(f({"labels": {}}), "")
+        # Cloud Run did not sample the request: the root is the service's own server span.
+        own_span = {
+            "/http/host": "169.254.169.1:8080",
+            "http.server_name": "sre-agent-285931116611.us-central1.run.app",
+        }
+        self.assertEqual(f({"labels": own_span}), "sre-agent")
 
 
 class TestPostMortem(unittest.TestCase):
@@ -101,6 +108,41 @@ class TestPostMortem(unittest.TestCase):
         for claim in ("database", "ConnectionTimeoutError", "RESOLVED` (", "chaos"):
             self.assertNotIn(claim, report)
         self.assertIn("**Status**: `OPEN`", report)
+
+    def test_console_links_in_real_mode_only(self) -> None:
+        with mock.patch.object(gcp_tools, "IS_MOCK", False):
+            links = gcp_tools.console_links("t" * 32, "demo")
+            report = gcp_tools._render_post_mortem("t" * 32, self.SLOW, [], links)
+        self.assertEqual(links["trace"], f"https://console.cloud.google.com/traces/list?project=demo&tid={'t' * 32}")
+        self.assertIn("query=trace%3D%22projects%2Fdemo%2Ftraces%2F", links["logs"])
+        self.assertIn(f"*   **Logs in Cloud Logging**: {links['logs']}", report)
+        with mock.patch.object(gcp_tools, "IS_MOCK", True):
+            self.assertEqual(gcp_tools.console_links("t" * 32, "demo"), {})
+
+    def test_request_logs_have_a_message(self) -> None:
+        """Cloud Run request logs carry no payload, only the request."""
+        log = {"text_payload": None, "json_payload": None,
+               "http_request": {"method": "GET", "url": "https://x/api/gateway", "status": 500, "latency": "10.4s"}}  # fmt: skip
+        self.assertEqual(gcp_tools._log_message(log), "GET https://x/api/gateway -> HTTP 500 after 10.4s")
+
+    def test_error_logs_are_read_newest_first(self) -> None:
+        client = mock.Mock()
+        client.list_entries.return_value = []
+        with (
+            mock.patch.object(gcp_tools, "IS_MOCK", False),
+            mock.patch.object(gcp_tools.cloud_logging, "Client", return_value=client),
+        ):
+            asyncio.run(gcp_tools.query_logs("severity>=ERROR", project_id="demo"))
+        self.assertEqual(client.list_entries.call_args.kwargs["order_by"], gcp_tools.cloud_logging.DESCENDING)
+
+    def test_missing_trace_is_an_error_not_an_empty_post_mortem(self) -> None:
+        missing = json.dumps({"error": "Trace ID t not found in mock data."})
+        with (
+            mock.patch.object(gcp_tools, "get_trace_details", mock.AsyncMock(return_value=missing)),
+            mock.patch.object(gcp_tools, "query_logs_by_trace", mock.AsyncMock(return_value="[]")),
+        ):
+            report = asyncio.run(gcp_tools.generate_post_mortem("t"))
+        self.assertEqual(report, "Error: No spans found for trace t: Trace ID t not found in mock data.")
 
     def test_timeline_follows_real_time_across_timestamp_formats(self) -> None:
         logs = [{"severity": "ERROR", "text_payload": "late", "timestamp": "2026-10-04T16:37:20+02:00"}]

@@ -14,13 +14,18 @@ A2A messages do not name a skill, so callers pass it as request metadata, next t
 its parameters: ``{"skill": "list_incidents", "project_id": "..."}``. Without one
 the agent diagnoses. The A2A ``contextId`` identifies the conversation, so repeated
 diagnoses in one chat share a session history.
+
+The card also advertises the A2UI extension. A caller that sends A2UI client
+capabilities listing the SRE catalog (`a2ui_surfaces.client_capabilities`) gets
+the result as an A2UI surface too: one data part per A2UI message, marked with
+the A2UI media type.
 """
 
 from collections.abc import AsyncGenerator
 from typing import Any
 
 from a2a.helpers import new_data_part
-from a2a.types import AgentCapabilities, AgentCard, AgentInterface, AgentSkill
+from a2a.types import AgentCapabilities, AgentCard, AgentExtension, AgentInterface, AgentSkill
 from a2a.utils.constants import PROTOCOL_VERSION_CURRENT
 from google.adk.a2a.converters.part_converter import convert_a2a_part_to_genai_part
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
@@ -30,6 +35,7 @@ from google.adk.events import Event
 from google.genai import types
 from starlette.applications import Starlette
 
+from sre_agent import a2ui_surfaces
 from sre_agent.diagnosis import Report, run_diagnosis, run_list_incidents, run_post_mortem
 
 # Where ADK's A2A request converter puts the request metadata in the run config.
@@ -44,10 +50,11 @@ def _skill_run(skill: str, prompt: str, metadata: dict[str, Any], conversation_i
     """The pipeline for the requested skill, called with its parameters from the metadata."""
     project_id = metadata.get("project_id") or None
     trace_id = metadata.get("trace_id") or None
+    ui = a2ui_surfaces.client_renders_sre_catalog(metadata)
     if skill == LIST_INCIDENTS:
-        return run_list_incidents(project_id=project_id)
+        return run_list_incidents(project_id=project_id, ui=ui)
     if skill == WRITE_POST_MORTEM:
-        return run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id)
+        return run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id, ui=ui)
     if skill not in ("", DIAGNOSE_INCIDENT):
         raise ValueError(
             f"Unknown skill {skill!r}: expected one of {LIST_INCIDENTS}, {DIAGNOSE_INCIDENT}, {WRITE_POST_MORTEM}"
@@ -58,15 +65,24 @@ def _skill_run(skill: str, prompt: str, metadata: dict[str, Any], conversation_i
         refresh=bool(metadata.get("refresh", False)),
         conversation_id=conversation_id,
         trace_id=trace_id,
+        ui=ui,
     )
 
 
 def _parts(update: Any) -> list[types.Part]:
-    """The update as genai parts: its text, plus its structured data as an A2A data part."""
+    """The update as genai parts: its text, its structured data, and its A2UI messages.
+
+    Data goes through ADK's own converter, so the executor turns it back into A2A
+    data parts; the A2UI media type rides along in the part metadata.
+    """
     parts = [types.Part(text=update.text)]
-    if isinstance(update, Report) and update.data is not None:
-        # ADK's own converter, so the executor turns it back into an A2A data part.
-        parts.append(convert_a2a_part_to_genai_part(new_data_part(update.data)))
+    if isinstance(update, Report):
+        if update.data is not None:
+            parts.append(convert_a2a_part_to_genai_part(new_data_part(update.data)))
+        for message in update.a2ui or []:
+            a2ui_part = new_data_part(message)
+            a2ui_part.metadata.update({"mimeType": a2ui_surfaces.A2UI_MIME_TYPE})
+            parts.append(convert_a2a_part_to_genai_part(a2ui_part))
     return parts
 
 
@@ -116,7 +132,16 @@ def build_agent_card(public_url: str) -> AgentCard:
                 protocol_version=PROTOCOL_VERSION_CURRENT,
             )
         ],
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(
+            streaming=True,
+            extensions=[
+                AgentExtension(
+                    uri=a2ui_surfaces.A2UI_EXTENSION_URI,
+                    description="Results as A2UI surfaces, for clients that send A2UI client capabilities.",
+                    params={"supportedCatalogIds": [a2ui_surfaces.SRE_CATALOG_ID]},
+                )
+            ],
+        ),
         default_input_modes=["text/plain"],
         default_output_modes=["text/markdown"],
         skills=[

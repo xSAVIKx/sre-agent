@@ -22,6 +22,7 @@ dependencies = [
     "opentelemetry-sdk>=1.42.1",
     "opentelemetry-exporter-gcp-trace>=1.15.0",
     "sre-common",
+    "a2ui-core>=0.2.0,<0.3",
 ]
 
 [tool.uv.sources]

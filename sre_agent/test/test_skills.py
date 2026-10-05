@@ -100,7 +100,7 @@ class TestDiagnosisInputs(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((incident["traceId"], incident["durationMs"]), ("slow", 9000))
 
     async def test_question_and_candidates_reach_the_adk_workflow(self) -> None:
-        adk = mock.AsyncMock(return_value="report")
+        adk = mock.AsyncMock(return_value=sre_workflow.Diagnosis("report", "err"))
         with (
             mock.patch.object(sre_workflow, "_run_adk_diagnostics", adk),
             mock.patch.object(sre_workflow, "HAS_ADK", True),
@@ -110,6 +110,17 @@ class TestDiagnosisInputs(unittest.IsolatedAsyncioTestCase):
         candidates, project, incident, question = adk.await_args.args
         self.assertEqual([c["traceId"] for c in json.loads(candidates)], ["err", "slow"])
         self.assertEqual((project, incident["traceId"], question), ("demo", "err", "why is it slow?"))
+
+
+class TestDiagnosisSurface(unittest.IsolatedAsyncioTestCase):
+    async def test_failed_diagnosis_gets_no_surface(self) -> None:
+        failed = sre_workflow.Diagnosis("### Diagnostic Execution Failure\nquota", failed=True)
+        self.assertIsNone(await diagnosis.diagnosis_surface(failed, "demo"))
+
+    async def test_healthy_diagnosis_gets_the_all_clear_card(self) -> None:
+        surface = await diagnosis.diagnosis_surface(sre_workflow.Diagnosis("All systems are healthy."), "demo")
+        title = next(c for c in surface[1]["updateComponents"]["components"] if c["id"] == "title")
+        self.assertEqual(title["text"], "✅ All clear")
 
 
 if __name__ == "__main__":

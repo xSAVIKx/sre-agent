@@ -1,56 +1,71 @@
 # 🎓 Extend the SRE Agent: Follow-Up Exercises
 
-You've read [`BLOGPOST.md`](BLOGPOST.md) and worked through [`CODELAB.md`](CODELAB.md). You now have
-a runnable autonomous SRE agent that scans traces, finds the bottleneck span, correlates logs, and
-writes a post-mortem. **This is where it gets fun.**
+Read [`BLOGPOST.md`](BLOGPOST.md) and do [`CODELAB.md`](CODELAB.md) before you start. After the
+codelab, you have an SRE agent that does these tasks:
 
-> **📦 Repo:** all of this lives at
-> **[`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)** — fork it and build
-> your extensions on top.
+- It scans traces.
+- It finds the bottleneck span.
+- It correlates logs.
+- It writes a post-mortem.
 
-This guide is a set of homework challenges that turn the codelab project into *your* project. Each
-one is a real, self-contained feature you can build on top of the existing stack — ordered from
-quick warm-ups to a production-grade capstone. Pick whatever scratches your itch.
+> **📦 Repository:** The code is at
+> **[`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)**. Fork the repository
+> and add your changes to the fork.
+
+Each exercise adds one feature to the existing stack. The exercises start with small tasks and end
+with a production capstone. You can do them in any sequence.
 
 ---
 
 ## How to Use This Guide
 
-**Difficulty / effort legend:**
+**Levels:**
 
-|    | Level                                                         | Typical effort |
-|:---|:--------------------------------------------------------------|:---------------|
-| 🟢 | Warm-up — extend an existing tool or report                   | 30–60 min      |
-| 🟡 | Intermediate — change agent behavior or the workflow graph    | 1–3 hrs        |
-| 🔴 | Advanced — new service, RAG, evaluation, or production wiring | half a day+    |
+|    | Level                                                          | Typical time |
+|:---|:---------------------------------------------------------------|:-------------|
+| 🟢 | Warm-up: change a tool or a report                             | 30–60 min    |
+| 🟡 | Intermediate: change the agent behavior or the workflow graph  | 1–3 hours    |
+| 🔴 | Advanced: new service, RAG, evaluation or production setup     | half a day or more |
 
-**The five project conventions you must keep** (see [`AGENTS.md`](AGENTS.md)). These aren't
-busywork — break them and the agent's planner or the local simulation stops working:
+**Obey the five project rules** (see [`AGENTS.md`](AGENTS.md)). If you break a rule, the planner of
+the agent or the local simulation stops working.
 
-1. **Every tool needs an `if IS_MOCK:` branch** that reads from `mock_telemetry_data/` instead of
-   calling the cloud.
-2. **Full type hints + a thorough docstring** on every tool — the Antigravity SDK parses them into
-   the LLM tool schema.
-3. **Register tools with `@register_tool`** (`from sre_agent.registry import register_tool`); never
-   hand-append to the config.
-4. **Keep the Orchestrator deny-by-default** — only add `allow(...)`/`ask_user(...)` entries
-   deliberately.
+1. **Each tool must have an `if IS_MOCK:` branch.** This branch reads from `mock_telemetry_data/`
+   and does not call the cloud.
+2. **Each tool must have full type hints and a clear docstring.** The Antigravity SDK makes the LLM
+   tool schema from them.
+3. **Register each tool with `@register_tool`**
+   (`from sre_agent.registry import register_tool`). Do not add tools to the config manually.
+4. **Keep the Orchestrator deny-by-default.** Add an `allow(...)` or `ask_user(...)` rule only when
+   you have a reason.
 5. **Wrap external calls** with `@retry_async` and `@otel_trace` from `sre_common`.
 
-**How to verify your work** (do this after every exercise):
+**Verify your work after each exercise:**
 
-```bash
-uv run simulate_incident.py                                            # end-to-end smoke test
-PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
-PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
-uv run python -m unittest discover -s test                             # workspace import smoke test
-uv run ruff check . && uv run ruff format --check .                    # lint + formatting
-```
+1. Run the end-to-end simulation:
 
-CI runs exactly these, the tests on both Python 3.11 and 3.14 and `ruff` once, so if they pass
-locally the pull request should be green.
+   ```bash
+   uv run simulate_incident.py
+   ```
 
-### Where you can plug in
+2. Run the three test suites. The last suite includes the workspace import test:
+
+   ```bash
+   PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
+   PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
+   uv run python -m unittest discover -s test
+   ```
+
+3. Run the linter and the format check:
+
+   ```bash
+   uv run ruff check . && uv run ruff format --check .
+   ```
+
+CI runs these checks. CI runs the tests on Python 3.11 and on Python 3.14, and `ruff` one time. If
+the checks pass on your computer, CI usually passes too.
+
+### Where to Add Your Code
 
 ```mermaid
 flowchart LR
@@ -58,9 +73,9 @@ flowchart LR
     TA --> FT["fetch_telemetry<br/>(topology enrichment)"]
     FT --> LC["🩺 LogCorrelator<br/>+ tools"]
     LC --> PM["analyze_trace_cascade<br/>generate_post_mortem"]
-    PM --> A2["A2UI translator"] --> UI["💬 web chat + 📥"]
-    E1(["🧩 Ex.1–3: new tools / richer report"]) -.-> LC & PM
-    E2(["🧩 Ex.4: severity in the UI"]) -.-> A2
+    PM --> A2["A2UI surfaces<br/>(a2ui_surfaces.py)"] --> UI["💬 web chat + 📥"]
+    E1(["🧩 Ex.1–3: new tools / better report"]) -.-> LC & PM
+    E2(["🧩 Ex.4: severity in the post-mortem"]) -.-> PM
     E3(["🧩 Ex.5–6: new ADK node / multi-trace"]) -.-> FT
     E4(["🧩 Ex.7: human-in-the-loop write tool"]) -.-> LC
     E5(["🧩 Ex.9: RAG runbooks"]) -.-> FT
@@ -69,210 +84,257 @@ flowchart LR
 
 ---
 
-## 🟢 Level 1 — Warm-Ups (Tools & Reports)
+## 🟢 Level 1: Warm-Ups (Tools and Reports)
 
 ### Exercise 1 · Make the metrics tell the truth 🟢
 
-**Goal.** The [workshop](workshop/README.md) (step 2) made the target app write `metrics.json`, so
-the **Observability Metrics** section now shows numbers. But its verdicts are hard-coded: CPU is
-always "(Healthy)" and the connection count always says "Max capacity reached". Derive them from
-the data instead.
+**Goal.** In step 2 of the [workshop](workshop/README.md), the target app started to write
+`metrics.json`. Thus, the **Observability Metrics** section of the report shows numbers. But the
+verdicts are fixed text: the CPU is always "(Healthy)", and the connection count always shows "Max
+capacity reached". Calculate the verdicts from the data.
 
-**Start here.** `_run_simulated_diagnostics` in
-[`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py). Compare the latest DB connection
-reading with a configurable pool size, and the CPU fraction with a threshold.
+**Start here.** Go to `_run_simulated_diagnostics` in
+[`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
 
-**Done when.** A healthy run (`trigger_error=False` in `app/main.py`) reports a healthy pool, and the
-incident run still reports saturation. Add a unit test for each.
+1. Compare the latest DB connection count with a pool size that you can configure.
+2. Compare the CPU fraction with a threshold.
+
+**Done when.**
+
+- With the healthy readings, the report shows a healthy pool. The healthy readings are the
+  `trigger_error=False` series of `_mock_metric_series` in `app/main.py`.
+- With the incident readings, the report still shows saturation.
+- One unit test covers each case.
+
+Note: `simulate_incident.py` always makes an incident. A healthy trace gives no incident, and the
+report then has no metrics section. Thus, test the healthy case with a unit test.
 
 ---
 
 ### Exercise 2 · Add a log-pattern clustering tool 🟢
 
-**Goal.** A single error message is easy; a *storm* of slightly-different ones is the real signal.
-Add a tool `summarize_log_patterns(trace_id | query)` that groups correlated logs by normalized
-message (strip IDs/timestamps) and returns the top recurring patterns with counts.
+**Goal.** One error message is easy to read. Many errors with small differences are a better signal.
+Add a tool `summarize_log_patterns(trace_id | query)`. The tool does these steps:
 
-**Start here.** Add the tool to [
-`sre_agent/src/sre_agent/gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py) next to
-`query_logs_by_trace`. Register it, give it an `IS_MOCK` branch, then add it to the
-`log_correlator`'s `tools=[...]` list in [
-`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
+1. It normalizes each correlated log message: it removes IDs and timestamps.
+2. It groups the logs by the normalized message.
+3. It returns the most frequent patterns with their counts.
 
-**Done when.** A unit test in `sre_agent/test/` proves it clusters a set of mock logs, and the agent
-can call it during a diagnosis.
+**Start here.**
+
+1. Add the tool to [`sre_agent/src/sre_agent/gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py),
+   near `query_logs_by_trace`.
+2. Register the tool with `@register_tool`.
+3. Add an `IS_MOCK` branch.
+4. Add the tool to the `tools=[...]` list of `log_correlator` in
+   [`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
+
+**Done when.** A unit test in `sre_agent/test/` shows that the tool groups a set of mock logs. The
+agent can call the tool during a diagnosis.
 
 ---
 
 ### Exercise 3 · Add an SLO / error-budget section to the post-mortem 🟢
 
-**Goal.** Make the post-mortem speak the language of SREs: given the trace's total duration and a
-configurable latency SLO (say 1000 ms), compute how badly the request blew the budget and add a **"
-SLO Impact"** block.
+**Goal.** Use SRE terms in the post-mortem. Use the total duration of the trace and a latency SLO
+that you can configure (for example, 1000 ms). Calculate how much the request went over the
+budget. Add an **"SLO Impact"** section with the result.
 
-**Start here.** [`generate_post_mortem`](sre_agent/src/sre_agent/gcp_tools.py). Keep the exact
-`# 🚨 Incident Post-Mortem` heading — the [`a2ui_translator`](agent/src/agent/a2ui_translator.py) and
-`test_a2ui_translator.py` depend on it.
+**Start here.** Go to [`generate_post_mortem`](sre_agent/src/sre_agent/gcp_tools.py). Do not change
+the heading `# 🚨 Incident Post-Mortem`. The post-mortem surface in
+[`a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py) and its tests use this heading.
 
-**Done when.** The generated post-mortem includes a quantified SLO-breach line (e.g. *"10270 ms vs.
-1000 ms SLO → 927% over budget"*) and existing tests still pass.
+**Done when.** The post-mortem has a line that gives the SLO breach as a number. For example:
+*"10270 ms vs. 1000 ms SLO → 927% over budget"*. The existing tests pass.
 
 ---
 
 ### Exercise 4 · Carry severity into the post-mortem 🟢
 
-**Goal.** Workshop step 5 renders a SEV1/2/3 badge in the chat, but the downloaded
-`post_mortem.md` doesn't mention severity. Put it in the document itself, and color the chat's
-"Incident Detected" alert by severity too.
+**Goal.** Step 5 of the workshop shows a SEV1, SEV2 or SEV3 badge in the chat. But the post-mortem
+file from the **Download** button (`post-mortem-<trace ID prefix>.md`) does not show the severity.
+Add the severity to the document.
 
-**Start here.** `classify_severity` in [`a2ui_translator.py`](agent/src/agent/a2ui_translator.py)
-and `generate_post_mortem` in [`gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py). Keep the exact
-`# 🚨 Incident Post-Mortem` heading: the translator depends on it.
+**Start here.** Go to `classify_severity` in
+[`a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py) and to `generate_post_mortem` in
+[`gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py). Do not change the heading
+`# 🚨 Incident Post-Mortem`. The post-mortem surface uses it.
 
-**Done when.** The downloaded post-mortem has a `Severity` line in its overview, and a test covers
-it.
+**Done when.** The **Incident Overview** section of the downloaded post-mortem has a `Severity`
+line. A test covers this line.
 
 ---
 
-## 🟡 Level 2 — Smarter Diagnosis (Workflow & Agents)
+## 🟡 Level 2: Better Diagnosis (Workflow and Agents)
 
 ### Exercise 5 · Add a third ADK node: the Mitigation Planner 🟡
 
-**Goal.** Today the graph is `TraceAnalyzer → LogCorrelator`. Add a **MitigationPlanner** agent that
-takes the root cause and emits a ranked, actionable remediation plan (with rollback steps),
-separating *diagnosis* from *recommendation*.
+**Goal.** Now the graph is `TraceAnalyzer → fetch_telemetry → LogCorrelator`. Add a
+**MitigationPlanner** agent. This agent gets the root cause. It writes a ranked list of remediation
+actions, with rollback steps. Thus, the diagnosis and the recommendation are separate.
 
-**Start here.** [`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py) — define a third
-`AdkAgent` and extend the `AdkWorkflow` edges. Remember the **two tiers**: also give
-`_run_simulated_diagnostics` an equivalent deterministic section so the offline path produces the
-same report structure.
+**Start here.** Go to [`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
 
-**Done when.** Both tiers (with and without `GEMINI_API_KEY`) produce a report containing a
-distinct "Mitigation Plan" section, verified via `simulate_incident.py`.
+1. Define a third `AdkAgent`.
+2. Add the new agent to the edges of the `AdkWorkflow`.
+3. Add an equivalent fixed section to `_run_simulated_diagnostics`. Thus, both **tiers** have the
+   same report structure.
+
+**Done when.** Both tiers write a report with a separate "Mitigation Plan" section. Test both tiers
+with `simulate_incident.py`: one time with `GEMINI_API_KEY` and one time without it.
 
 ---
 
 ### Exercise 6 · Multi-trace incident correlation 🟡
 
-**Goal.** Real incidents span many requests. Instead of diagnosing one trace, detect that *N* recent
-traces share a failure signature (same failing span/error) and report it as a single incident with a
-blast-radius count.
+**Goal.** A real incident usually affects many requests. Find *N* recent traces with the same
+failure signature (the same failing span and error). Report them as one incident, with the number
+of affected traces (the blast radius).
 
-**Start here.** A new tool over `query_traces` output that buckets traces by failing span + error
-class. Feed the summary into the `fetch_telemetry` node in [
-`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
+**Start here.**
 
-**Done when.** With several error traces in `mock_telemetry_data/`, the report states something like
-*"12 traces affected by the same `/api/database` timeout in the last 2h."*
+1. Write a new tool that reads the output of `query_traces`.
+2. In the tool, group the traces by failing span and error class.
+3. Send the summary to the `fetch_telemetry` node in
+   [`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
+
+**Done when.** Put several error traces in `mock_telemetry_data/`. Run `simulate_incident.py` with
+`--keep-data`, so that the script keeps the traces of earlier runs. The report contains a sentence
+like *"12 traces affected by the same `/api/database` timeout in the last 2h."*
 
 ---
 
 ### Exercise 7 · A human-in-the-loop remediation tool (safety!) 🟡
 
-**Goal.** Give the agent the power to *act* — safely. Add a `restart_service(service_name)` (mock)
-tool that is **gated behind explicit human confirmation**, exercising Antigravity's `ask_user`
-policy hook rather than the blanket `deny`/`allow`.
+**Goal.** Let the agent *act*, but safely. Add a mock tool `restart_service(service_name)`. The
+tool runs only after **explicit human approval**. Use the Antigravity `ask_user` policy, not a
+plain `deny` or `allow` rule.
 
-**Start here.** [`agent/src/agent/config.py`](agent/src/agent/config.py). `ask_user` is already
-imported. Add the tool, then add an `ask_user("restart_service", handler=...)` rule in
-`build_safety_policies()` — and **leave `deny("*")` in place**. The real SDK refuses an `ask_user`
-policy without a `handler`: a function that receives the pending `ToolCall` and returns `True` to
-approve. Start with one that logs the request and returns `False`, then wire it to the chat UI.
+**Start here.** Go to [`agent/src/agent/config.py`](agent/src/agent/config.py). The file already
+imports `ask_user`.
 
-**Done when.** The tool cannot run without confirmation, and you can explain (in a comment or PR
-note) why deny-by-default + `ask_user` is safer than simply `allow`-ing it. *This is the most
-important exercise for understanding the project's safety model.*
+1. Add the tool.
+2. In `build_safety_policies()`, add the rule `ask_user("restart_service", handler=...)`.
+3. **Do not remove `deny("*")`.**
+4. Write the handler. The handler receives the pending `ToolCall` and returns `True` to approve the
+   call. The real SDK refuses an `ask_user` policy that has no `handler`.
+5. Start with a handler that logs the request and returns `False`.
+6. Then connect the handler to the chat UI.
+
+**Done when.** The tool cannot run without approval. In a comment or a PR note, explain why
+deny-by-default with `ask_user` is safer than `allow`. *This exercise is the most important one to
+understand the safety model of the project.*
 
 ---
 
 ### Exercise 8 · Notify a channel (Slack / webhook) 🟡
 
-**Goal.** Close the human loop: when a post-mortem is generated, POST it to a webhook (mockable
-locally).
+**Goal.** Tell the humans about the result. When the agent writes a post-mortem, send it with a
+`POST` request to a webhook. In local mock mode, do not send it.
 
-**Start here.** A new tool that uses `httpx` wrapped in `@retry_async`; in `IS_MOCK` mode, write the
-payload to a local file instead of making a network call. Reuse the A2A HTTP pattern from
-`diagnose_sre` in [`config.py`](agent/src/agent/config.py).
+**Start here.**
 
-**Done when.** A local mock run records the notification payload to disk; a `WEBHOOK_URL` env var
-enables real posting. Bonus: gate it behind `ask_user` like Exercise 7.
+1. Write a new tool that uses `httpx`. Wrap it in `@retry_async`.
+2. In `IS_MOCK` mode, write the payload to a local file. Do not make a network call.
+3. For the error handling, look at `_call_sre_skill` in [`config.py`](agent/src/agent/config.py).
+   It catches the error and returns a result that starts with `Error:`.
+
+**Done when.** A local mock run writes the notification payload to disk. The environment variable
+`WEBHOOK_URL` enables real posts. Optional: put the tool behind an `ask_user` rule, as in
+Exercise 7.
 
 ---
 
-## 🔴 Level 3 — Close the Loop (Architecture & Production)
+## 🔴 Level 3: Close the Loop (Architecture and Production)
 
 ### Exercise 9 · RAG over runbooks 🔴
 
-**Goal.** The Inventory agent already does similarity lookup of *diagnostic templates*. Extend that
-into retrieval-augmented diagnosis: store org-specific **runbooks** and inject the most relevant one
-for the failing service into the LogCorrelator's context.
+**Goal.** The SRE agent already finds *diagnostic templates* with a similarity search. It searches
+for each resource that the Inventory agent discovers. Extend this search to retrieval-augmented
+diagnosis:
 
-**Start here.** [`sre_agent/src/sre_agent/itinerary.py`](sre_agent/src/sre_agent/itinerary.py) (
-`DEFAULT_TEMPLATES`, `get_embedding`, `find_matching_template`) and the enrichment step in
-`fetch_telemetry` ([`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py)). The mock
-`get_embedding` returns a zero vector — decide how to make matching meaningful offline (e.g. keyword
-fallback when `IS_MOCK`).
+1. Store the **runbooks** of your organization.
+2. Find the runbook that matches the failing service best.
+3. Add this runbook to the context of the LogCorrelator.
 
-**Done when.** A diagnosis for `sre-chaos-monkey` pulls in a matching runbook snippet, and the
-workflow still runs with no API key.
+**Start here.** Go to [`sre_agent/src/sre_agent/itinerary.py`](sre_agent/src/sre_agent/itinerary.py)
+(`DEFAULT_TEMPLATES`, `get_embedding`, `find_matching_template`). Also go to the enrichment step in
+`fetch_telemetry` ([`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py)). In mock mode,
+`get_embedding` returns a zero vector. Decide how to get useful matches offline. For example, use a
+keyword match when `IS_MOCK` is true.
+
+**Done when.** A diagnosis for `sre-chaos-monkey` includes a part of the matching runbook. The
+workflow still runs without an API key.
 
 ---
 
 ### Exercise 10 · Go live on real GCP 🔴
 
-**Goal.** Turn off the mocks. Deploy to Cloud Run and diagnose a *real* incident with real Cloud
-Trace/Logging/Monitoring data.
+**Goal.** Stop the mocks. Deploy to Cloud Run. Diagnose a *real* incident with real data from
+Cloud Trace, Cloud Logging and Cloud Monitoring.
 
-**Start here.** `./bootstrap.sh` → `./deploy.sh` (see [`README.md`](README.md) for the
-least-privilege service-account matrix), then trigger `curl ".../api/gateway?trigger_error=true"`
-and ask the agent in the `/chat` UI.
+**Start here.**
 
-**Done when.** With `MOCK_GCP=false`, the agent diagnoses a live trace end-to-end. Then run
-`./cleanup.sh` to avoid charges. Watch the IAM split do its job: the app SA can only *write*
-telemetry, the agent SA can only *read* it.
+1. Run `./bootstrap.sh`.
+2. Run `./deploy.sh`. For the least-privilege service accounts, see [`README.md`](README.md).
+3. Trigger an incident: `curl ".../api/gateway?trigger_error=true"`.
+4. Ask the agent in the `/chat` UI.
+
+**Done when.** With `MOCK_GCP=false`, the agent diagnoses a live trace from start to end. Then run
+`./cleanup.sh` to stop the costs. Look at the IAM split: the app service account can only *write*
+telemetry. The agent service account can *read* telemetry, and it can write only its own spans.
 
 ---
 
 ### Exercise 11 · Build an evaluation harness 🔴
 
-**Goal.** How do you know a prompt or model change made the agent *better*? Build a small eval set
-of labeled incidents (trace fixtures + expected root cause / bottleneck span) and score the agent's
-output automatically.
+**Goal.** Find out if a prompt change or a model change makes the agent *better*. Make a small
+evaluation set of labeled incidents. Each incident has trace fixtures and the expected root cause
+or bottleneck span. Score the output of the agent automatically.
 
-**Start here.** Add fixtures under `mock_telemetry_data/` and an eval runner that calls
-`run_sre_diagnostics` and checks the identified bottleneck span + error class against the label. (
-This mirrors ADK's evaluation methodology — an "LLM-as-judge" scorer is a great stretch.)
+**Start here.**
 
-**Done when.** `make eval` (or a script) reports pass-rate over your incident set, and you can A/B
-two agent instructions.
+1. Add the fixtures to `mock_telemetry_data/`.
+2. Write an evaluation runner that calls `run_sre_diagnostics`.
+3. In the runner, compare the bottleneck span and the error class with the label.
+
+This method is the same as the ADK evaluation method. Optional: add an "LLM-as-judge" scorer.
+
+**Done when.** A script (or a `make eval` target that you add) shows the pass rate over your
+incident set. You can compare two agent instructions (A/B).
 
 ---
 
 ### 🏆 Capstone · The fully autonomous loop
 
-**Goal.** Deliver on the blog's promise — *fix it before you even log on.* Wire a Cloud Monitoring
-alert → Pub/Sub → an entrypoint that automatically runs the diagnosis and posts the post-mortem to
-your channel (Exercise 8), with any remediation gated behind `ask_user` (Exercise 7).
+**Goal.** Fix the incident before a human logs on. Connect these parts:
 
-**Start here.** Add a Pub/Sub-push endpoint to the Orchestrator ([
-`agent/src/agent/routes.py`](agent/src/agent/routes.py)) that calls the same `diagnose_sre` path the
-chat uses; provision the alert + topic in `deploy.sh`.
+1. A Cloud Monitoring alert sends a message to Pub/Sub.
+2. Pub/Sub calls an entry point that runs the diagnosis automatically.
+3. The entry point sends the post-mortem to your channel (Exercise 8).
+4. Each remediation needs approval through `ask_user` (Exercise 7).
 
-**Done when.** A triggered incident produces an unattended post-mortem in your channel — no human in
-the loop until a remediation needs approval. Record a short demo. 🎬
+**Start here.**
+
+1. Add a Pub/Sub push endpoint to the Orchestrator
+   ([`agent/src/agent/routes.py`](agent/src/agent/routes.py)). The endpoint calls the same
+   `diagnose_sre` tool as the chat. The existing `/diagnose` endpoint is an example.
+2. Create the alert and the topic in `deploy.sh`.
+
+**Done when.** An incident produces a post-mortem in your channel without a human. A human is
+necessary only when a remediation needs approval. Record a short demo. 🎬
 
 ---
 
-## ✅ Definition of Done (for any exercise)
+## ✅ Definition of Done (for all exercises)
 
-- [ ] New tools have an `IS_MOCK` branch, full type hints, and a clear docstring.
-- [ ] `uv run simulate_incident.py` still produces a complete report (both tiers if you touched the
-  workflow).
-- [ ] All three test suites pass, and `ruff check` / `ruff format --check` are clean.
-- [ ] The Orchestrator is still deny-by-default; any new capability is a deliberate `allow(...)` /
-  `ask_user(...)`.
+- [ ] Each new tool has an `IS_MOCK` branch, full type hints and a clear docstring.
+- [ ] `uv run simulate_incident.py` still writes a complete report. If you changed the workflow,
+  test both tiers.
+- [ ] All three test suites pass. `ruff check` and `ruff format --check` show no errors.
+- [ ] The Orchestrator is still deny-by-default. Each new capability has its own `allow(...)` or
+  `ask_user(...)` rule.
 - [ ] You can explain *why* your change is safe.
 
-Stuck? Re-read the relevant section of [`CODELAB.md`](CODELAB.md), the design rationale in [
-`BLOGPOST.md`](BLOGPOST.md), and the conventions in [`AGENTS.md`](AGENTS.md). Now go break
-something — safely. 🛠️
+If you have a problem, read the related section of [`CODELAB.md`](CODELAB.md) again. Also read the
+design decisions in [`BLOGPOST.md`](BLOGPOST.md) and the rules in [`AGENTS.md`](AGENTS.md).

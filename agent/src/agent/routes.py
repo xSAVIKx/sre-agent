@@ -9,15 +9,17 @@ import datetime
 import json
 import logging
 import os
+import re
 import uuid
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from pydantic import BaseModel, model_validator
 
-from agent.a2ui_translator import compose_reply_a2ui
 from agent.config import (
     HAS_ANTIGRAVITY,
     Agent,
@@ -47,22 +49,48 @@ class DiagnoseResponse(BaseModel):
     result: str
 
 
-class ChatRequest(BaseModel):
-    """Pydantic model representing a stateful chat request."""
+class SurfaceAction(BaseModel):
+    """An A2UI action the user triggered on a surface (e.g. a button), as the renderer reports it."""
 
-    prompt: str
+    name: str
+    context: dict[str, Any] = {}
+    surfaceId: str = ""  # the A2UI field name
+
+
+# What each A2UI action the SRE agent's surfaces can send asks the Orchestrator. The
+# action becomes an ordinary chat turn, so it goes through the agent and its policy.
+ACTION_PROMPTS = {
+    "diagnose_incident": "Diagnose trace {traceId}.",
+    "write_post_mortem": "Write the post-mortem for trace {traceId}.",
+}
+_TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+def action_prompt(action: SurfaceAction) -> str:
+    """The chat prompt for a surface action. Rejects unknown actions and malformed trace IDs."""
+    template = ACTION_PROMPTS.get(action.name)
+    trace_id = str(action.context.get("traceId", ""))
+    if template is None or not _TRACE_ID.match(trace_id):
+        raise ValueError(f"Unsupported surface action {action.name!r}")
+    return template.format(traceId=trace_id)
+
+
+class ChatRequest(BaseModel):
+    """Pydantic model representing a stateful chat request: a prompt, or a surface action."""
+
+    prompt: str = ""
+    action: SurfaceAction | None = None
     conversation_id: str | None = None
     project_id: str | None = None
     refresh: bool = False
 
-
-class ChatResponse(BaseModel):
-    """Pydantic model representing a stateful chat response with A2UI."""
-
-    status: str
-    response: str
-    response_a2ui: dict[str, Any] | None = None
-    conversation_id: str | None = None
+    @model_validator(mode="after")
+    def _prompt_from_action(self) -> "ChatRequest":
+        if self.action is not None:
+            self.prompt = action_prompt(self.action)
+        if not self.prompt.strip():
+            raise ValueError("Either a prompt or an action is required")
+        return self
 
 
 @router.get("/health")
@@ -181,14 +209,19 @@ TURNS_COLLECTION = "turns"
 
 
 def _turn_entries(
-    prompt: str, reply: str, thinking: list[str], tool_calls: list[str], rendered: str
+    prompt: str,
+    reply: str,
+    thinking: list[str],
+    tool_calls: list[str],
+    rendered: str,
+    a2ui: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """The compact user/model pair one chat turn adds to the transcript.
 
-    Only what the UI replays is kept. The raw SDK steps are far too large to store
-    (one diagnosis is ~90 streamed steps), and the A2UI payload is rebuilt on read.
-    `rendered` is the SRE skill's full result, shown as a card under the reply; it is
-    stored only when it differs from the reply.
+    Only what the UI replays is kept; the raw SDK steps are far too large to store
+    (one diagnosis is ~90 streamed steps). Under the reply the UI shows the SRE
+    skill's result: its A2UI surface (`a2ui`), or else its Markdown (`rendered`,
+    stored only when it differs from the reply).
     """
     user = {"source": "USER", "content": prompt}
     model: dict[str, Any] = {"source": "MODEL", "content": reply}
@@ -196,7 +229,9 @@ def _turn_entries(
         model["thinking"] = "\n".join(thinking)
     if tool_calls:
         model["tool_calls"] = [{"name": name} for name in tool_calls]
-    if rendered and rendered != reply:
+    if a2ui:
+        model["a2ui"] = a2ui
+    elif rendered and rendered != reply:
         model["rendered"] = rendered
     return user, model
 
@@ -239,43 +274,71 @@ async def _register_session(conv_id: str, prompt: str) -> None:
         logger.exception(f"Failed to register new conversation {conv_id}")
 
 
-async def _save_turn(conv_id: str, prompt: str, user: dict[str, Any], model: dict[str, Any]) -> None:
-    """Appends one turn to the conversation's transcript.
+@dataclass
+class _Turn:
+    """One chat turn in the transcript, saved before it runs and completed when it ends."""
+
+    conv_id: str
+    prompt: str
+    # The Firestore turn document, or (simulation) the placeholder entry in MOCK_HISTORY_DB.
+    ref: Any
+
+
+# A turn whose answer was never saved (e.g. the instance stopped) shows as failed after this.
+STALE_TURN = datetime.timedelta(minutes=15)
+
+
+async def _start_turn(conv_id: str, prompt: str, user: dict[str, Any]) -> _Turn:
+    """Saves the user's message as a running turn, before the agent answers.
 
     Each turn is its own document under agent_sessions/{id}/turns, so a long
     conversation never approaches Firestore's 1 MiB document limit - the session
-    document itself also holds the Antigravity harness snapshot.
+    document itself also holds the Antigravity harness snapshot. A running turn is
+    replayed as "still working", so a browser that lost the connection can wait for it.
     """
     if not HAS_ANTIGRAVITY:
         from agent.config import MOCK_HISTORY_DB
 
-        MOCK_HISTORY_DB.setdefault(conv_id, []).extend([user, model])
-        return
+        placeholder = {"source": "MODEL", "pending": True}
+        MOCK_HISTORY_DB.setdefault(conv_id, []).extend([user, placeholder])
+        return _Turn(conv_id, prompt, placeholder)
 
     from google.cloud import firestore
 
     db = firestore.AsyncClient()
-    session = db.collection(SESSIONS_COLLECTION).document(conv_id)
-    await session.collection(TURNS_COLLECTION).add(
-        {"created_at": firestore.SERVER_TIMESTAMP, "user": user, "model": model}
-    )
+    ref = db.collection(SESSIONS_COLLECTION).document(conv_id).collection(TURNS_COLLECTION).document()
+    await ref.set({"created_at": firestore.SERVER_TIMESTAMP, "user": user, "status": "running"})
+    return _Turn(conv_id, prompt, ref)
+
+
+async def _finish_turn(turn: _Turn, model: dict[str, Any]) -> None:
+    """Saves the answer of a running turn, and lists the chat as updated."""
+    if not HAS_ANTIGRAVITY:
+        turn.ref.clear()
+        turn.ref.update(model)
+        return
+
+    from google.cloud import firestore
+
+    await turn.ref.update({"model": model, "status": "done"})
+    session = turn.ref.parent.parent
     existing = await session.get()
-    update: dict[str, Any] = {"conversation_id": conv_id, "updated_at": firestore.SERVER_TIMESTAMP}
+    update: dict[str, Any] = {"conversation_id": turn.conv_id, "updated_at": firestore.SERVER_TIMESTAMP}
     if not (existing.exists and (existing.to_dict() or {}).get("prompt")):
-        update["prompt"] = prompt
+        update["prompt"] = turn.prompt
     await session.set(update, merge=True)
 
 
-def _with_a2ui(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Copies of the entries, with the A2UI payload rebuilt for model entries lacking one."""
-    result = []
-    for entry in entries:
-        entry = dict(entry)
-        has_text = entry.get("content") or entry.get("rendered")
-        if entry.get("source") == "MODEL" and has_text and not entry.get("response_a2ui"):
-            entry["response_a2ui"] = compose_reply_a2ui(entry.get("content") or "", entry.get("rendered"))
-        result.append(entry)
-    return result
+def _model_entry(turn: dict[str, Any]) -> dict[str, Any] | None:
+    """The answer of a saved turn: the model entry, "still working", or a failure if it stalled."""
+    if turn.get("model"):
+        return turn["model"]
+    if turn.get("status") != "running":
+        return None
+    created = turn.get("created_at")
+    if isinstance(created, datetime.datetime) and datetime.datetime.now(datetime.UTC) - created > STALE_TURN:
+        return {"source": "MODEL", "content": "Error: the agent did not finish this answer.", "error": True}
+    return {"source": "MODEL", "pending": True}
 
 
 @router.get("/sessions/{conversation_id}/history")
@@ -290,19 +353,19 @@ async def get_session_history(conversation_id: str):
         history: list[dict[str, Any]] = []
         for turn in turns:
             data = turn.to_dict() or {}
-            history.extend(entry for entry in (data.get("user"), data.get("model")) if entry)
+            history.extend(entry for entry in (data.get("user"), _model_entry(data)) if entry)
         if not history:
             # Sessions saved before transcripts moved to a subcollection keep them inline.
             doc = await session.get()
             history = (doc.to_dict() or {}).get("history", []) if doc.exists else []
-        return {"conversation_id": conversation_id, "history": _with_a2ui(history)}
+        return {"conversation_id": conversation_id, "history": history}
     except Exception as e:
         logger.warning(f"Using mock database history fallback: {e}")
         from agent.config import MOCK_HISTORY_DB
 
         return {
             "conversation_id": conversation_id,
-            "history": _with_a2ui(MOCK_HISTORY_DB.get(conversation_id, [])),
+            "history": MOCK_HISTORY_DB.get(conversation_id, []),
         }
 
 
@@ -348,6 +411,21 @@ async def get_chat_ui() -> HTMLResponse:
         raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {e!s}") from e
 
 
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+@router.get("/static/sre-a2ui.js", include_in_schema=False)
+async def a2ui_renderer() -> FileResponse:
+    """The chat UI's A2UI renderer bundle (built from agent/web).
+
+    no-cache: browsers revalidate it on every load (a cheap 304 when unchanged), so a
+    deploy reaches them at once instead of after a stale cached copy expires.
+    """
+    return FileResponse(
+        os.path.join(STATIC_DIR, "sre-a2ui.js"), media_type="text/javascript", headers={"Cache-Control": "no-cache"}
+    )
+
+
 @router.post("/chat")
 @otel_trace("routes.chat")
 async def chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
@@ -364,132 +442,130 @@ def _sse(event: dict[str, Any]) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
+# Running turns, by conversation. A turn runs as its own task, not inside the HTTP
+# stream: a phone suspends the browser's connection when the user switches apps, and
+# the answer must still be saved. POST /sessions/{id}/cancel stops a turn on purpose.
+_running_turns: dict[str, asyncio.Task] = {}
+
+
+@router.post("/sessions/{conversation_id}/cancel")
+async def cancel_turn(conversation_id: str) -> dict[str, Any]:
+    """Stops the running turn of a conversation (the chat's Stop button)."""
+    task = _running_turns.get(conversation_id)
+    if task is None or task.done():
+        return {"status": "idle", "conversation_id": conversation_id}
+    task.cancel()
+    return {"status": "cancelled", "conversation_id": conversation_id}
+
+
+async def _run_turn(request: ChatRequest, turn: _Turn, emit: Callable[[dict[str, Any]], None]) -> None:
+    """Runs one turn of the Orchestrator agent, reports it through `emit`, and saves its answer."""
+    reply, thinking, tool_calls = "", [], []
+
+    def think(text: str) -> None:
+        thinking.append(text)
+        emit({"type": "thought", "text": text})
+
+    # Set in this task's own context, so the tools and the tasks the SDK spawns see it.
+    sink = DiagnosisSink(on_progress=think, context_id=turn.conv_id)
+    diagnosis_sink.set(sink)
+    response = None
+    try:
+        config = load_firestore_agent_config(conversation_id=turn.conv_id)
+        config.prompt = request.prompt
+        # No history replay here: the agent's memory of earlier turns is the Antigravity
+        # harness state, which the Firestore strategy restores for a known conversation_id.
+        async with Agent(config) as agent:
+            response = await agent.chat(request.prompt)
+            async for chunk in response.chunks:
+                kind = chunk.__class__.__name__
+                if kind == "Thought":
+                    think(chunk.text)
+                elif kind == "ToolCall":
+                    tool_calls.append(chunk.name)
+                    emit({"type": "thought", "text": f"🔧 Calling tool `{chunk.name}`..."})
+                elif kind == "Text":
+                    reply += chunk.text
+                    emit({"type": "chunk", "text": chunk.text})
+
+        # The model replies with a short summary; under it the UI renders the SRE skill's
+        # result - its A2UI surface, or its Markdown without one.
+        rendered = sink.report if sink.report and not sink.report.startswith("Error:") else ""
+        _, model = _turn_entries(request.prompt, reply, thinking, tool_calls, rendered, sink.a2ui)
+        await _finish_turn(turn, model)
+        emit(
+            {
+                "type": "done",
+                "conversation_id": turn.conv_id,
+                "response": reply,
+                "a2ui": model.get("a2ui", []),
+                "rendered": model.get("rendered", ""),
+            }
+        )
+    except asyncio.CancelledError:
+        logger.info(f"Turn of conversation {turn.conv_id} stopped by the user.")
+        if response is not None:
+            with contextlib.suppress(Exception):
+                await asyncio.shield(response.cancel())
+        with contextlib.suppress(Exception):
+            await asyncio.shield(_finish_turn(turn, {"source": "MODEL", "content": "Stopped.", "stopped": True}))
+        raise
+    except Exception as e:
+        logger.exception(f"Turn of conversation {turn.conv_id} failed.")
+        detail = str(e) or e.__class__.__name__
+        with contextlib.suppress(Exception):
+            await _finish_turn(turn, {"source": "MODEL", "content": f"Error: {detail}", "error": True})
+        emit({"type": "error", "detail": detail})
+
+
 async def _stream_orchestrator_chat(request: ChatRequest, fastapi_request: Request) -> StreamingResponse:
-    """Invokes the Orchestrator agent reasoning loop and streams it as SSE."""
+    """Starts a turn of the Orchestrator agent and streams it as SSE.
+
+    The turn runs as its own task: when the client goes away (e.g. a phone switched
+    apps), the stream ends but the turn finishes and saves its answer, which the
+    chat loads from the history when it is back.
+    """
 
     async def event_generator():
-        # Progress from diagnose_sre and chunks from the agent share one queue,
-        # so sub-agent progress shows up while the tool call is still running.
-        queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
-        sink = DiagnosisSink(on_progress=lambda text: queue.put_nowait(("progress", text)))
-        # Set before the agent starts so tasks the SDK spawns inherit it.
-        sink_token = diagnosis_sink.set(sink)
-        response = None
         try:
             # A new chat gets its ID now, before the agent runs: the browser registers it
             # (sidebar, URL) from the first event, and it survives a failed or interrupted
             # turn. The agent creates the conversation under this ID and resumes it later.
             conv_id = _resolve_conversation_id(request.conversation_id)
+            running = _running_turns.get(conv_id)
+            if running is not None and not running.done():
+                yield _sse({"type": "error", "detail": "This chat is still working on the previous message."})
+                return
             if conv_id != request.conversation_id:
                 await _register_session(conv_id, request.prompt)
-            yield _sse({"type": "start", "conversation_id": conv_id})
-            # One A2A context per chat conversation, so the SRE agent keeps its session.
-            sink.context_id = conv_id
-
-            config = load_firestore_agent_config(conversation_id=conv_id)
-            config.prompt = request.prompt
-
-            async with Agent(config) as agent:
-                # No history replay here: the agent's memory of earlier turns is the
-                # Antigravity harness state, which the Firestore strategy restores for a
-                # known conversation_id. The transcript below only feeds the UI.
-
-                response = await agent.chat(request.prompt)
-
-                async def pump_chunks() -> None:
-                    try:
-                        async for chunk in response.chunks:
-                            await queue.put(("chunk", chunk))
-                    except Exception as exc:
-                        await queue.put(("error", exc))
-                    finally:
-                        await queue.put(("end", None))
-
-                pump = asyncio.create_task(pump_chunks())
-                accumulated_text = ""
-                thinking: list[str] = []
-                tool_calls: list[str] = []
-                disconnected = False
-                finished = False
-                try:
-                    while True:
-                        try:
-                            # Wake up regularly so a long, silent tool call still
-                            # notices a client that went away.
-                            kind, item = await asyncio.wait_for(queue.get(), timeout=1.0)
-                        except TimeoutError:
-                            if await fastapi_request.is_disconnected():
-                                disconnected = True
-                                break
-                            continue
-                        if kind == "end":
-                            finished = True
-                            break
-                        if kind == "error":
-                            raise item
-                        if await fastapi_request.is_disconnected():
-                            disconnected = True
-                            break
-                        if kind == "progress":
-                            thinking.append(item)
-                            yield _sse({"type": "thought", "text": item})
-                            continue
-
-                        cls_name = item.__class__.__name__
-                        if cls_name == "Thought":
-                            thinking.append(item.text)
-                            yield _sse({"type": "thought", "text": item.text})
-                        elif cls_name == "ToolCall":
-                            tool_calls.append(item.name)
-                            yield _sse({"type": "thought", "text": f"🔧 Calling tool `{item.name}`..."})
-                        elif cls_name == "Text":
-                            accumulated_text += item.text
-                            yield _sse({"type": "chunk", "text": item.text})
-                finally:
-                    # Runs on normal exit, errors, and when Starlette cancels the
-                    # stream because the client disconnected: stop the agent turn
-                    # and the pump instead of leaving them running.
-                    if not finished:
-                        logger.info("Chat stream ended early (client gone or error). Cancelling the agent turn.")
-                        with contextlib.suppress(Exception, asyncio.CancelledError):
-                            await asyncio.shield(response.cancel())
-                    if not pump.done():
-                        pump.cancel()
-                    with contextlib.suppress(Exception, asyncio.CancelledError):
-                        await pump
-
-                # Stream complete
-                if not disconnected and not await fastapi_request.is_disconnected():
-                    # The model replies with a short summary; the SRE skill's full
-                    # result is rendered as a card under it.
-                    rendered = accumulated_text
-                    if sink.report and not sink.report.startswith("Error:"):
-                        rendered = sink.report
-                    response_a2ui = compose_reply_a2ui(accumulated_text, rendered)
-
-                    user_entry, model_entry = _turn_entries(
-                        request.prompt, accumulated_text, thinking, tool_calls, rendered
-                    )
-                    try:
-                        await _save_turn(conv_id, request.prompt, user_entry, model_entry)
-                    except Exception:
-                        logger.exception(f"Failed to save the transcript of conversation {conv_id}")
-
-                    yield _sse(
-                        {
-                            "type": "done",
-                            "conversation_id": conv_id,
-                            "response": accumulated_text,
-                            "response_a2ui": response_a2ui,
-                        }
-                    )
-
+            user, _ = _turn_entries(request.prompt, "", [], [], "")
+            turn = await _start_turn(conv_id, request.prompt, user)
         except Exception as e:
-            logger.exception("Failed inside Orchestrator chat stream.")
+            logger.exception("Failed to start the chat turn.")
             yield _sse({"type": "error", "detail": str(e) or e.__class__.__name__})
-        finally:
-            with contextlib.suppress(ValueError):  # reset from a different context
-                diagnosis_sink.reset(sink_token)
+            return
+
+        # Start the turn before the first event: a client may leave right after it.
+        events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+        task = asyncio.create_task(_run_turn(request, turn, events.put_nowait))
+        _running_turns[conv_id] = task
+        task.add_done_callback(lambda _: _running_turns.pop(conv_id, None))
+        yield _sse({"type": "start", "conversation_id": conv_id, "prompt": request.prompt})
+
+        while True:
+            try:
+                # Wake up regularly to notice a client that went away during a long tool call.
+                event = await asyncio.wait_for(events.get(), timeout=1.0)
+            except TimeoutError:
+                if task.done() and events.empty():
+                    return  # stopped: the client cancelled the turn
+                if await fastapi_request.is_disconnected():
+                    logger.info(f"Client left conversation {conv_id}; its turn keeps running.")
+                    return
+                continue
+            yield _sse(event)
+            if event["type"] in ("done", "error"):
+                return
 
     return StreamingResponse(
         event_generator(),

@@ -23,7 +23,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 # package directory -> importable module names inside it.
 PACKAGES: dict[str, tuple[str, ...]] = {
-    "agent/src": ("agent.a2ui_translator", "agent.config", "agent.firestore_strategy", "agent.main", "agent.routes"),
+    "agent/src": ("agent.config", "agent.firestore_strategy", "agent.main", "agent.routes"),
     "sre_agent/src": (
         "sre_agent.config",
         "sre_agent.firestore_strategy",

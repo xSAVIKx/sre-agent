@@ -107,6 +107,25 @@ jobs:
           grep -q "Identified Bottleneck" simulation.log
           grep -q "Incident Post-Mortem" simulation.log
 
+  a2ui-bundle:
+    name: A2UI renderer bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # The chat UI loads a prebuilt bundle (agent/src/agent/static/sre-a2ui.js), so the
+      # service needs no Node toolchain. Rebuild it from the lockfile with the runner's
+      # Node and fail if the committed copy is stale. esbuild output is deterministic.
+      - name: Rebuild the bundle
+        working-directory: agent/web
+        run: |
+          node --version
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: Committed bundle is up to date
+        run: git diff --exit-code -- agent/src/agent/static/
+
   docker:
     name: docker images
     runs-on: ubuntu-latest

@@ -1,6 +1,6 @@
 --- a/agent/src/agent/config.py
 +++ b/agent/src/agent/config.py
-@@ -574,9 +574,7 @@
+@@ -615,9 +615,7 @@
  
  def build_safety_policies() -> list[Any]:
      """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""

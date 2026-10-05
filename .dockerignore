@@ -40,3 +40,7 @@ docker-compose*
 cleanup.sh
 bootstrap.sh
 deploy.sh
+
+# The chat UI bundle is prebuilt (agent/src/agent/static); its sources are not needed in images
+agent/web
+node_modules

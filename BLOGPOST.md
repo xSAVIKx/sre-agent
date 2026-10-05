@@ -215,15 +215,15 @@ That Markdown is then rendered through the [A2UI protocol](https://a2ui.org/):
 
 ```mermaid
 flowchart TB
-    R["SRE report markdown<br/># 🚨 Incident Post-Mortem"] --> T["translate_markdown_to_a2ui()"]
-    T --> C["A2UI components:<br/>alert · preview · download_button"]
-    C --> B["Web chat renders<br/>.download-pm-btn"]
+    R["SRE agent result<br/>post-mortem"] --> T["a2ui_surfaces.post_mortem_surface()"]
+    T --> C["A2UI v0.9 surface:<br/>Card · SeverityBadge · Tabs · Download"]
+    C --> B["@a2ui/lit renders it<br/>in the web chat"]
     B --> D["📥 Client-side Blob download<br/>post_mortem.md"]
 ```
 
-A server-side translator spots the post-mortem heading and appends a download-button component; the
-browser renders it as a styled button that builds the file entirely client-side (no server
-round-trip) from the Markdown it already holds.
+The SRE agent sends the result as an A2UI surface next to the Markdown: JSON naming catalog
+components, never HTML. The browser renders the surface's `Download` component as a button that
+builds the file entirely client-side (no server round-trip) from the Markdown it already holds.
 
 One click exports `post_mortem.md`, ready to drop into your incident-review wiki.
 

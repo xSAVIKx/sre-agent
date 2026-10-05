@@ -1,20 +1,20 @@
-# Codelab: Build an Autonomous GCP SRE Agent (ADK + Antigravity with `uv`)
+# Codelab: Build a GCP SRE Agent with ADK, A2A, A2UI and Antigravity
 
-This hands-on codelab walks you through building an autonomous Site Reliability Engineering (SRE)
-agent that diagnoses distributed application failures and generates download-ready incident
-post-mortems — start to finish.
+This codelab shows how to build a Site Reliability Engineering (SRE) agent. The agent diagnoses
+failures in a distributed application. It also writes an incident post-mortem that you can
+download.
 
-Every step builds the real, runnable packages in this repository, and the whole thing runs **locally
-with no GCP credentials** thanks to a mock-telemetry mode. The terminal output shown in Step 8 is
-the actual, verified output of the finished project.
+Each step uses the real packages in this repository. All steps run **locally without GCP
+credentials**, because a mock telemetry mode replaces the cloud APIs. Step 8 shows the real
+output of the finished project.
 
-> **A note on tooling:** the surrounding project is normally driven by the Antigravity CLI, but this
-> codelab (and its prose/diagrams) is plain documentation — follow it with whatever editor or
-> assistant you like, per [`AGENTS.md`](AGENTS.md).
+> **Tools:** You can use the Antigravity CLI with this project, but it is not necessary. This
+> codelab is plain documentation. Use the editor or assistant that you prefer. Obey the rules in
+> [`AGENTS.md`](AGENTS.md).
 
-> **📦 Get the finished code:** the complete, runnable project lives at
+> **📦 Finished code:** The complete project is at
 > **[`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)**. Clone it to compare
-> against your work as you go, or to skip ahead:
+> your work with it, or to go to a later step:
 > ```bash
 > git clone https://github.com/xSAVIKx/sre-agent.git
 > ```
@@ -40,86 +40,113 @@ flowchart LR
     AG -->|" chat + 📥 post-mortem "| User(["👤 You"])
 ```
 
-By the end you will have:
+This codelab uses these terms:
 
-1. An instrumented **FastAPI target application** simulating a `Gateway → Backend → Database` call
-   chain that emits OpenTelemetry traces and correlated logs.
-2. A set of **custom SRE tools** that query Cloud Trace/Logging/Monitoring, perform cascade latency
-   analysis, and generate post-mortems — each with a local mock fallback.
-3. A **Google ADK multi-agent workflow** coordinating trace scanning and log correlation.
-4. An **Antigravity SDK Orchestrator** that enforces a deny-by-default safety policy, translates
-   Markdown reports into rich UI components, and serves a web chat.
-5. An **interactive local simulation** and a **least-privilege Cloud Run deployment**.
+| Term | Package | What it does |
+|:-----|:--------|:-------------|
+| Target app | `app/` | A FastAPI service that makes the synthetic incident. |
+| SRE agent | `sre_agent/` | Diagnoses incidents. The Cloud Run service name is `sre-sub-agent`. |
+| Orchestrator | `agent/` | The agent that you talk to in the web chat. It delegates to the SRE agent. |
+| Inventory agent | `inventory_agent/` | Finds the Cloud Run services and databases of the project. |
+| Shared library | `sre_common/` | Code that all services use. |
+| Surface | – | One A2UI user interface that the chat shows for one result. |
+
+At the end of the codelab, you have:
+
+1. A **FastAPI target app** with OpenTelemetry. It simulates a `Gateway → Backend → Database` call
+   chain and writes traces, correlated logs and metrics.
+2. **SRE tools** that query Cloud Trace, Cloud Logging and Cloud Monitoring. The tools also find the
+   slowest span and write post-mortems. Each tool has a local mock mode.
+3. A **Google ADK multi-agent workflow**. One agent selects the trace. A second agent correlates
+   the logs.
+4. An **Orchestrator** that uses the Antigravity SDK. Its safety policy denies all tools by default
+   and allows only the three SRE tools. It also serves the web chat.
+5. **A2UI surfaces**: the SRE agent sends each result as user-interface components that the chat
+   shows.
+6. A **local simulation** and a **Cloud Run deployment** with least privilege.
 
 ---
 
 ## 🛠️ Prerequisites
 
-- **Python 3.11+** (the codebase uses 3.14-style typing — `list[str]`, `str | None`).
-- The **`uv`** package manager: `pip install uv`.
-- *Optional, for cloud deployment only:* the **`gcloud` CLI** authenticated against a
-  billing-enabled GCP project.
+- **Python 3.11 or later.** The code uses 3.14-style typing, for example `list[str]` and
+  `str | None`.
+- The **`uv`** package manager. To install it, run `pip install uv`.
+- *Optional, only for cloud deployment:* the **`gcloud` CLI**, logged in to a GCP project that has
+  billing.
 
 ---
 
-## Step 1: Bootstrap the `uv` Workspace
+## Step 1: Create the `uv` Workspace
 
-We use [`uv`](https://docs.astral.sh/uv/) workspaces for fast, isolated, cross-package dependency
-resolution. Create the root [`pyproject.toml`](pyproject.toml):
+This project uses [`uv`](https://docs.astral.sh/uv/) workspaces. A workspace resolves the
+dependencies of all packages together. Each package keeps its own dependencies.
 
-```toml
-[project]
-name = "sre-agent-codelab-workspace"
-version = "0.1.0"
-description = "SRE agent trace & log correlation codelab workspace"
-readme = "README.md"
-requires-python = ">=3.11"
-dependencies = []
+1. Create the root [`pyproject.toml`](pyproject.toml). This excerpt shows the workspace part:
 
-[tool.uv.workspace]
-members = ["app", "agent", "sre_agent", "inventory_agent", "sre_common"]
-```
+   ```toml
+   [project]
+   name = "sre-agent-codelab-workspace"
+   version = "0.1.0"
+   description = "SRE agent trace & log correlation codelab workspace"
+   readme = "README.md"
+   requires-python = ">=3.11"
+   dependencies = []
 
-Each member is its own package with its own `pyproject.toml`; the root file only defines the
-workspace. Create the shared virtual environment and link every package:
+   [tool.uv.workspace]
+   members = ["app", "agent", "sre_agent", "inventory_agent", "sre_common"]
+   ```
 
-```bash
-uv venv
-uv sync --all-packages
-```
+   Each member is a package with its own `pyproject.toml`. The root file only defines the
+   workspace, the `ruff` settings and the development tools.
+
+2. Create the shared virtual environment:
+
+   ```bash
+   uv venv
+   ```
+
+3. Install the dependencies and link all packages:
+
+   ```bash
+   uv sync --all-packages
+   ```
 
 > [!TIP]
-> **Why `uv`?** It resolves and installs workspace dependencies far faster than `pip` + `venv`, and
-> produces a single reproducible lockfile across all five packages.
+> **Why `uv`?** `uv` installs workspace dependencies faster than `pip` and `venv`. It also writes
+> one lockfile (`uv.lock`) for all five packages, so each installation gets the same versions.
 
 ---
 
 ## Step 2: The Shared Library (`sre_common`)
 
-Cross-cutting concerns live in one place so every service behaves consistently. [
-`sre_common`](sre_common) exposes:
+The shared library contains the code that all services use. Thus, all services operate in the same
+way. [`sre_common`](sre_common) contains:
 
-- `otel_trace` / `start_span` — OpenTelemetry decorators for spans.
-- `retry_async` / `retry_sync` — exponential-backoff retries for flaky cloud calls.
-- `setup_logging` — uniform structured logging.
-- `TraceContextMiddleware` + `target_project_contextvar` — propagate the trace context and target
-  project per request.
+| Name | Module | Purpose |
+|:-----|:-------|:--------|
+| `otel_trace`, `start_span` | `sre_common.otel` | OpenTelemetry decorator and context manager for spans. |
+| `retry_async`, `retry_sync` | `sre_common.retry` | Retries with exponential backoff for cloud calls that can fail. |
+| `setup_logging` | `sre_common.logging` | Structured logging in the same format for all services. |
+| `setup_tracing` | `sre_common.tracing` | Exports the spans of a service to Cloud Trace. |
+| `TraceContextMiddleware`, `target_project_contextvar` | `sre_common.middleware` | Keeps the trace context and the target project for each request. |
+| `call_agent` | `sre_common.a2a_client` | Calls another agent with the A2A protocol. |
 
-Anywhere in the stack you can simply:
+The package root exports the decorators:
 
 ```python
 from sre_common import retry_async, otel_trace
 ```
 
-We will lean on these in the tools and workflow that follow.
+The tools and the workflow in the next steps use these functions.
 
 ---
 
-## Step 3: The Target Application (the "Chaos Monkey")
+## Step 3: The Target App ("Chaos Monkey")
 
-[`app/main.py`](app/main.py) is an OpenTelemetry-instrumented FastAPI app that simulates a
-three-tier request. A `trigger_error=true` query parameter injects a database connection timeout —
-the synthetic incident our agent will later diagnose.
+[`app/main.py`](app/main.py) is a FastAPI app with OpenTelemetry. It simulates a request through
+three tiers. The query parameter `trigger_error=true` adds a database connection timeout. This
+timeout is the synthetic incident that the agent diagnoses.
 
 ```mermaid
 flowchart LR
@@ -130,36 +157,51 @@ flowchart LR
     G -. " spans + structured logs " .-> O[("Cloud Trace / Logging<br/>(or mock_telemetry_data/)")]
 ```
 
-In **mock mode** (`MOCK_GCP=true`, the default) the tiers call each other in-process and write
-synthetic trace/log JSON to `mock_telemetry_data/`. In **real mode** each tier propagates W3C
-`traceparent` headers to the next over HTTP and exports spans to Cloud Trace.
+The app has two modes:
 
-The key detail is how a mock span timeline is written — millisecond offsets must land in the
-**seconds + milliseconds** fields of the timestamp, or the downstream cascade math collapses:
+| Mode | Setting | Behavior |
+|:-----|:--------|:---------|
+| Mock | `MOCK_GCP=true` (the default) | The tiers call each other in the same process. The app writes trace, log and metric JSON files to `mock_telemetry_data/`. |
+| Real | `MOCK_GCP=false` | Each tier sends the W3C `traceparent` header to the next tier over HTTP. The app exports spans to Cloud Trace. |
+
+In mock mode, the timestamp format is important. The millisecond offset must go into the
+**seconds and milliseconds** fields of the timestamp. If it goes into the fraction field, the
+duration calculation in Step 4 gives incorrect values.
 
 ```python
 def _ts(ms: int) -> str:
-    """10270 ms -> '2026-06-11T16:00:10.270Z' (NOT '...:00.10270Z')."""
+    """Formats an integer millisecond offset as a valid RFC3339 timestamp.
+
+    The value must occupy the seconds + milliseconds fields (e.g. 10270 ms ->
+    ``...:10.270Z``). ...
+    """
     secs, millis = divmod(ms, 1000)
     return f"2026-06-11T16:00:{secs:02d}.{millis:03d}Z"
 
 
-# On an injected error, the database tier dominates the budget:
-db_duration = 10200  # ~10s connection timeout
+# On an injected error, the database tier uses most of the time (a ~10 s connection timeout):
+db_duration = 10200 if trigger_error else 30
 backend_duration = db_duration + 50
 gateway_duration = backend_duration + 20
 ```
 
+The app also writes `metrics.json`. This file contains the CPU utilization of `sre-chaos-monkey`
+and the connection count of the `db-primary` database.
+
 ---
 
-## Step 4: Custom SRE Tools
+## Step 4: The SRE Tools
 
-The Antigravity SDK turns plain Python functions into LLM tools by parsing their **type hints and
-docstrings** into a schema — so both are mandatory and must be precise. Tools register themselves
-via a decorator from [`sre_agent/registry.py`](sre_agent/src/sre_agent/registry.py):
+The Antigravity SDK and ADK make LLM tools from Python functions. They read the **type hints and
+the docstring** of each function to make the tool schema. Thus, each tool must have correct type
+hints and a clear docstring.
+
+A tool registers itself with a decorator from
+[`sre_agent/registry.py`](sre_agent/src/sre_agent/registry.py). This excerpt has no docstrings:
 
 ```python
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 class ToolRegistry:
@@ -182,83 +224,119 @@ def register_tool(func: Callable[..., Any]) -> Callable[..., Any]:
     return registry.register(func)
 ```
 
-All observability tools live in [`sre_agent/gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py):
-`query_traces`, `get_trace_details`, `query_logs`, `query_logs_by_trace`, `query_metrics`,
-`list_metric_descriptors`, `analyze_trace_cascade`, and `generate_post_mortem`.
+All observability tools are in [`sre_agent/gcp_tools.py`](sre_agent/src/sre_agent/gcp_tools.py):
 
-**Every tool must honor two non-negotiable patterns:** the `@register_tool` decorator, and an
-`if IS_MOCK:` branch that reads from `mock_telemetry_data/` instead of calling the cloud. Here is
-the heart of `analyze_trace_cascade` — the inclusive-vs-exclusive duration calculation that finds
-the true bottleneck:
+| Tool | Purpose |
+|:-----|:--------|
+| `query_traces` | Lists recent traces from Cloud Trace. |
+| `get_trace_details` | Gets all spans of one trace. |
+| `query_logs` | Queries Cloud Logging with a filter. |
+| `query_logs_by_trace` | Gets the logs of one trace. |
+| `query_metrics` | Queries time series from Cloud Monitoring. |
+| `list_metric_descriptors` | Lists the metric types of the project. |
+| `analyze_trace_cascade` | Finds the bottleneck span of one trace. |
+| `generate_post_mortem` | Writes the post-mortem of one trace. |
+
+**Each tool must obey two rules:**
+
+1. Use the `@register_tool` decorator.
+2. Add an `if IS_MOCK:` branch. This branch reads from `mock_telemetry_data/` and does not call the
+   cloud.
+
+`analyze_trace_cascade` finds the bottleneck. For each span, it calculates two durations:
+
+- **Inclusive duration**: the wall-clock time of the span, with its children.
+- **Exclusive (self) duration**: the inclusive duration minus the time that the children cover.
+  When children run at the same time, their overlap counts only once.
+
+The bottleneck is the span with the largest exclusive duration. The helper `_cascade` does the
+calculation. This excerpt is shortened:
 
 ```python
-@register_tool
-async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
-    """Analyzes a trace to calculate inclusive vs exclusive duration for each span
-    and locate the bottleneck.
-
-    Args:
-        trace_id: The unique hex string identifying the trace (32 characters).
-        project_id: The GCP Project ID. If None, uses the default project.
-
-    Returns:
-        A Markdown report with the span hierarchy, self-execution time, and bottleneck.
-    """
-    details_str = await get_trace_details(trace_id, project_id)  # mock or live
-    data = json.loads(details_str)
-    spans = data.get("spans", [])
-
-    # 1. Build the parent -> children map
+def _cascade(spans: list[dict[str, Any]]) -> Cascade:
+    # Build parent-child relationships and calculate inclusive durations
     span_map = {s["spanId"]: s for s in spans}
+    spans = list(span_map.values())  # drop duplicate span IDs
     children_map = {s["spanId"]: [] for s in spans}
+
     for s in spans:
         parent_id = s.get("parentSpanId")
         if parent_id and parent_id in span_map:
             children_map[parent_id].append(s["spanId"])
 
-    # 2. Inclusive duration = wall-clock time of the span (incl. children)
-    inclusive = {s["spanId"]: _calculate_duration_ms(s["startTime"], s["endTime"]) for s in spans}
-
-    # 3. Exclusive (self) duration = inclusive minus the sum of child inclusives
-    exclusive = {}
+    # Calculate inclusive duration for all spans
+    inclusive_durations = {}
     for s in spans:
-        child_sum = sum(inclusive[c] for c in children_map[s["spanId"]])
-        exclusive[s["spanId"]] = max(0, inclusive[s["spanId"]] - child_sum)
+        inclusive_durations[s["spanId"]] = _calculate_duration_ms(s["startTime"], s["endTime"])
 
-    # 4. The bottleneck is the span with the largest self-time
-    bottleneck = max(exclusive, key=exclusive.get)
-    # …format the hierarchy + bottleneck as a Markdown table…
+    # Calculate exclusive duration for all spans (overlapping children count once)
+    exclusive_durations = {}
+    for s in spans:
+        span_id = s["spanId"]
+        child_ids = children_map[span_id]
+        covered_ms = _covered_ms(s, [span_map[cid] for cid in child_ids])
+        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - covered_ms)
+
+    # Find the bottleneck (the span with the highest exclusive duration)
+    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
+
+    return Cascade(spans, span_map, children_map, inclusive_durations, exclusive_durations, bottleneck_span_id)
+
+
+@register_tool
+async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) -> str:
+    """Analyzes a trace to calculate inclusive vs exclusive duration for each span and locate the bottleneck.
+
+    Args:
+        trace_id: The unique hex string identifying the trace (32 characters).
+        project_id: The GCP Project ID. If None, uses default project.
+
+    Returns:
+        A Markdown report showing trace hierarchy, self-execution time, and the identified bottleneck.
+    """
+    details_str = await get_trace_details(trace_id, project_id)  # mock or live
+    data = json.loads(details_str)
+    cascade = _cascade(data.get("spans", []))
+    # …format the hierarchy and the bottleneck as a Markdown table…
 ```
 
-The companion `generate_post_mortem` tool assembles a full RCA document headed by
-`# 🚨 Incident Post-Mortem` (that exact heading matters in Step 7).
+The `generate_post_mortem` tool writes a post-mortem document. The document starts with the
+heading `# 🚨 Incident Post-Mortem`. Do not change this heading: the A2UI surface in Step 7 uses it
+to find the post-mortem in a report.
 
 ---
 
 ## Step 5: The ADK Multi-Agent Workflow
 
-[`sre_agent/sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py) wires two specialized ADK
-agents into a graph. The `log_correlator` is handed the diagnostic toolbelt; the `trace_analyzer`
-only has to surface one ID.
+[`sre_agent/sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py) connects two ADK agents in a
+graph:
+
+- The **TraceAnalyzer** (`trace_analyzer`) selects one trace. It has no tools.
+- The **LogCorrelator** (`log_correlator`) diagnoses the trace. It has the diagnostic tools.
+
+Between the two agents, the `fetch_telemetry` node gets the spans, the logs and the topology.
 
 ```mermaid
 flowchart LR
-    Start([START]) --> TA["🕵️ trace_analyzer<br/>'return ONLY the failing 32-char traceId'"]
+    Start([START]) --> TA["🕵️ trace_analyzer<br/>'return ONLY its raw 32-character hex traceId'"]
     TA --> FT["fetch_telemetry node<br/>spans + logs + enriched topology"]
-    FT --> LC["🩺 log_correlator<br/>tools: query_metrics ·<br/>analyze_trace_cascade ·<br/>generate_post_mortem"]
+    FT --> LC["🩺 log_correlator<br/>tools: query_metrics ·<br/>list_metric_descriptors ·<br/>analyze_trace_cascade ·<br/>generate_post_mortem"]
     LC --> Rep(["📄 root-cause report"])
 ```
+
+This excerpt has shortened instructions:
 
 ```python
 from google.adk import Agent as AdkAgent
 from google.adk import Workflow as AdkWorkflow
-from google.adk.workflow import node, START
+from google.adk.workflow import START, node
 
 trace_analyzer = AdkAgent(
     name="trace_analyzer",
     instruction=(
-        "You are an SRE trace analyst. Locate the slowest or failing request "
-        "and return ONLY the raw 32-character hex traceId — no extra text."
+        "You are an SRE trace analyst. You receive the recent requests worth diagnosing, "
+        "ranked best candidate first; ... "
+        "Return ONLY its raw 32-character hex traceId. ..."
     ),
     model="gemini-3.8-flash",
 )
@@ -266,155 +344,206 @@ trace_analyzer = AdkAgent(
 log_correlator = AdkAgent(
     name="log_correlator",
     instruction=(
-        "You are a senior SRE debugging assistant. Identify the failing span, "
-        "the root cause (timeouts, resource exhaustion, logic errors), and a "
-        "mitigation plan. Use your tools for metrics, cascade analysis, and post-mortems."
+        "You are a senior SRE debugging assistant. Analyze the trace details "
+        "and correlated logs provided. Identify the failing span, the root cause ... "
+        "and recommend a mitigation plan. ..."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
     model="gemini-3.8-flash",
 )
 
+# Inside _run_adk_diagnostics(), after the @node(name="fetch_telemetry") function:
 sre_diagnostics_workflow = AdkWorkflow(
-    name="sre_diagnostics_workflow",
-    edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)],
+    name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
 )
 ```
 
-The public entrypoint `run_sre_diagnostics` selects between **two tiers** so the project always
-produces a report — with or without a model key:
+The function `diagnose` selects one of **two tiers**. Thus, the project always writes a report,
+with or without a Gemini API key. `run_sre_diagnostics` calls `diagnose` and returns only the
+report text.
 
 ```python
-async def run_sre_diagnostics(traces_json: str, project_id: str | None = None) -> str:
-    # …short-circuit to a clean "all healthy" report if no error/slow traces…
-    if HAS_ADK and "GEMINI_API_KEY" in os.environ:
-        return await _run_adk_diagnostics(traces_json, project_id)  # real Gemini reasoning
-    return await _run_simulated_diagnostics(traces_json, project_id)  # deterministic, offline
+async def diagnose(
+    traces_json: str, project_id: str | None = None, question: str = "", trace_id: str | None = None
+) -> Diagnosis:
+    # …select the incident (incidents.find_incident); if there is none, return an "all healthy" report…
+    if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
+        return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)  # Gemini
+    report = await _run_simulated_diagnostics(incident, project_id)  # offline
+    return Diagnosis(report, incident.get("traceId"), failed=report.startswith(SIMULATION_FAILURE))
 ```
 
-Both tiers emit the same report structure (RCA → metrics → cascade table → post-mortem), so the UI
-and tests don't care which one ran.
+| Tier | Condition | How it works |
+|:-----|:----------|:-------------|
+| ADK | `google-adk` is installed and `GEMINI_API_KEY` is set | Gemini runs the TraceAnalyzer and the LogCorrelator. |
+| Simulated | All other cases | Fixed Python code reads the mock files. The result is the same for each run. |
+
+Both tiers end the report with the cascade table and the post-mortem. The A2UI surfaces and the
+tests use these two sections.
 
 ---
 
-## Step 6: The Orchestrator & Safety Policy
+## Step 6: The Orchestrator and the Safety Policy
 
-The user never talks to the SRE engine directly. They talk to a thin **Orchestrator** ([
-`agent/src/agent/config.py`](agent/src/agent/config.py)) whose entire job is to delegate — and whose
-Antigravity safety policy makes that the *only* thing it can do:
+You do not talk to the SRE agent directly. You talk to the **Orchestrator**
+([`agent/src/agent/config.py`](agent/src/agent/config.py)). The Orchestrator does not diagnose. It
+only delegates to the SRE agent. Its Antigravity safety policy makes delegation the only thing that
+it can do:
 
 ```python
-safety_policies = [
-    deny("*"),  # deny everything by default
-    allow("diagnose_sre"),  # …the one tool the Orchestrator may call
-]
+def build_safety_policies() -> list[Any]:
+    """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""
+    return [deny("*"), allow("list_incidents"), allow("diagnose_sre"), allow("write_post_mortem")]
 ```
 
-The single allowed tool reaches the SRE sub-agent over the **A2A protocol** — or, in the standalone
-simulation where no sub-agent service is running, runs the workflow in-process:
+The SRE agent has three A2A skills. The Orchestrator has one allowed tool for each skill:
+
+| Orchestrator tool | SRE agent skill | Result |
+|:------------------|:----------------|:-------|
+| `list_incidents` | `list_incidents` | The recent failing and slow requests. Fast, with no model calls. |
+| `diagnose_sre` | `diagnose_incident` | The root cause of one incident, with a post-mortem at the end. |
+| `write_post_mortem` | `write_post_mortem` | The post-mortem of one trace. |
+
+All three tools call `_call_sre_skill`. This function calls the SRE agent with the **A2A
+protocol**. In the standalone simulation, no SRE agent service runs. Then the function runs the
+same skill in the Orchestrator process. This excerpt is shortened:
 
 ```python
 @register_tool
-async def diagnose_sre(prompt: str, project_id: str | None = None, refresh: bool = False) -> str:
-    """Delegates SRE diagnostics, trace correlation, and log analysis to the SRE sub-agent."""
+async def diagnose_sre(
+    prompt: str, project_id: str | None = None, refresh: bool = False, trace_id: str | None = None
+) -> str:
+    """Delegates root-cause diagnosis of an incident to the SRE Sub-Agent. ..."""
+    return await _call_sre_skill("diagnose_incident", prompt, project_id, trace_id, refresh)
+
+
+async def _call_sre_skill(
+    skill: str, prompt: str, project_id: str | None = None, trace_id: str | None = None, refresh: bool = False
+) -> str:
     sre_agent_url = os.getenv("SRE_AGENT_URL")
-    if os.getenv("MOCK_GCP", "false").lower() == "true" and not sre_agent_url:
-        from sre_agent.gcp_tools import query_traces
-        from sre_agent.sre_workflow import run_sre_diagnostics
-
-        traces_json = await query_traces(project_id=project_id, limit=10)
-        return await run_sre_diagnostics(traces_json=traces_json, project_id=project_id)
-
-    # An A2A task: progress arrives as status updates (forwarded to the chat UI),
-    # the report as the task artifact.
-    result = await call_agent(sre_agent_url, prompt, {"project_id": project_id, "refresh": refresh})
-    return result.text
+    mock_mode = os.getenv("MOCK_GCP", "false").lower() == "true"
+    if mock_mode and not sre_agent_url:
+        # Standalone simulation: run the same skill in this process.
+        report, surface = await _run_in_process(skill, prompt, project_id, trace_id, ui=sink is not None)
+    else:
+        # An A2A task: progress arrives as status updates (forwarded to the chat),
+        # the result as the task artifact.
+        metadata = {"skill": skill, "project_id": ..., "refresh": refresh}
+        result = await call_agent(base_url, prompt, metadata, context_id=..., on_progress=_emit_progress, ...)
+        report = result.text
+    # …store the report and the A2UI surface for the chat UI…
+    return report
 ```
 
-On the other side, the SRE engine is an ADK agent served with one call to ADK's `to_a2a()`, which
-also publishes its agent card at `/.well-known/agent-card.json` (see
-[`sre_agent/a2a_agent.py`](sre_agent/src/sre_agent/a2a_agent.py)):
+A2A messages do not name a skill. Thus, the Orchestrator puts the skill name in the request
+metadata.
+
+The SRE agent is a custom ADK agent. ADK's `to_a2a()` serves it over A2A. `to_a2a()` also publishes
+the agent card at `/.well-known/agent-card.json`. The card lists the three skills. See
+[`sre_agent/a2a_agent.py`](sre_agent/src/sre_agent/a2a_agent.py):
 
 ```python
-app = to_a2a(sre_diagnostics_agent, agent_card=build_agent_card(public_url))
+to_a2a(sre_diagnostics_agent, agent_card=build_agent_card(public_url))
 ```
 
-Every message typed into the web chat goes through this agent: there is no side door that sends
-"diagnostic-looking" prompts straight to the sub-agent. The model decides to call `diagnose_sre`,
-the policy approves it, and the sub-agent's progress is streamed back while the tool runs.
+All messages from the web chat go to the Orchestrator. No other path sends prompts directly to the
+SRE agent. The model selects a tool, and the policy allows or denies the call. While the tool runs,
+the chat shows the progress messages from the SRE agent.
 
 > [!IMPORTANT]
-> Because the deny-by-default policy is enforced by the runtime, the Orchestrator literally cannot
-> read files, run shell commands, or call arbitrary URLs. Least privilege is structural, not
-> advisory — keep it that way (see [`AGENTS.md`](AGENTS.md)).
+> The Antigravity runtime enforces the deny-by-default policy. Thus, the Orchestrator cannot read
+> files, run shell commands or call URLs. The least-privilege design is part of the structure. Do
+> not relax this policy (see [`AGENTS.md`](AGENTS.md)).
 
 ---
 
-## Step 7: Rendering & the One-Click Download
+## Step 7: Show Results with A2UI
 
-A Markdown report is fine for a terminal, but the web chat renders it as rich UI. [
-`agent/src/agent/a2ui_translator.py`](agent/src/agent/a2ui_translator.py) detects a post-mortem and
-wraps it in A2UI components, including a `download_button`:
+Markdown is good for a terminal and for the model of the Orchestrator. For people, the chat shows a
+user interface. The SRE agent sends each result also as an **[A2UI](https://a2ui.org/) v0.9
+surface**. A surface is JSON that names components from a catalog. It does not contain HTML.
+[`sre_agent/src/sre_agent/a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py) has one
+function for each type of result:
+
+| Function | Result |
+|:---------|:-------|
+| `incident_list_surface` | The list of incidents, with Diagnose and Post-mortem buttons on each row. |
+| `diagnosis_surface` | A diagnosis: severity, the report in tabs (the post-mortem is the last tab) and a Download button. |
+| `post_mortem_surface` | A post-mortem: severity, the document in tabs and a Download button. |
+
+These are the components of a post-mortem surface. This excerpt shows the values as they are after
+the helper functions run:
 
 ```python
-if "# 🚨 Incident Post-Mortem" in text or "Incident Post-Mortem" in text:
-    return {
-        "type": "container",
-        "components": [
-            {
-                "type": "alert",
-                "level": "success",
-                "title": title,
-                "text": "The SRE agent has auto-generated the incident post-mortem report.",
-            },
-            {"type": "section", "title": "Document Preview", "content": text},
-            {
-                "type": "download_button",
-                "text": "Download Post-Mortem Markdown",
-                "filename": "post_mortem.md",
-                "content": text,
-            },
-        ],
-    }
+components = [
+    {"id": "root", "component": "Card", "child": "body"},
+    {"id": "body", "component": "Column", "children": ["severity", "title", "trace", "sections", "download"]},
+    {"id": "severity", "component": "SeverityBadge", "level": "SEV1", "contribution": 99.3},
+    {"id": "title", "component": "Text", "text": "🚨 Incident post-mortem", "variant": "h2"},
+    {
+        "id": "trace",
+        "component": "Text",
+        "text": f"Trace {trace_id} · status OPEN until a fix is confirmed",
+        "variant": "caption",
+    },
+    {"id": "sections", "component": "Tabs", "tabs": [{"title": "Post-mortem", "child": "tab-0"}]},
+    {"id": "tab-0", "component": "Text", "text": "<the post-mortem Markdown>", "variant": "body"},
+    {
+        "id": "download",
+        "component": "Download",
+        "label": "Download",
+        "filename": f"post-mortem-{trace_id[:8]}.md",
+        "content": report,
+    },
+]
 ```
 
-The frontend ([`agent/src/agent/index.html`](agent/src/agent/index.html)) renders that component as
-a styled `.download-pm-btn` that builds the file client-side with the Blob API:
+`_messages` puts the components into three A2UI messages: `createSurface`, `updateComponents` and,
+when there is data, `updateDataModel`.
 
-```javascript
-case 'download_button':
-const btn = document.createElement('button');
-btn.className = 'download-pm-btn';
-btn.innerHTML = `<span aria-hidden="true">📥</span> ${comp.text || 'Download Post-Mortem'}`;
-btn.onclick = () => {
-    const blob = new Blob([comp.content], {type: 'text/markdown'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = comp.filename || 'post_mortem.md';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-};
-containerDiv.appendChild(btn);
-break;
-```
+* **Catalog.** The surfaces use the SRE catalog. The SRE catalog is the A2UI basic catalog plus two
+  custom components: `SeverityBadge` and `Download`.
+* **Negotiation.** The agent card of the SRE agent advertises the A2UI extension. For a chat, the
+  Orchestrator sends A2UI client capabilities in the request metadata. Without these capabilities,
+  the SRE agent sends only Markdown.
+* **Transport.** Each A2UI message is one A2A data part. The metadata of the part sets the media
+  type `application/json+a2ui`.
+* **Rendering.** The browser shows the surfaces with `@a2ui/lit` (see
+  [`agent/web/src/sre-a2ui.js`](agent/web/src/sre-a2ui.js)). The chat loads the prebuilt bundle
+  `agent/src/agent/static/sre-a2ui.js`. The `Download` component makes the file in the browser with
+  the Blob API.
+* **Interaction.** Buttons send A2UI actions. For example, "Diagnose" on an incident row comes back
+  to the Orchestrator as the next chat turn: "Diagnose trace `<trace ID>`." The safety policy of the
+  Orchestrator applies to this turn too.
+
+If you change `agent/web/src/sre-a2ui.js`, build the bundle again:
+
+1. Go to the `agent/web` directory.
+2. Run `npm ci`.
+3. Run `npm run build`.
 
 ---
 
 ## Step 8: Run the Local Simulation
 
-Time to see it all work — no cloud, no API key. [`simulate_incident.py`](simulate_incident.py)
-triggers the chaos-monkey incident, then boots the Orchestrator (which calls `diagnose_sre` → the
-in-process workflow):
+This step does not use the cloud or an API key.
+[`simulate_incident.py`](simulate_incident.py) does these steps:
+
+1. It deletes the old telemetry in `mock_telemetry_data/`.
+2. It triggers the chaos-monkey incident in the target app.
+3. It starts the Orchestrator. The Orchestrator calls `diagnose_sre`, which runs the workflow in the
+   same process.
+
+Run the simulation:
 
 ```bash
 uv run simulate_incident.py
 ```
 
-You'll first see the structured telemetry the target app emits (gateway → backend → database, ending
-in a `CRITICAL ConnectionTimeoutError`), then the agent's report. The diagnosis ends with the
-cascade table and post-mortem:
+The output starts with the structured logs of the target app: gateway, backend, then database. The
+database log is a `CRITICAL ConnectionTimeoutError`. Then the script prints the short reply of the
+Orchestrator (`AGENT REPLY`) and the full report (`AGENT DIAGNOSIS REPORT`). The trace ID changes
+for each run. This excerpt is shortened:
 
 ```text
 ==================================================
@@ -422,69 +551,84 @@ AGENT DIAGNOSIS REPORT
 ==================================================
 # 🚨 SRE Incident Diagnosis Report
 
-**Anomalous Trace ID**: `b49d148f5dd14e99bc2519951d8cf85b`
-**Root Service**: `gateway`
+- **Anomalous Trace ID**: `1f765c576bee4066a7ea8cbb146a3ded`
+- **Root Service**: `gateway`
+...
+## 📊 Observability Metrics
+- **CPU Utilization (sre-chaos-monkey)**: `24.0% (Healthy)`
+- **Database Connections (db-primary)**: `100 connections (Warning: Max capacity reached)`
 ...
 ## ⛓️ Multi-Service Cascade Latency & Bottleneck Analysis
-**Total Trace Duration**: `10270 ms`
+- **Trace ID**: `1f765c576bee4066a7ea8cbb146a3ded`
+- **Total Trace Duration**: `10270 ms`
 
 ### 🔍 Span Latency Breakdown
-| Service / Span Name     | ... | Inclusive Time | Exclusive (Self) Time | Contribution |
-| /api/gateway            | ... | 10270 ms       | 20 ms                 | 0.2%         |
-|   └── /api/backend      | ... | 10250 ms       | 50 ms                 | 0.5%         |
-|       └── /api/database | ... | 10200 ms       | 10200 ms              | 99.3%        |
+| Service / Span Name | Span ID | Parent ID | Status | Inclusive Time | Exclusive (Self) Time | Contribution |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `/api/gateway` | `span-gateway-111` | `None` | **ERROR** | 10270 ms | 20 ms | 0.2% |
+| &nbsp;&nbsp;└── `/api/backend` | `span-backend-222` | `span-gateway-111` | **ERROR** | 10250 ms | 50 ms | 0.5% |
+| &nbsp;&nbsp;&nbsp;&nbsp;└── `/api/database` | `span-database-333` | `span-backend-222` | **ERROR** | 10200 ms | 10200 ms | 99.3% |
 
 ### 🚨 Identified Bottleneck
-*   Bottleneck Span:     /api/database (span-database-333)
-*   Self-Execution Time: 10200 ms (99.3% of total trace)
-*   Error Message:       ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms
+*   **Bottleneck Span**: `/api/database` (`span-database-333`)
+*   **Self-Execution Time**: `10200 ms` (99.3% of total trace)
+*   **Status**: `ERROR`
+*   **Error Message**: `ConnectionTimeoutError: Failed to connect to db-primary.gcp.internal:5432 after 10000ms`
 
 # 🚨 Incident Post-Mortem
+
 ## 📝 Incident Overview ...
 ## 🔍 Incident Timeline ...
 ## 🎯 Root Cause Analysis (RCA) ...
-## 🛠️ Actions Taken & Prevention Plan ...
+## 🛠️ Next Steps ...
 ==================================================
 ```
 
 > [!NOTE]
-> **What to verify:** the breakdown table pins `/api/database` at **99.3%** of the trace via a
-`ConnectionTimeoutError`, and the run finishes with a complete `# 🚨 Incident Post-Mortem`. Set
-`GEMINI_API_KEY` to swap the deterministic tier for the real ADK + Gemini reasoning path.
+> **Check these results:**
+> - The breakdown table shows that `/api/database` uses **99.3%** of the trace.
+> - The bottleneck error is `ConnectionTimeoutError`.
+> - The report ends with a complete `# 🚨 Incident Post-Mortem`.
+>
+> To use the ADK tier with Gemini instead of the simulated tier, set `GEMINI_API_KEY`.
 
 ---
 
 ## Step 9 (Optional): Package as an Antigravity Skill
 
-Beyond the runnable workspace, the same diagnostics logic is mirrored as a portable **Antigravity
-Agent Skill** under [`skills/sre_incident_solver/`](skills/sre_incident_solver) — the format the
-Antigravity CLI and the Antigravity 2.0 desktop app auto-discover. A skill is just a folder with a
-metadata file:
+The repository also contains a portable copy of the diagnostics code. This copy is an **Antigravity
+Agent Skill** in [`skills/sre_incident_solver/`](skills/sre_incident_solver). The Antigravity CLI
+and the Antigravity desktop app find skills in this format automatically. A skill is a folder with
+a metadata file, `SKILL.md`:
 
 ```markdown
 ---
 name: sre_incident_solver
-description: Diagnoses distributed service failures in a GCP stack - scans Cloud Trace for slow
-  or failing requests, finds the bottleneck span, correlates logs, and writes a post-mortem.
+description: Diagnoses distributed service failures in a GCP stack - scans Cloud Trace for slow or failing requests, finds the bottleneck span (inclusive vs. exclusive time), correlates Cloud Logging entries, and writes an incident post-mortem. Use when a developer reports errors, latency spikes, HTTP 5xx failures or outages in their microservices.
 ---
 
 # SRE Incident Solver
 ...
 ```
 
-The YAML frontmatter is what skill loaders read to decide when to use the skill. The Python
-modules next to it are generated from `sre_agent/` by `scripts/sync_skill.py`, so the skill never
-drifts from the engine the services run.
+Skill loaders read the YAML front matter to decide when to use the skill.
 
-Drop the skill folder into an Antigravity workspace and it appears on the visual canvas, ready to
-run — no service wiring required.
+`scripts/sync_skill.py` generates the Python modules of the skill from `sre_agent/`. Thus, the
+skill and the services always use the same code. Do not edit the copy. After you change
+`sre_agent/`, run:
+
+```bash
+uv run python scripts/sync_skill.py
+```
+
+If the copy is old, the root test suite fails.
 
 ---
 
-## Step 10: Deploy to Cloud Run (Least-Privilege)
+## Step 10: Deploy to Cloud Run with Least Privilege
 
-For a real deployment, four services run on Cloud Run, each with its own minimally-scoped service
-account.
+For a real deployment, four services run on Cloud Run. Each service account has only the roles
+that its service needs.
 
 ```mermaid
 flowchart TB
@@ -497,73 +641,115 @@ flowchart TB
     OBS -. " read-only<br/>sre-agent-sa " .-> SUB
 ```
 
-```bash
-./bootstrap.sh   # interactive: gcloud auth login, set project + region, write .env
-./deploy.sh      # enable APIs, create SAs, grant least-privilege roles, build & deploy
-```
+1. Prepare the project. The script is interactive. It logs you in to `gcloud` and sets the
+   project. It can link a billing account. It sets the region and the zone, asks for a Gemini API
+   key, and writes `.env`:
 
-`deploy.sh` provisions and scopes each identity:
+   ```bash
+   ./bootstrap.sh
+   ```
 
-| Service account       | Used by         | Roles                                                                                    |
-|:----------------------|:----------------|:-----------------------------------------------------------------------------------------|
-| `sre-chaos-monkey-sa` | target app      | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)*                         |
-| `sre-agent-sa`        | SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(own spans)* |
-| `inventory-agent-sa`  | inventory agent | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`, `cloudtrace.agent` |
-| `sre-build-sa`        | Cloud Build     | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter`             |
+2. Deploy. The script enables the APIs, creates the service accounts, grants the roles, and builds
+   and deploys the services:
+
+   ```bash
+   ./deploy.sh
+   ```
+
+`deploy.sh` grants these project roles:
+
+| Service account | Used by | Roles |
+|:----------------|:--------|:------|
+| `sre-chaos-monkey-sa` | Target app | `cloudtrace.agent`, `logging.logWriter` *(write telemetry only)* |
+| `sre-agent-sa` | Orchestrator and SRE agent | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(write its own spans)* |
+| `inventory-agent-sa` | Inventory agent and its scanner job | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer`, `cloudtrace.agent` |
+| `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter` |
+
+`sre-agent-sa` and `sre-build-sa` can also read the `GEMINI_API_KEY` secret
+(`secretmanager.secretAccessor`). `sre-build-sa` can act as the other service accounts
+(`iam.serviceAccountUser`), so that it can deploy the services.
 
 ---
 
 ## Step 11: Verify the Deployment
 
-```bash
-# 1. Trigger a live incident in the target app
-curl "https://sre-chaos-monkey-<hash>.run.app/api/gateway?trigger_error=true"
+Cloud Run URLs have the format `https://<service>-<project number>.<region>.run.app`. At the end,
+`deploy.sh` prints the URLs and example `curl` commands.
 
-# 2. Open the Orchestrator chat UI in your browser
-#    https://sre-agent-<hash>.run.app/chat
+1. Trigger a live incident in the target app:
 
-# 3. In the chat, ask:
-#    "Diagnose the recent latency spikes and generate a post-mortem."
+   ```bash
+   curl "https://sre-chaos-monkey-<project number>.<region>.run.app/api/gateway?trigger_error=true"
+   ```
 
-# 4. Confirm a green "Download Post-Mortem Markdown" button renders and exports post_mortem.md.
-```
+2. In your browser, open the chat UI of the Orchestrator:
+   `https://sre-agent-<project number>.<region>.run.app/chat`.
+3. In the chat, type: "Diagnose the recent latency spikes and generate a post-mortem."
+4. Make sure that the result card shows a **Download** button.
+5. Click **Download**. Make sure that the browser saves a Markdown file, for example
+   `post-mortem-<first 8 characters of the trace ID>.md`.
 
-You can also run the diagnostics non-interactively against the Orchestrator's `/diagnose` endpoint (
-see the example `curl` printed at the end of `deploy.sh`).
+You can also run a diagnosis without the chat. Send a `POST` request to the `/diagnose` endpoint of
+the Orchestrator. `deploy.sh` prints an example `curl` command for this endpoint.
 
 ---
 
 ## Step 12: Run the Tests
 
-The `src/` layout means each package's tests run with its `src` on `PYTHONPATH`. A third suite at
-the repository root imports every module in the workspace, which is the only coverage `app/`,
-`inventory_agent/` and `sre_common/` get:
+Each package uses the `src/` layout. Thus, put the `src` directory of the package on `PYTHONPATH`
+when you run its tests. The root suite in `test/` has an import test for all modules of the
+workspace. It also has the tests for `app/`, `inventory_agent/`, `sre_common/` and the skill copy.
 
-```bash
-PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
-PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
-uv run python -m unittest discover -s test
-```
+1. Run the tests of the SRE agent:
 
-Lint and formatting are `ruff`, configured in the root `pyproject.toml`:
+   ```bash
+   PYTHONPATH=sre_agent/src uv run python -m unittest discover -s sre_agent/test
+   ```
 
-```bash
-uv run ruff check .
-uv run ruff format --check .
-```
+2. Run the tests of the Orchestrator:
 
-All of the above runs in GitHub Actions on every push and pull request
-([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). The tests run against **Python 3.11 and
-3.14** — the floor `requires-python` declares and the version the Dockerfiles ship; testing only one
-of them is how the floor quietly stopped working the first time. `ruff` runs once, on its own:
-`target-version = "py311"` decides which rules apply, so the interpreter it happens to run under
-makes no difference to the answer.
+   ```bash
+   PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
+   ```
+
+3. Run the root suite:
+
+   ```bash
+   uv run python -m unittest discover -s test
+   ```
+
+4. Run the linter and the format check. The `ruff` settings are in the root `pyproject.toml`:
+
+   ```bash
+   uv run ruff check .
+   uv run ruff format --check .
+   ```
+
+GitHub Actions runs these checks for each pull request and for each push to `master`
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)). CI also runs `simulate_incident.py` and
+makes sure that the A2UI bundle is current.
+
+CI runs the tests on **Python 3.11 and 3.14**:
+
+- 3.11 is the minimum version in `requires-python`.
+- 3.14 is the version in the Dockerfiles.
+
+A test on one version only does not find all errors. For example, code that works on 3.14 can fail
+on 3.11. CI runs `ruff` one time only. The setting `target-version = "py311"` selects the rules, so
+the Python version that runs `ruff` does not change the result.
 
 ---
 
 ## Step 13: Clean Up
 
-To avoid ongoing charges, tear down every Cloud Run service, IAM binding, and service account:
+To stop the costs, delete the resources that `deploy.sh` created. `cleanup.sh` deletes:
+
+- The Cloud Run services and the scanner job.
+- The Artifact Registry repository.
+- The `GEMINI_API_KEY` secret.
+- The service accounts and their role bindings.
+
+It can also delete the Firestore database and the local files. Run:
 
 ```bash
 ./cleanup.sh
@@ -571,10 +757,11 @@ To avoid ongoing charges, tear down every Cloud Run service, IAM binding, and se
 
 ---
 
-🎉 **That's the full loop** — instrument, simulate, diagnose, and deploy an autonomous SRE agent that
-turns a 3 AM trace into a ready-to-file post-mortem. For the architectural deep dive and design
-rationale, read the companion [`BLOGPOST.md`](BLOGPOST.md).
+🎉 **You completed the codelab.** You instrumented, simulated, diagnosed and deployed an SRE agent.
+The agent changes a failed trace into a post-mortem that you can file. For the architecture and the
+design decisions, read [`BLOGPOST.md`](BLOGPOST.md).
 
-## 🎓 Where to Next?
+## 🎓 Next Steps
 
-You have a working agent — now make it yours. [`EXERCISES.md`](EXERCISES.md) is a graded set of follow-up challenges (warm-up tool tweaks → a fully autonomous capstone) that build directly on the stack you just assembled.
+[`EXERCISES.md`](EXERCISES.md) contains more tasks. They start with small changes to the tools and
+end with a fully autonomous capstone. All tasks use the stack from this codelab.

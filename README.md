@@ -7,9 +7,20 @@
 
 ![Autonomous Cloud SRE Agent — scans traces, isolates the bottleneck, correlates logs, and auto-writes the post-mortem](blogpost_assets/readme-banner.png)
 
-Welcome to the production-grade template for building, testing, and deploying an autonomous **Site Reliability Engineering (SRE) Agent** in Google Cloud. This system integrates the **Google Agent Development Kit (ADK)** for multi-agent diagnostic graphs and the **Google Antigravity SDK** for the agent runtime, deny-by-default safety policies, and safe execution.
+This repository is a demo and workshop project. It shows how to build, test and deploy a
+**Site Reliability Engineering (SRE) agent** on Google Cloud. It uses these technologies:
 
-The agent monitors microservices, queries distributed traces, correlates logs, diagnoses cascade bottlenecks, auto-generates comprehensive incident post-mortems, and lets you download them straight from the chat UI. The whole stack runs **locally with zero GCP credentials** thanks to a mock-telemetry mode.
+| Technology | Use in this project |
+| :--- | :--- |
+| Google Agent Development Kit (ADK) | The multi-agent diagnosis workflow in the SRE agent. |
+| Google Antigravity SDK | The Orchestrator runtime and its deny-by-default tool policies. |
+| Agent2Agent (A2A) protocol, `a2a-sdk` 1.x | All calls from one agent to another agent. |
+| A2UI v0.9, rendered with `@a2ui/lit` 0.12 | The result cards (surfaces) in the web chat. |
+
+The SRE agent finds failing and slow requests in distributed traces. It finds the bottleneck span,
+correlates logs and metrics, and writes an incident post-mortem. You can download the post-mortem
+from the web chat. The full stack runs locally without GCP credentials, because a mock-telemetry
+mode replaces the Google Cloud APIs.
 
 > **📦 Source code:** [`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)
 
@@ -19,31 +30,59 @@ The agent monitors microservices, queries distributed traces, correlates logs, d
 
 ---
 
-## ⚡ Featured Capabilities
+## ⚡ Capabilities
 
-### 1. ⛓️ Multi-Service Cascade Latency & Bottleneck Analyzer
-When a request spikes in latency, the SRE Agent dissects the distributed trace. It calculates the **inclusive vs. exclusive (self) execution time** for every span, rendering a contribution table that pins down the exact bottleneck — e.g. a gateway request that looks 10 s slow, where 99.3% of the time is actually trapped in one database span three levels down.
+### 1. ⛓️ Bottleneck analysis
+The SRE agent reads the distributed trace of a slow or failing request. For each span, it
+calculates the inclusive time and the exclusive (self) time. The result is a contribution table
+that shows the bottleneck span. Example: a gateway request takes 10 s, and one database span three
+levels down owns 99.3% of that time.
 
-### 2. 📄 Automated Incident Post-Mortem Generator
-Following a diagnosis, the agent compiles a complete **Incident Post-Mortem (RCA)** including:
-* **Incident Overview**: Date/time, root service, Trace ID, impact duration, and status.
-* **Timeline**: Trace timestamps for the gateway alert, cascading failure, and mitigation.
-* **Root Cause Analysis**: Connection states, active chaos injections, or infrastructure timeouts.
-* **Prevention Plan**: Immediate remediation, short-term workarounds, and long-term preventions.
+### 2. 📄 Incident post-mortem
+The SRE agent writes a post-mortem from the spans and logs of one trace. The post-mortem has these
+sections:
 
-### 3. 📥 Interactive Chat Downloader
-The web chat parses diagnostic reports server-side; when it detects a post-mortem it renders a premium, styled **Download Button** that exports the report to markdown (`post_mortem.md`) entirely client-side via the Blob API.
+| Section | Content |
+| :--- | :--- |
+| Incident Overview | Date and time, root service, trace ID, impact duration, outcome, bottleneck and status (`OPEN`). |
+| Incident Timeline | The request start, the failing spans and the bottleneck span, the error logs, and the request end. |
+| Root Cause Analysis (RCA) | The bottleneck, the error message, and a note when the error is a timeout. |
+| Next Steps | Numbered actions to fix the incident and to prevent a repeat. |
+| Analyst Notes (AI-generated) | Optional. Added only when `GEMINI_API_KEY` is set. |
+
+### 3. 🖼️ Result cards in the chat (A2UI)
+Each result comes back as Markdown and as an A2UI surface. The SRE agent builds the surfaces in
+[`a2ui_surfaces.py`](sre_agent/src/sre_agent/a2ui_surfaces.py). The web chat renders them with the
+prebuilt bundle [`sre-a2ui.js`](agent/src/agent/static/sre-a2ui.js).
+
+| Surface | Content |
+| :--- | :--- |
+| Incident list | One row for each recent incident, with **Diagnose** and **Post-mortem** buttons. |
+| Diagnosis | A severity badge, tabs for the analysis, the bottleneck and the post-mortem, and a **Download** button. |
+| Post-mortem | A severity badge, the post-mortem in tabs, and a **Download** button. |
+
+The **Download** button saves the report as a Markdown file (for example `post-mortem-<trace>.md`).
+The browser creates the file. A button such as **Diagnose** sends a new chat turn to the
+Orchestrator, so the Orchestrator policy also applies to it.
 
 ---
 
 ## 🏗️ Architecture
 
-Four services on Cloud Run. The agents talk to each other over the **[Agent2Agent (A2A) protocol](https://a2a-protocol.org)** (v1.0): each publishes an agent card at `/.well-known/agent-card.json`, and calls are A2A tasks whose progress streams as status updates and whose result is the task artifact. The user-facing Orchestrator is locked to a **deny-by-default** policy — its only capability is to delegate to the read-only SRE diagnostics agent.
+The project deploys four services to Cloud Run. The agents talk to each other over the
+**[Agent2Agent (A2A) protocol](https://a2a-protocol.org)** (v1.0):
+
+* The SRE agent and the Inventory agent each publish an agent card at
+  `/.well-known/agent-card.json`.
+* Each call is an A2A task. Progress comes back as status updates. The result is the task artifact.
+
+The Orchestrator is the agent that the user talks to. It has a **deny-by-default** policy. It can
+only call the read-only SRE agent, through one tool for each SRE skill.
 
 | Agent | Built with | Served over A2A by | Skill |
 | :--- | :--- | :--- | :--- |
-| SRE diagnostics | ADK (custom agent + workflow) | ADK `to_a2a()` | `list_incidents` → table + JSON data, `diagnose_incident` → Markdown report, `write_post_mortem` → post-mortem (+ AI notes with a key) |
-| Inventory | plain Python | `a2a-sdk` `AgentExecutor` | `get_topology` → JSON data artifact |
+| SRE agent | ADK (custom agent + workflow) | ADK `to_a2a()` | `list_incidents` → table + JSON data, `diagnose_incident` → Markdown report, `write_post_mortem` → post-mortem (+ AI notes with a key) |
+| Inventory agent | plain Python | `a2a-sdk` `AgentExecutor` | `get_topology` → JSON data artifact |
 | Orchestrator | Antigravity SDK | — (A2A **client**, one tool per SRE skill) | — |
 
 ```mermaid
@@ -54,21 +93,21 @@ flowchart LR
         ORCH["Antigravity runtime<br/>policy = deny('*') + allow one tool per SRE skill"]
     end
 
-    ORCH -->|"list_incidents · diagnose_incident · write_post_mortem — A2A"| SRE["🔬 SRE diagnostics<br/>service: sre-sub-agent<br/>ADK: TraceAnalyzer ➜ LogCorrelator"]
+    ORCH -->|"list_incidents · diagnose_incident · write_post_mortem — A2A"| SRE["🔬 SRE agent<br/>service: sre-sub-agent<br/>ADK: TraceAnalyzer ➜ LogCorrelator"]
     SRE -->|"get_topology — A2A"| INV["📚 Inventory agent<br/>service: inventory-agent"]
     INV --> FS[("Firestore")]
     SRE -->|"read-only · or MOCK_GCP"| OBS[("☁️ Trace · Logging · Monitoring")]
     APP["🐒 Target app<br/>service: sre-chaos-monkey"] -->|"write-only telemetry"| OBS
-    SRE -->|"result: table · report · 📥 post-mortem"| ORCH -->|"short summary + result card"| User
+    SRE -->|"result: Markdown + A2UI surface"| ORCH -->|"short summary + A2UI surface"| User
 ```
 
 | Service | Package | Role |
 | :--- | :--- | :--- |
-| Orchestrator | [`agent/`](agent) | User-facing agent + web chat UI; delegates via one tool per SRE skill and replies with a short summary. |
-| SRE diagnostics | [`sre_agent/`](sre_agent) | The engine: observability tools + the ADK multi-agent workflow. |
-| Inventory | [`inventory_agent/`](inventory_agent) | Discovers & caches the project topology (Cloud Run services + databases). |
-| Target app | [`app/`](app) | OpenTelemetry-instrumented "chaos monkey" that generates synthetic incidents. |
-| Shared lib | [`sre_common/`](sre_common) | `otel_trace`, `retry_async`, `setup_logging`, trace-context middleware, the A2A client. |
+| Orchestrator | [`agent/`](agent) | The user-facing agent and the web chat. It calls one tool for each SRE skill and replies with a short summary. |
+| SRE agent | [`sre_agent/`](sre_agent) | The diagnostics engine: the observability tools and the ADK multi-agent workflow. |
+| Inventory agent | [`inventory_agent/`](inventory_agent) | Finds and caches the project topology (Cloud Run services and databases). |
+| Target app | [`app/`](app) | A "chaos monkey" app with OpenTelemetry. It makes synthetic incidents. |
+| Shared library | [`sre_common/`](sre_common) | `otel_trace`, `retry_async`, `setup_logging`, the trace-context middleware, tracing setup and the A2A client. |
 
 ---
 
@@ -76,17 +115,19 @@ flowchart LR
 
 ```
 .
-├── README.md · AGENTS.md · BLOGPOST.md · CODELAB.md
+├── README.md · AGENTS.md · BLOGPOST.md · CODELAB.md · EXERCISES.md
 ├── pyproject.toml          # Root uv workspace (5 members)
 ├── uv.lock
 ├── docker-compose.yaml     # Full local multi-service stack + Firestore emulator
-├── cloudbuild.yaml         # Parallel build + deploy of all four services
-├── docker/base.Dockerfile  # Shared dependency image every service builds on
+├── cloudbuild.yaml         # Parallel build + deploy of the four services and the scanner job
+├── docker/base.Dockerfile  # Shared dependency image that every service builds on
 ├── scripts/base-image.sh   # Content-addressed tag of that image
+├── scripts/sync_skill.py   # Regenerates the skill mirror from sre_agent
 ├── bootstrap.sh            # Interactive GCP project setup (writes .env)
 ├── deploy.sh               # Least-privilege Cloud Run deploy
 ├── cleanup.sh              # GCP resource teardown
 ├── simulate_incident.py    # Local standalone simulation (no GCP needed)
+├── workshop/               # 90-minute workshop: steps, patches and checks
 │
 ├── app/                    # 🐒 Target FastAPI app (OpenTelemetry-instrumented)
 │   ├── main.py             # Gateway → Backend → Database incident generator
@@ -94,24 +135,27 @@ flowchart LR
 │
 ├── agent/                  # 🛡️ Orchestrator service (user-facing + web UI)
 │   ├── src/agent/
-│   │   ├── config.py           # Antigravity safety policies & runtime loader
-│   │   ├── routes.py           # FastAPI endpoints (/chat UI + SSE, /diagnose)
+│   │   ├── config.py           # Antigravity tools, safety policies & runtime loader
+│   │   ├── routes.py           # FastAPI endpoints (/chat UI + SSE, /diagnose, /sessions)
 │   │   ├── main.py             # FastAPI app wiring
-│   │   ├── a2ui_translator.py  # Markdown → rich A2UI schema (download button)
 │   │   ├── firestore_strategy.py
-│   │   └── index.html          # Premium web chat interface
+│   │   ├── static/sre-a2ui.js  # A2UI renderer bundle (@a2ui/lit + SRE catalog), prebuilt
+│   │   └── index.html          # Web chat: model replies + A2UI surfaces
+│   ├── web/                    # Sources of the renderer bundle (npm ci && npm run build)
 │   ├── test/
 │   └── Dockerfile · pyproject.toml
 │
-├── sre_agent/              # 🔬 SRE diagnostics engine
+├── sre_agent/              # 🔬 SRE agent (diagnostics engine)
 │   ├── src/sre_agent/
 │   │   ├── gcp_tools.py     # Trace/log/metric tools + cascade & post-mortem
-│   │   ├── sre_workflow.py  # ADK multi-agent orchestration (two tiers)
+│   │   ├── sre_workflow.py  # ADK multi-agent workflow (TraceAnalyzer ➜ LogCorrelator)
 │   │   ├── a2a_agent.py     # The engine as an ADK agent, served over A2A (to_a2a)
-│   │   ├── diagnosis.py     # Pipeline: topology → traces → workflow → report
+│   │   ├── a2ui_surfaces.py # A2UI surfaces and the SRE catalog
+│   │   ├── diagnosis.py     # Skill pipelines: topology → traces → workflow → report
+│   │   ├── post_mortem_analysis.py # Optional AI analyst notes
 │   │   ├── routes.py        # REST: /health, /trace
 │   │   ├── registry.py      # @register_tool decorator
-│   │   ├── itinerary.py · config.py · firestore_strategy.py · main.py
+│   │   ├── incidents.py · inventory_client.py · itinerary.py · config.py · firestore_strategy.py · main.py
 │   ├── test/
 │   └── Dockerfile · pyproject.toml
 │
@@ -120,62 +164,75 @@ flowchart LR
 │   └── Dockerfile · pyproject.toml
 │
 ├── sre_common/             # 🧰 Shared library
-│   └── src/sre_common/{otel,retry,logging,middleware,a2a_client}.py
+│   └── src/sre_common/{otel,retry,logging,middleware,tracing,a2a_client}.py
 │
-└── skills/                 # 🧩 Portable Antigravity skill (mirror of the engine)
-    └── sre_incident_solver/{SKILL.md, sre_workflow.py, gcp_tools.py, registry.py}
+└── skills/                 # 🧩 Portable Antigravity skill (generated mirror of the engine)
+    └── sre_incident_solver/{SKILL.md, requirements.txt, sre_workflow.py, gcp_tools.py, registry.py, ...}
 ```
 
 ---
 
-## 📖 Key Deliverables
+## 📖 Documents
 
-* **Step-by-step Tutorial**: Build the agent from scratch in [`CODELAB.md`](CODELAB.md).
-* **Editorial Technical Post**: The engineering architecture & design rationale in [`BLOGPOST.md`](BLOGPOST.md).
-* **Contributor Guide**: Conventions for AI and human collaborators in [`AGENTS.md`](AGENTS.md).
-* **90-Minute Workshop**: Tagged, test-checked steps that finish the agent hands-on in [`workshop/`](workshop/README.md).
-* **Follow-Up Exercises**: Turn the codelab into your own project with hands-on extension challenges in [`EXERCISES.md`](EXERCISES.md).
+| Document | Content |
+| :--- | :--- |
+| [`CODELAB.md`](CODELAB.md) | A step-by-step tutorial that builds the agent from the start. |
+| [`BLOGPOST.md`](BLOGPOST.md) | The architecture and the design decisions. |
+| [`AGENTS.md`](AGENTS.md) | Rules for AI agents and human contributors. |
+| [`workshop/`](workshop/README.md) | A 90-minute workshop. Each step has a tag and a test check. |
+| [`EXERCISES.md`](EXERCISES.md) | Follow-up exercises to extend the project. |
 
 ---
 
-## 🚀 Quickstart: Local Standalone Simulation
+## 🚀 Quickstart: Local Simulation
 
-Run the entire diagnostic workflow locally in seconds with **`uv`**. No GCP account, project, or credentials required.
+Run the full diagnosis workflow on your computer with **`uv`**. You do not need a GCP account,
+project or credentials.
 
-### 1. Clone the Repository
-```bash
-git clone https://github.com/xSAVIKx/sre-agent.git
-cd sre-agent
-```
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/xSAVIKx/sre-agent.git
+   cd sre-agent
+   ```
+2. Install the dependencies:
+   ```bash
+   pip install uv
+   uv sync --all-packages
+   ```
+3. Run the incident simulation:
+   ```bash
+   uv run simulate_incident.py
+   ```
 
-### 2. Synchronize Dependencies
-```bash
-pip install uv
-uv sync --all-packages
-```
+The simulation does these steps:
 
-### 3. Run the Incident Simulation
-```bash
-uv run simulate_incident.py
-```
+1. It deletes the telemetry from earlier runs. To keep it, add `--keep-data`.
+2. It calls the gateway of the target app with an error flag. This makes a synthetic database-timeout incident.
+3. It writes mock traces and logs to `mock_telemetry_data/` (gitignored).
+4. It starts the Orchestrator in mock mode. The Orchestrator calls `diagnose_sre`, which runs the workflow in the same process.
+5. It prints the Orchestrator reply and the full diagnosis. The diagnosis includes the
+   **`/api/database` 99.3% bottleneck table** and the **`# 🚨 Incident Post-Mortem`**.
 
-This single command:
-1. Triggers the mock target app gateway to generate a synthetic database-timeout incident.
-2. Writes mock traces and logs to `mock_telemetry_data/` (gitignored).
-3. Boots the Orchestrator in mock mode, which calls `diagnose_sre` and runs the workflow in-process.
-4. Prints the structured telemetry plus the full diagnosis — the **`/api/database` 99.3% bottleneck table** and the complete **`# 🚨 Incident Post-Mortem`** — straight to your terminal.
+To run the SRE agent without the Orchestrator, add `--engine-only`.
 
-Want the full multi-service experience (Orchestrator + SRE + Inventory + Firestore emulator + target app) with the web chat UI?
+### Full local stack
 
-```bash
-docker compose up --build                                   # GEMINI_API_KEY is optional
-curl "http://localhost:8081/api/gateway?trigger_error=true" # trigger an incident in the target app
-# then open http://localhost:8080/chat and ask: "Diagnose the recent latency spikes"
-```
+Use Docker Compose to run all services with the web chat: the Orchestrator, the SRE agent, the
+Inventory agent, the Firestore emulator and the target app.
 
-Without `GEMINI_API_KEY` every agent runs its deterministic simulated tier; with it, the
-Orchestrator and the SRE sub-agent use Gemini. Either way, the chat goes through the
-Orchestrator's deny-by-default policy and reaches the SRE sub-agent over A2A.
+1. Start the stack. `GEMINI_API_KEY` is optional.
+   ```bash
+   docker compose up --build
+   ```
+2. Make an incident in the target app:
+   ```bash
+   curl "http://localhost:8081/api/gateway?trigger_error=true"
+   ```
+3. Open `http://localhost:8080/chat` and ask: "Diagnose the recent latency spikes".
+
+Without `GEMINI_API_KEY`, the Orchestrator and the SRE agent use deterministic simulation code.
+With `GEMINI_API_KEY`, they use Gemini. In both cases, the chat goes through the Orchestrator
+policy and calls the SRE agent over A2A.
 
 ---
 
@@ -195,62 +252,93 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-[CI](.github/workflows/ci.yml) runs all of the above plus the local simulation on every push and
-pull request. The tests run against **Python 3.11 and 3.14** — the floor `requires-python` declares
-and the version the Dockerfiles ship — while `ruff` runs once, since `target-version = "py311"`
-makes its verdict independent of the interpreter. Dependabot keeps the dependency floors and
-`uv.lock` from drifting; see [`.github/dependabot.yml`](.github/dependabot.yml).
+To change the chat renderer, edit `agent/web/src/sre-a2ui.js`. Then rebuild the bundle:
+
+```bash
+cd agent/web && npm ci && npm run build
+```
+
+[CI](.github/workflows/ci.yml) runs on each push and pull request. It has these jobs:
+
+| Job | Checks |
+| :--- | :--- |
+| `ruff` | `ruff check`, `ruff format --check`, and that the workshop patches are up to date. |
+| `tests` | The three test suites and the local simulation, on **Python 3.11 and 3.14**. |
+| `A2UI renderer bundle` | That the committed `agent/src/agent/static/sre-a2ui.js` matches a new build. |
+| `docker images` | That `docker compose build` builds every image. |
+
+Python 3.11 is the floor that `requires-python` declares. Python 3.14 is the version in the
+Dockerfiles. Ruff runs one time only, because `target-version = "py311"` sets its rules.
+Dependabot keeps the dependency floors and `uv.lock` current. See
+[`.github/dependabot.yml`](.github/dependabot.yml).
 
 ---
 
-## ☁️ Production Deployment: Google Cloud Run
+## ☁️ Deployment to Google Cloud Run
 
-Deploy to Cloud Run following least-privilege best practices — each service gets its own minimally-scoped service account.
+Each service gets its own service account with the minimum roles that it needs.
 
-### 1. Bootstrap GCP Settings
-```bash
-./bootstrap.sh   # gcloud auth login, set project + region, write .env
-```
+1. Set up the GCP project. The script runs `gcloud auth login`, sets the project and region, and writes `.env`.
+   ```bash
+   ./bootstrap.sh
+   ```
+2. Deploy the services:
+   ```bash
+   ./deploy.sh
+   ```
 
-### 2. Deploy the Services
-```bash
-./deploy.sh
-```
-This enables the required APIs (Run, Cloud Build, Trace, Logging, Monitoring, Artifact Registry, Firestore, Secret Manager, Cloud Asset), provisions the service accounts, grants least-privilege roles, then builds and deploys four Cloud Run services:
+`deploy.sh` does these steps:
+
+1. It enables the APIs: Run, Cloud Build, Trace, Logging, Monitoring, Artifact Registry, Firestore, Secret Manager and Cloud Asset.
+2. It stores `GEMINI_API_KEY` in Secret Manager.
+3. It creates the service accounts and grants the roles in the table below.
+4. It creates the Artifact Registry repository and the Firestore database.
+5. It builds and deploys the four Cloud Run services and the inventory scanner job (Cloud Run job).
 
 | Service account | Used by | Roles |
 | :--- | :--- | :--- |
 | `sre-chaos-monkey-sa` | target app (`sre-chaos-monkey`) | `cloudtrace.agent`, `logging.logWriter` *(write-only telemetry)* |
-| `sre-agent-sa` | Orchestrator + SRE diagnostics | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(write only its own spans)* |
-| `inventory-agent-sa` | inventory agent (`inventory-agent`) | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)*, `cloudtrace.agent` *(its own spans)* |
-| `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter` |
+| `sre-agent-sa` | Orchestrator + SRE agent | `cloudtrace.user`, `logging.viewer`, `monitoring.viewer`, `datastore.user` *(read telemetry)*, `cloudtrace.agent` *(write only its own spans)*, `secretmanager.secretAccessor` *(on the `GEMINI_API_KEY` secret)* |
+| `inventory-agent-sa` | Inventory agent (`inventory-agent`) and its scanner job | `datastore.user`, `run.developer`, `logging.logWriter`, `cloudasset.viewer` *(discovery)*, `cloudtrace.agent` *(its own spans)* |
+| `sre-build-sa` | Cloud Build | `run.admin`, `storage.admin`, `artifactregistry.writer`, `logging.logWriter`, `secretmanager.secretAccessor` *(on the `GEMINI_API_KEY` secret)* |
 
-The split is the point: the app that *generates* chaos can only **write** telemetry; the agent that *investigates* it can only **read**.
+This split is the main safety control. The target app can only **write** telemetry. The agents
+that investigate the telemetry can only **read** it.
 
-> ⚠️ **Demo posture.** All four services are deployed with `--allow-unauthenticated` so the chat
-> and the A2A calls work without extra setup. Anyone with a URL can use the agents (and your
-> Gemini quota). Tear the stack down with `./cleanup.sh` after a demo, or put the services behind
-> IAP / IAM-authenticated invocations before leaving them up.
+> ⚠️ **Demo configuration.** All four services use `--allow-unauthenticated`, so the chat and the
+> A2A calls work without more setup. Each person with a service URL can use the agents and your
+> Gemini quota. After a demo, run `./cleanup.sh`. To keep the services, put them behind IAP or
+> IAM-authenticated invocation first.
 
 ---
 
 ## ⚙️ The Antigravity Ecosystem
 
-This codebase shows three ways to work with the SRE agent:
+You can use the SRE agent in three ways.
 
 ### 1. The Antigravity SDK
-Used programmatically in [`agent/src/agent/config.py`](agent/src/agent/config.py) to configure the Orchestrator: system instructions, registered tools, and a strict deny-by-default safety policy — `[deny("*"), allow("diagnose_sre")]`. The Orchestrator literally cannot read files, run commands, or hit arbitrary URLs; its only move is to delegate to the read-only SRE sub-agent.
+[`agent/src/agent/config.py`](agent/src/agent/config.py) uses the SDK to configure the
+Orchestrator: the system instructions, the tools and a deny-by-default policy:
+`[deny("*"), allow("list_incidents"), allow("diagnose_sre"), allow("write_post_mortem")]`.
+The Orchestrator cannot read files, run commands or call other URLs. It can only call the
+read-only SRE agent.
 
 ### 2. The Antigravity CLI (`agy`)
-Developers can drive and inspect the workspace from the terminal. The most direct way to exercise the full diagnostic loop is the local simulation above (`uv run simulate_incident.py`); the CLI also discovers the reusable skill under [`skills/sre_incident_solver/`](skills/sre_incident_solver).
+Use the CLI to work with the workspace from a terminal. The CLI finds the skill in
+[`skills/sre_incident_solver/`](skills/sre_incident_solver). To run the full diagnosis loop, use the
+local simulation (`uv run simulate_incident.py`).
 
 ### 3. Antigravity 2.0 (Visual Workspace)
-The desktop application auto-discovers skills placed in the `skills/` directory. Opening this repository surfaces the `sre_incident_solver` skill via [`SKILL.md`](skills/sre_incident_solver/SKILL.md), letting you run and audit SRE tasks from a graphical canvas.
+The desktop application finds the skills in the `skills/` directory. When you open this repository,
+it shows the `sre_incident_solver` skill from [`SKILL.md`](skills/sre_incident_solver/SKILL.md).
+You can then run and audit SRE tasks in the graphical interface.
 
 ---
 
-## 🧹 Tearing Down the Stack
-To prevent ongoing billing charges, remove all deployed Cloud Run services, IAM bindings, and service accounts:
+## 🧹 Teardown
+To stop billing, remove the deployed resources. The script deletes the Cloud Run services, the
+scanner job, the Artifact Registry repository, the `GEMINI_API_KEY` secret, and the service
+accounts with their role bindings. It can also delete the Firestore database and the local data.
 ```bash
 ./cleanup.sh
 ```

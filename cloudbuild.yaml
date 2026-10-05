@@ -135,6 +135,9 @@ steps:
       - --port=8080
       - --set-env-vars=MOCK_GCP=false,GCP_PROJECT=${PROJECT_ID},BACKEND_SERVICE_URL=${_URL_APP},SRE_AGENT_URL=${_URL_SRE},OTEL_INSTRUMENTATION_A2A_SDK_ENABLED=false
       - --set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest
+      # A chat turn keeps running after the browser disconnects (a phone switching apps);
+      # without this, Cloud Run throttles the CPU outside requests and the turn stalls.
+      - --no-cpu-throttling
       - --allow-unauthenticated
       - --labels=demo=sre-agent-codelab
 
