@@ -17,6 +17,8 @@ import sys
 
 # Ensure workspace root is in Python path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+# The report has emoji. On Windows, a pipe (for example in Git Bash) is not UTF-8 by default.
+sys.stdout.reconfigure(encoding="utf-8")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

@@ -187,6 +187,7 @@ uv run ruff format --check .   # drop --check to apply
 | :--- | :--- |
 | `ruff` | `ruff check` and `ruff format --check`. It also runs `workshop/build_steps.py` and fails when the workshop patches change. |
 | `tests` | The three test suites and the `simulate_incident.py` smoke test, on **Python 3.11 and 3.14**. |
+| `installer` | Runs `install.sh` (Linux, macOS) and `install.ps1` (Windows PowerShell 5.1) on a new runner, then `workshop/check.py all` and the simulation. Keep the installers' `UV_VERSION` equal to the CI `UV_VERSION`. |
 | `A2UI renderer bundle` | Rebuilds `agent/src/agent/static/sre-a2ui.js` and fails when the committed bundle is different. |
 | `docker images` | Runs `docker compose build` for the base image and all service images. |
 

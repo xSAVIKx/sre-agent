@@ -60,7 +60,7 @@ The diagnosis card and the post-mortem card put the return value of `_badge` fir
    uv run workshop/check.py 5
 
    uv run simulate_incident.py                                 # fresh incident telemetry
-   MOCK_GCP=true uv run uvicorn agent.main:app --port 8080     # the web chat
+   uv run workshop/chat.py                                     # the web chat
    ```
 
 2. Open <http://localhost:8080/chat>.
@@ -101,4 +101,5 @@ The Orchestrator sends a request to the SRE agent only when it is necessary.
   over HTTP. To make an incident, run
   `curl "http://localhost:8081/api/gateway?trigger_error=true"`.
 
-**Stuck?** `git apply workshop/steps/05-show-the-severity/solution.patch`
+**Stuck?** Run `uv run workshop/step.py hint 5`, or ask the workshop coach in Antigravity. To apply the
+solution: `uv run workshop/step.py solve 5`.

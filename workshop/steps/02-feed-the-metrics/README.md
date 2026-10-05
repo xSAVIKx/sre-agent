@@ -65,4 +65,5 @@ After your change, the report shows:
 The CPU usage is low and the connection pool is full. Thus, the app is not busy: it *waits*. This
 data supports the result of the trace analysis from step 1.
 
-**Stuck?** `git apply workshop/steps/02-feed-the-metrics/solution.patch`
+**Stuck?** Run `uv run workshop/step.py hint 2`, or ask the workshop coach in Antigravity. To apply the
+solution: `uv run workshop/step.py solve 2`.

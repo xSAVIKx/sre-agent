@@ -44,7 +44,8 @@ dependency image.
 them:
 
 ```bash
-git apply workshop/steps/02-*/solution.patch workshop/steps/03-*/solution.patch
+uv run workshop/step.py solve 2
+uv run workshop/step.py solve 3
 ```
 
 ## Common problems
@@ -53,11 +54,12 @@ git apply workshop/steps/02-*/solution.patch workshop/steps/03-*/solution.patch
 |:--|:--|
 | `check.py 0` shows that an import is missing | Run `uv sync --all-packages`. The `--all-packages` flag is necessary. |
 | `The diagnose_sre tool call was blocked by the safety policy` | This is correct before step 4. Use `simulate_incident.py --engine-only`. |
-| Port 8080 is in use | Use `--port 8081` and open `http://localhost:8081/chat`. |
+| Port 8080 is in use | Use `uv run workshop/chat.py --port 8081` and open `http://localhost:8081/chat`. |
 | The cloud demo finds no anomalous trace | Cloud Trace receives spans with a delay. After `curl .../api/gateway?trigger_error=true`, wait approximately 2 minutes. Then ask the agent. |
 | The chat shows "All systems are healthy" | There is no incident telemetry. From the repository root, run `uv run simulate_incident.py` first. |
 | An attendee with a key gets different text | This is correct. Gemini writes the text. The tools make the cascade table and the post-mortem, so these are the same. |
-| Local changes prevent a step change | Run `git stash`, then `git switch -C catch-up step-0N`. Or use `git apply` with the `solution.patch` file of the step. |
+| An attendee is behind or lost | `uv run workshop/step.py status` shows their progress. `uv run workshop/step.py goto N` commits their changes and starts the step N on a new branch. |
+| `solve N` reports that the solution does not fit | The attendee changed the code of the step. Use `goto N+1`. |
 
 ## Maintaining the steps
 
