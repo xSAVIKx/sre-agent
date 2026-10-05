@@ -44,8 +44,13 @@ needs no GCP account and no API key.
    optional. Fix red lines with the table below.
 
 6. **Run the simulation:** `uv run simulate_incident.py`. The output must contain
-   `Identified Bottleneck` and `Incident Post-Mortem`. On the workshop branch at `step-00`, the
-   steps are not solved yet, so the report can be incomplete. This is correct.
+   `Identified Bottleneck` and `Incident Post-Mortem`.
+
+   On the workshop branch, the steps are not solved yet. This is correct, and it is not a setup
+   problem. Do not solve the workshop steps for the user:
+   * Before step 4, the Orchestrator's safety policy blocks the tool call. Use
+     `uv run simulate_incident.py --engine-only` to check the setup.
+   * Before step 1, the bottleneck is the wrong span (`/api/gateway`, 0.0 %).
 
 7. **Explain the result** in 3 to 5 sentences: which span is the bottleneck, its share of the
    request time, and the root cause from the post-mortem.
