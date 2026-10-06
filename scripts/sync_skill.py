@@ -30,6 +30,7 @@ MODULES = (
     "inventory_client.py",
     "itinerary.py",
     "registry.py",
+    "simulated_llm.py",
     "sre_workflow.py",
 )
 

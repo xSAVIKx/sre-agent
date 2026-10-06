@@ -7,8 +7,15 @@ This module orchestrates two specialized ADK agents:
 
 import json
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
+
+from google.adk import Agent as AdkAgent
+from google.adk import Context
+from google.adk import Workflow as AdkWorkflow
+from google.adk.models.base_llm import BaseLlm
+from google.adk.workflow import START, node
 
 from sre_agent.gcp_tools import (
     analyze_trace_cascade,
@@ -19,92 +26,53 @@ from sre_agent.gcp_tools import (
     query_logs_by_trace,
     query_metrics,
 )
+from sre_agent.simulated_llm import SimulatedLlm
 from sre_common import retry_async
 
-# Setup logger
 logger = logging.getLogger("sre_workflow")
 
-# Resilient imports for google-adk
-try:
-    from google.adk import Agent as AdkAgent
-    from google.adk import Context
-    from google.adk import Workflow as AdkWorkflow
-    from google.adk.workflow import START, node
-
-    HAS_ADK = True
-except ImportError as e:
-    HAS_ADK = False
-    logger.warning(
-        f"google-adk is not installed or failed to import. Using simulated agent fallbacks. Error: {e}", exc_info=True
-    )
-
-    class AdkAgent:  # type: ignore
-        """Mock ADK Agent for resilience."""
-
-        def __init__(
-            self, name: str, instruction: str, model: str = "gemini-3.8-flash", tools: list[Any] | None = None
-        ) -> None:
-            self.name = name
-            self.instruction = instruction
-            self.model = model
-            self.tools = tools or []
-
-        async def chat(self, prompt: str) -> Any:
-            """Mock chat method."""
-            return f"Mock response from {self.name} for: {prompt[:30]}..."
-
-    class AdkWorkflow:  # type: ignore
-        """Mock ADK Workflow for resilience."""
-
-        def __init__(self, name: str, edges: list[Any]) -> None:
-            self.name = name
-            self.edges = edges
-
-    def node(*args: Any, **kwargs: Any) -> Any:
-        def decorator(func: Any) -> Any:
-            return func
-
-        if args and callable(args[0]):
-            return args[0]
-        return decorator
-
-    START = "START"
-
-    class Context:  # type: ignore
-        """Mock ADK Context for resilience."""
+GEMINI_MODEL = "gemini-3.8-flash"
 
 
-# 1. Define SRE specialized ADK agents
-trace_analyzer = AdkAgent(
-    name="trace_analyzer",
-    instruction=(
-        "You are an SRE trace analyst. You receive the recent requests worth diagnosing, "
-        "ranked best candidate first; each has an `incident` kind (error or slow) and a `service`. "
-        "Pick the request the user is asking about - if nothing narrows it down, the first one. "
-        "Return ONLY its raw 32-character hex traceId. "
-        "Do not include any extra text, code block backticks, or explanation."
-    ),
-    model="gemini-3.8-flash",
+def _model() -> str | BaseLlm:
+    """Gemini when GEMINI_API_KEY is set. Else a scripted model, so the same ADK workflow runs offline."""
+    return GEMINI_MODEL if os.environ.get("GEMINI_API_KEY") else SimulatedLlm()
+
+
+MODEL = _model()
+
+
+# 1. The two ADK agents. Each agent is a model, an instruction and (optionally) tools.
+TRACE_ANALYZER_INSTRUCTION = (
+    "You are an SRE trace analyst. You receive the recent requests worth diagnosing, "
+    "ranked best candidate first; each has an `incident` kind (error or slow) and a `service`. "
+    "Pick the request the user is asking about - if nothing narrows it down, the first one. "
+    "Return ONLY its raw 32-character hex traceId. "
+    "Do not include any extra text, code block backticks, or explanation."
 )
+
+LOG_CORRELATOR_INSTRUCTION = (
+    "You are a senior SRE debugging assistant. Analyze the trace details "
+    "and correlated logs provided. Identify the failing span, the root cause "
+    "of the issue (such as connection timeouts, resource exhaustion, or "
+    "logic errors), and recommend a mitigation plan. "
+    "You have access to tools to query observability metrics (e.g., container CPU or memory utilization) "
+    "as well as trace cascade bottleneck analysis and incident post-mortem generation "
+    "if you need more context or need to build a post-mortem report. "
+    "Call each tool at most once per trace: the system appends the full cascade table and "
+    "post-mortem to your answer, so do not repeat them - write the root cause and mitigation. "
+    "Base every claim on the spans, logs and metrics you were given. If they do not show why "
+    "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
+    "in the telemetry and what to check; do not infer one from service names."
+)
+
+trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
 
 log_correlator = AdkAgent(
     name="log_correlator",
-    instruction=(
-        "You are a senior SRE debugging assistant. Analyze the trace details "
-        "and correlated logs provided. Identify the failing span, the root cause "
-        "of the issue (such as connection timeouts, resource exhaustion, or "
-        "logic errors), and recommend a mitigation plan. "
-        "You have access to tools to query observability metrics (e.g., container CPU or memory utilization) "
-        "as well as trace cascade bottleneck analysis and incident post-mortem generation "
-        "if you need more context or need to build a post-mortem report. "
-        "Call each tool at most once per trace: the system appends the full cascade table and "
-        "post-mortem to your answer, so do not repeat them - write the root cause and mitigation. "
-        "Base every claim on the spans, logs and metrics you were given. If they do not show why "
-        "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
-        "in the telemetry and what to check; do not infer one from service names."
-    ),
+    model=MODEL,
+    instruction=LOG_CORRELATOR_INSTRUCTION,
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-    model="gemini-3.8-flash",
 )
 
 
@@ -118,9 +86,6 @@ class Diagnosis:
     report: str
     trace_id: str | None = None
     failed: bool = False
-
-
-SIMULATION_FAILURE = "### Diagnostic Simulation Failure"
 
 
 # 2. Orchestrate the diagnostic workflow
@@ -143,8 +108,6 @@ async def _run_adk_diagnostics(
     Returns:
         The Log Correlator's report, with the cascade and post-mortem of the trace it diagnosed.
     """
-    import os
-
     from google.adk.runners import Runner
     from google.adk.sessions import InMemorySessionService
     from google.genai import types
@@ -346,124 +309,6 @@ async def _run_adk_diagnostics(
         )
 
 
-@otel_trace("_run_simulated_diagnostics")
-async def _run_simulated_diagnostics(incident: dict[str, Any], project_id: str | None = None) -> str:
-    """Runs a simulated diagnostics fallback loop.
-
-    Locally parses telemetry from mock data files to produce the report.
-
-    Args:
-        incident: The trace summary to diagnose (from `incidents.find_incident`).
-        project_id: Optional GCP project identifier.
-
-    Returns:
-        A simulated markdown diagnostics report.
-    """
-    import json
-
-    try:
-        failing_trace = incident
-        trace_id = failing_trace.get("traceId", "unknown_trace_id")
-        logger.info(f"[Simulation] Identified trace ID: {trace_id}")
-
-        # Fetch trace details, logs, and metrics from mock files
-        trace_details = await get_trace_details(trace_id, project_id)
-        logs = await query_logs_by_trace(trace_id, project_id)
-        metrics = await query_metrics(
-            filter_expression='metric.type="run.googleapis.com/container/cpu/utilizations" AND resource.labels.service_name="sre-chaos-monkey"',
-            project_id=project_id,
-        )
-        db_connections = await query_metrics(
-            filter_expression='metric.type="cloudsql.googleapis.com/database/postgresql/connection_count" AND resource.labels.database_id="db-primary"',
-            project_id=project_id,
-        )
-
-        # Build mock SRE analysis response based on telemetry
-        trace_data = json.loads(trace_details)
-        log_data = json.loads(logs)
-
-        # Parse CPU utilization
-        cpu_info = "No CPU utilization data available."
-        try:
-            cpu_data = json.loads(metrics)
-            if isinstance(cpu_data, list) and len(cpu_data) > 0:
-                points = cpu_data[0].get("points", [])
-                if points:
-                    latest_val = points[-1].get("value", 0)
-                    cpu_info = f"{latest_val * 100:.1f}% (Healthy)"
-        except Exception as e:
-            logger.warning(f"Failed to parse mock CPU metrics in simulation: {e}")
-
-        # Parse DB connection count
-        db_conn_info = "No DB connection count data available."
-        try:
-            db_data = json.loads(db_connections)
-            if isinstance(db_data, list) and len(db_data) > 0:
-                points = db_data[0].get("points", [])
-                if points:
-                    latest_val = points[-1].get("value", 0)
-                    db_conn_info = f"{latest_val} connections (Warning: Max capacity reached)"
-        except Exception as e:
-            logger.warning(f"Failed to parse mock DB connection metrics in simulation: {e}")
-
-        error_msg = "Unknown error"
-        if isinstance(log_data, list):
-            for log in log_data:
-                if log.get("severity") in ("ERROR", "CRITICAL"):
-                    error_msg = log.get("text_payload") or (log.get("json_payload") or {}).get("message", error_msg)
-
-        # Simulate Itinerary Catalog enrichment in report
-        from sre_agent.itinerary import DEFAULT_TEMPLATES
-
-        catalog_md = "## 🗺️ Enriched Service Catalog\n"
-        catalog_md += "Pre-defined diagnostic helper filters mapped via similarity lookup:\n"
-        for template in DEFAULT_TEMPLATES:
-            if template["resource_type"] == "cloud_run_revision":
-                # For sre-chaos-monkey
-                metrics = template["helpers"]["metrics"].replace("{service_name}", "sre-chaos-monkey")
-                logs = template["helpers"]["logs"].replace("{service_name}", "sre-chaos-monkey")
-                catalog_md += "- **Resource**: `sre-chaos-monkey` (cloud_run_revision)\n"
-                catalog_md += f"  - Metrics: `{metrics}`\n"
-                catalog_md += f"  - Logs: `{logs}`\n"
-            elif template["resource_type"] == "datastore_database":
-                # For (default)
-                metrics = template["helpers"]["metrics"].replace("{database_id}", "(default)")
-                logs = template["helpers"]["logs"].replace("{database_id}", "(default)")
-                catalog_md += "- **Resource**: `(default)` (datastore_database)\n"
-                catalog_md += f"  - Metrics: `{metrics}`\n"
-                catalog_md += f"  - Logs: `{logs}`\n"
-        catalog_md += "\n"
-
-        # Call the new cascade analysis and post-mortem tools
-        cascade_report = await analyze_trace_cascade(trace_id, project_id)
-        post_mortem_report = await generate_post_mortem(trace_id, project_id)
-
-        report = (
-            f"# 🚨 SRE Incident Diagnosis Report\n\n"
-            f"- **Anomalous Trace ID**: `{trace_id}`\n"
-            f"- **Root Service**: `{trace_data.get('root_span', 'gateway')}`\n\n"
-            f"## 🔍 Root Cause Analysis\n"
-            f"A distributed trace scan identified elevated latencies in trace `{trace_id}`. "
-            f"Further investigation into the span hierarchy reveals the child span "
-            f"`/api/database` was slow and marked with an error status.\n\n"
-            f"Correlating this trace with Cloud Logging logs revealed the following error message:\n"
-            f"```\n{error_msg}\n```\n\n"
-            f"## 📊 Observability Metrics\n"
-            f"- **CPU Utilization (sre-chaos-monkey)**: `{cpu_info}`\n"
-            f"- **Database Connections (db-primary)**: `{db_conn_info}`\n\n"
-            f"{catalog_md}"
-            f"## 🛠️ Recommended Mitigation\n"
-            f"1. **Check Database Health**: Verify that the database instance `db-primary.gcp.internal` is running and accessible.\n"
-            f"2. **Verify Firewall Rules**: Ensure VPC firewall settings allow ingress traffic from the backend service subnet on port 5432.\n"
-            f"3. **Adjust Connection Pools**: Review backend service connection pool configurations to prevent pool exhaustion.\n\n"
-            f"{cascade_report}\n\n"
-            f"{post_mortem_report}"
-        )
-        return report
-    except Exception as e:
-        return f"{SIMULATION_FAILURE}\nFailed to parse telemetry during simulation: {e}"
-
-
 async def run_sre_diagnostics(
     traces_json: str, project_id: str | None = None, question: str = "", trace_id: str | None = None
 ) -> str:
@@ -477,8 +322,8 @@ async def diagnose(
 ) -> Diagnosis:
     """Executes the SRE diagnostic workflow using ADK agents.
 
-    Delegates to the real ADK multi-agent workflow if ADK is installed and an API
-    key is configured, otherwise falls back to simulated reasoning.
+    The agents use Gemini when GEMINI_API_KEY is set, and the scripted
+    `SimulatedLlm` otherwise (see `MODEL`).
 
     Args:
         traces_json: A JSON string containing recent trace summaries.
@@ -510,9 +355,4 @@ async def diagnose(
         )
     logger.info(f"Diagnosing {incident.get('incident')} trace {incident.get('traceId')} ({incident.get('name')})")
 
-    import os
-
-    if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
-        return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)
-    report = await _run_simulated_diagnostics(incident, project_id)
-    return Diagnosis(report, incident.get("traceId"), failed=report.startswith(SIMULATION_FAILURE))
+    return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)

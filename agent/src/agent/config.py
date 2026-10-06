@@ -16,6 +16,8 @@ from typing import Any
 
 from sre_common.a2a_client import call_agent
 
+from agent.local_sre import local_sre_agent_url
+
 # Fail-safe OpenTelemetry imports for tracer initialization. These names are a
 # capability probe for HAS_OTEL, not call sites - hence the noqa.
 try:
@@ -106,9 +108,9 @@ def summarize_report(report: str) -> str:
     """
     if report.startswith("Error:") or "blocked by the safety policy" in report:
         return report
-    # The first line of plain prose: not a heading, list item, table row or code fence.
+    # The first line of plain prose: not a heading, list item, table row, code fence or note.
     prose = (line.strip() for line in report.splitlines())
-    first = next((line for line in prose if line and line[0] not in "#*-|`>" and not _NUMBERED.match(line)), "")
+    first = next((line for line in prose if line and line[0] not in "#*-|`>_" and not _NUMBERED.match(line)), "")
     return f"{first} The full result is below." if first else report
 
 
@@ -426,44 +428,6 @@ def _emit_progress(text: str) -> None:
         sink.emit(text)
 
 
-SIMULATION_PROJECT = "simulation-project-123"
-
-
-async def _run_in_process(
-    skill: str, prompt: str, project_id: str | None, trace_id: str | None, ui: bool
-) -> tuple[str, list[dict[str, Any]]]:
-    """Runs an SRE skill in this process (standalone simulation: no SRE service is running).
-
-    Returns the Markdown result and, with ``ui``, its A2UI surface - the same messages
-    the SRE agent would send over A2A.
-    """
-    resolved_project = project_id or os.environ.get("GCP_PROJECT") or SIMULATION_PROJECT
-    if skill == "diagnose_incident":
-        from sre_agent.diagnosis import diagnosis_surface
-        from sre_agent.gcp_tools import TRACE_SCAN_SIZE, query_traces
-        from sre_agent.sre_workflow import diagnose
-
-        traces_json = await query_traces(project_id=resolved_project, limit=TRACE_SCAN_SIZE)
-        diagnosis = await diagnose(traces_json, resolved_project, question=prompt, trace_id=trace_id)
-        surface = await diagnosis_surface(diagnosis, resolved_project) if ui else None
-        return diagnosis.report, surface or []
-
-    from sre_agent.diagnosis import Progress, run_list_incidents, run_post_mortem
-
-    run = (
-        run_list_incidents(project_id=resolved_project, ui=ui)
-        if skill == "list_incidents"
-        else run_post_mortem(prompt=prompt, project_id=resolved_project, trace_id=trace_id, ui=ui)
-    )
-    report, surface = "", []
-    async for update in run:
-        if isinstance(update, Progress):
-            _emit_progress(update.text)
-        else:
-            report, surface = update.text, update.a2ui or []
-    return report, surface
-
-
 async def _call_sre_skill(
     skill: str, prompt: str, project_id: str | None = None, trace_id: str | None = None, refresh: bool = False
 ) -> str:
@@ -474,52 +438,38 @@ async def _call_sre_skill(
     (forwarded to the chat), the result as the task artifact. The result is also left
     in the request's `DiagnosisSink`, so the UI can show it in full as a card.
     """
-    sre_agent_url = os.getenv("SRE_AGENT_URL")
-    mock_mode = os.getenv("MOCK_GCP", "false").lower() == "true"
-
-    # Standalone simulation (simulate_incident.py): no sub-agent service is
-    # running, so run the same pipelines in-process. When SRE_AGENT_URL is set
-    # (docker-compose, Cloud Run) always delegate over A2A.
-    if mock_mode and not sre_agent_url:
-        logger.info(f"MOCK_GCP is true and SRE_AGENT_URL is unset. Running {skill} in-process.")
-        _emit_progress(f"Running the SRE skill `{skill}` in-process (simulation mode)...")
-        sink = diagnosis_sink.get()
-        try:
-            report, surface = await _run_in_process(skill, prompt, project_id, trace_id, ui=sink is not None)
-            if sink is not None:
-                sink.a2ui = surface
-        except Exception as mock_err:
-            logger.error(f"Failed to run {skill} in-process: {mock_err}")
-            report = f"Error: in-process SRE skill {skill} failed: {mock_err!s}"
-    else:
-        base_url = sre_agent_url or "http://sre-agent:8080"
-        sink = diagnosis_sink.get()
-        logger.info(f"Calling the SRE agent's {skill} skill over A2A: {base_url}")
-        _emit_progress(f"Contacting the SRE diagnostics sub-agent over A2A (skill `{skill}`)...")
-        metadata: dict[str, Any] = {
-            "skill": skill,
-            "project_id": project_id or os.environ.get("GCP_PROJECT", ""),
-            "refresh": refresh,
-        }
-        if trace_id:
-            metadata["trace_id"] = trace_id
-        if sink is not None:  # a chat: its UI renders A2UI
-            metadata["a2uiClientCapabilities"] = A2UI_CLIENT_CAPABILITIES
-        try:
-            result = await call_agent(
-                base_url,
-                prompt,
-                metadata,
-                context_id=sink.context_id if sink else "",
-                on_progress=_emit_progress,
-                extensions=[A2UI_EXTENSION_URI] if sink is not None else None,
-            )
-            report = result.text
-            if sink is not None:
-                sink.a2ui = result.a2ui
-        except Exception as e:
-            logger.error(f"Failed to communicate with SRE sub-agent: {e}")
-            report = f"Error: Failed to contact SRE Sub-Agent: {e!s}"
+    base_url = os.getenv("SRE_AGENT_URL")
+    if not base_url and os.getenv("MOCK_GCP", "false").lower() == "true":
+        # A laptop run (simulate_incident.py, workshop/chat.py): start the SRE agent locally.
+        base_url = await asyncio.to_thread(local_sre_agent_url)
+    base_url = base_url or "http://sre-agent:8080"
+    sink = diagnosis_sink.get()
+    logger.info(f"Calling the SRE agent's {skill} skill over A2A: {base_url}")
+    _emit_progress(f"Contacting the SRE diagnostics sub-agent over A2A (skill `{skill}`)...")
+    metadata: dict[str, Any] = {
+        "skill": skill,
+        "project_id": project_id or os.environ.get("GCP_PROJECT", ""),
+        "refresh": refresh,
+    }
+    if trace_id:
+        metadata["trace_id"] = trace_id
+    if sink is not None:  # a chat: its UI renders A2UI
+        metadata["a2uiClientCapabilities"] = A2UI_CLIENT_CAPABILITIES
+    try:
+        result = await call_agent(
+            base_url,
+            prompt,
+            metadata,
+            context_id=sink.context_id if sink else "",
+            on_progress=_emit_progress,
+            extensions=[A2UI_EXTENSION_URI] if sink is not None else None,
+        )
+        report = result.text
+        if sink is not None:
+            sink.a2ui = result.a2ui
+    except Exception as e:
+        logger.error(f"Failed to communicate with SRE sub-agent: {e}")
+        report = f"Error: Failed to contact SRE Sub-Agent: {e!s}"
 
     sink = diagnosis_sink.get()
     if sink is not None:
