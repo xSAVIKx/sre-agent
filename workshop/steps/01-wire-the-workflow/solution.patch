@@ -1,10 +1,10 @@
 --- a/skills/sre_incident_solver/sre_workflow.py
 +++ b/skills/sre_incident_solver/sre_workflow.py
-@@ -269,11 +269,9 @@
+@@ -271,11 +271,9 @@
  
      try:
          # Define the ADK 2.0 graph workflow
--        # TODO(step-2): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
+-        # TODO(step-1): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
 -        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
 -        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
 -        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.
@@ -17,11 +17,11 @@
          runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -267,11 +267,9 @@
+@@ -269,11 +269,9 @@
  
      try:
          # Define the ADK 2.0 graph workflow
--        # TODO(step-2): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
+-        # TODO(step-1): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
 -        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
 -        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
 -        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.

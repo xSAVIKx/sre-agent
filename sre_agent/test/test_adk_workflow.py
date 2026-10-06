@@ -1,6 +1,6 @@
 """The ADK agents and workflow, run for real with the scripted `SimulatedLlm`.
 
-Workshop step 1 builds the LogCorrelator agent, step 2 wires the workflow; these
+Workshop step 1 wires the workflow, step 2 gives the LogCorrelator its tools; these
 tests check what the agents do, not how the code looks.
 """
 
@@ -41,7 +41,7 @@ class TestSimulatedLlm(unittest.TestCase):
 
 
 class TestLogCorrelator(unittest.IsolatedAsyncioTestCase):
-    """Step 1: the LogCorrelator is an ADK agent with an instruction and the SRE tools."""
+    """Step 2: the LogCorrelator is an ADK agent with an instruction and the SRE tools."""
 
     async def _run(self) -> tuple[list[str], str]:
         """Runs the agent alone on one trace. Returns the tools it called and its answer."""
@@ -73,7 +73,7 @@ class TestLogCorrelator(unittest.IsolatedAsyncioTestCase):
 
 
 class TestWorkflow(unittest.IsolatedAsyncioTestCase):
-    """Step 2: the workflow runs TraceAnalyzer -> fetch_telemetry -> LogCorrelator."""
+    """Step 1: the workflow runs TraceAnalyzer -> fetch_telemetry -> LogCorrelator."""
 
     async def _diagnose(self, question: str = "") -> sre_workflow.Diagnosis:
         telemetry = {

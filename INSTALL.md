@@ -69,7 +69,7 @@ uv run simulate_incident.py   # makes an incident and diagnoses it in your termi
 uv run workshop/chat.py       # the web chat: open http://localhost:8080/chat
 ```
 
-To use Gemini instead of the deterministic simulation, set `GEMINI_API_KEY`
+To use Gemini instead of the scripted simulation, set `GEMINI_API_KEY`
 ([get a key](https://aistudio.google.com/apikey)):
 
 * macOS and Linux: `export GEMINI_API_KEY=...`

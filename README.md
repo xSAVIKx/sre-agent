@@ -210,7 +210,8 @@ The simulation does these steps:
 1. It deletes the telemetry from earlier runs. To keep it, add `--keep-data`.
 2. It calls the gateway of the target app with an error flag. This makes a synthetic database-timeout incident.
 3. It writes mock traces and logs to `mock_telemetry_data/` (gitignored).
-4. It starts the Orchestrator in mock mode. The Orchestrator calls `diagnose_sre`, which runs the workflow in the same process.
+4. It starts the Orchestrator in mock mode. The Orchestrator starts the SRE agent on a local port
+   and calls its `diagnose_incident` skill over A2A.
 5. It prints the Orchestrator reply and the full diagnosis. The diagnosis includes the
    **`/api/database` 99.3% bottleneck table** and the **`# 🚨 Incident Post-Mortem`**.
 
@@ -231,8 +232,8 @@ Inventory agent, the Firestore emulator and the target app.
    ```
 3. Open `http://localhost:8080/chat` and ask: "Diagnose the recent latency spikes".
 
-Without `GEMINI_API_KEY`, the Orchestrator and the SRE agent use deterministic simulation code.
-With `GEMINI_API_KEY`, they use Gemini. In both cases, the chat goes through the Orchestrator
+Without `GEMINI_API_KEY`, the Orchestrator uses simulation code, and the ADK agents of the SRE agent
+use a scripted model (`simulated_llm.py`). With `GEMINI_API_KEY`, they use Gemini. In both cases, the chat goes through the Orchestrator
 policy and calls the SRE agent over A2A.
 
 ---

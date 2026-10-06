@@ -57,8 +57,28 @@ class Step:
 STEPS: tuple[Step, ...] = (
     Step(
         1,
-        "01-build-the-agent",
-        "Build an ADK agent",
+        "01-wire-the-workflow",
+        "Connect the agents in a workflow",
+        (
+            Edit(
+                "sre_agent/src/sre_agent/sre_workflow.py",
+                solution="""        sre_diagnostics_workflow = AdkWorkflow(
+            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
+        )
+""",
+                starter="""        # TODO(step-1): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
+        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
+        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
+        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.
+        sre_diagnostics_workflow = AdkWorkflow(name="sre_diagnostics_workflow", edges=[(START, trace_analyzer)])
+""",
+            ),
+        ),
+    ),
+    Step(
+        2,
+        "02-build-the-agent",
+        "Give the agent its tools",
         (
             Edit(
                 "sre_agent/src/sre_agent/sre_workflow.py",
@@ -69,7 +89,7 @@ STEPS: tuple[Step, ...] = (
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
 )
 """,
-                starter="""# TODO(step-1): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
+                starter="""# TODO(step-2): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
 #   - name: "log_correlator". The workflow and the logs use this name.
 #   - model: MODEL. It is Gemini when GEMINI_API_KEY is set, and a scripted model if not.
 #   - instruction: LOG_CORRELATOR_INSTRUCTION (above). It tells the model its job.
@@ -77,26 +97,6 @@ STEPS: tuple[Step, ...] = (
 #     list_metric_descriptors, analyze_trace_cascade, generate_post_mortem. ADK reads their
 #     type hints and docstrings, and tells the model how to call them.
 log_correlator = AdkAgent(name="log_correlator", model=MODEL, instruction="Describe the trace.")
-""",
-            ),
-        ),
-    ),
-    Step(
-        2,
-        "02-wire-the-workflow",
-        "Connect the agents in a workflow",
-        (
-            Edit(
-                "sre_agent/src/sre_agent/sre_workflow.py",
-                solution="""        sre_diagnostics_workflow = AdkWorkflow(
-            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
-        )
-""",
-                starter="""        # TODO(step-2): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
-        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
-        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
-        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.
-        sre_diagnostics_workflow = AdkWorkflow(name="sre_diagnostics_workflow", edges=[(START, trace_analyzer)])
 """,
             ),
         ),

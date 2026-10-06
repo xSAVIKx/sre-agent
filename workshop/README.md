@@ -2,18 +2,20 @@
 
 In this workshop, you complete an SRE agent that does not work fully yet. You do these tasks:
 
-1. Make the SRE agent find the slowest span in a distributed trace.
-2. Give the SRE agent metrics data.
-3. Give the Gemini log correlator agent its tools.
-4. Set a deny-by-default safety policy on the Orchestrator, which is the agent that users talk to.
-5. Show the incident severity in the chat UI.
+1. **ADK:** connect two agents and a Python step in a workflow.
+2. **ADK:** build an agent with a model, an instruction and tools.
+3. **A2A:** publish a skill on the agent card of the SRE agent.
+4. **A2A and the Antigravity SDK:** make the Orchestrator call the SRE agent over A2A, with a
+   deny-by-default safety policy.
+5. **A2UI:** send UI from the agent: a severity badge, and buttons that send events back.
 
 All steps run **on your laptop**. You do not need a cloud account or an API key.
 
 A `GEMINI_API_KEY` is optional:
 
 * With a key, the agents use Gemini to find the root cause.
-* Without a key, each agent uses a deterministic simulation. The report has the same structure.
+* Without a key, the same ADK agents use a scripted model that answers with fixed rules. The
+  workflow, the tool calls and the A2A calls are the same.
 
 ## Before the workshop (10 minutes, at home)
 
@@ -56,11 +58,11 @@ Optional: set `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/apikey))
 |:----------|:---------------------------------------------------------------|:------------------------------------------|
 | 0:00      | Introduction and live demo                                     | –                                         |
 | 0:10      | [0 · Setup and tour](steps/00-setup/README.md)                 | –                                         |
-| 0:20      | [1 · Find the bottleneck](steps/01-find-the-bottleneck/README.md) | `sre_agent/.../gcp_tools.py`           |
-| 0:32      | [2 · Feed the metrics](steps/02-feed-the-metrics/README.md)    | `app/main.py`                             |
-| 0:44      | [3 · Give the agent its tools](steps/03-give-the-agent-tools/README.md) | `sre_agent/.../sre_workflow.py`  |
-| 0:54      | [4 · Lock the Orchestrator down](steps/04-lock-it-down/README.md) | `agent/.../config.py`                  |
-| 1:06      | [5 · Show the severity](steps/05-show-the-severity/README.md)  | `sre_agent/.../a2ui_surfaces.py`          |
+| 0:20      | [1 · Connect the agents in a workflow](steps/01-wire-the-workflow/README.md) (ADK) | `sre_agent/.../sre_workflow.py` |
+| 0:32      | [2 · Give the agent its tools](steps/02-build-the-agent/README.md) (ADK)        | `sre_agent/.../sre_workflow.py` |
+| 0:44      | [3 · Publish an A2A skill](steps/03-publish-a-skill/README.md) (A2A)            | `sre_agent/.../a2a_agent.py`    |
+| 0:56      | [4 · Call the agent over A2A, safely](steps/04-call-it-safely/README.md) (A2A, Antigravity) | `agent/.../config.py` |
+| 1:08      | [5 · Send UI with A2UI](steps/05-show-the-severity/README.md) (A2UI)            | `sre_agent/.../a2ui_surfaces.py` |
 | 1:20      | [6 · Wrap-up: production and next steps](steps/06-wrap-up/README.md) | –                                   |
 
 Each step has a `# TODO(step-N)` comment in the code. To find the comment for step 1, do this command:

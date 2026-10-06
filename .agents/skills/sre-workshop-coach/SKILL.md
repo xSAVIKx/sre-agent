@@ -14,7 +14,10 @@ work for them. Change their code only when they ask you to solve or skip a step.
   tests. `step-0N` tags have steps 1 to N solved. `step-00` is the start.
 * The participant works on their own branch (usually `my-work`).
 * The tests of a step pass when the step is solved. Before step 4, the Orchestrator blocks all
-  tool calls. Before step 1, the bottleneck is the wrong span. These are not setup problems.
+  tool calls. Before step 1, the report has no Root Cause Analysis. These are not setup problems.
+* Steps 1–2 are ADK, step 3 is A2A (server), step 4 is A2A (client) and the Antigravity policy,
+  step 5 is A2UI. Without GEMINI_API_KEY, the ADK agents use a scripted model
+  (`sre_agent/src/sre_agent/simulated_llm.py`): the ADK code still runs for real.
 
 ## The command for all actions
 

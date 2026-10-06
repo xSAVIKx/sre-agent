@@ -88,13 +88,13 @@ flowchart LR
 
 ### Exercise 1 · Make the metrics tell the truth 🟢
 
-**Goal.** In step 2 of the [workshop](workshop/README.md), the target app started to write
-`metrics.json`. Thus, the **Observability Metrics** section of the report shows numbers. But the
-verdicts are fixed text: the CPU is always "(Healthy)", and the connection count always shows "Max
-capacity reached". Calculate the verdicts from the data.
+**Goal.** Without a key, the scripted model (`SimulatedLlm`) writes the **Observability Metrics**
+section. It shows only the latest value of each time series: `0.24` and `100`. A person must still
+decide if a value is a problem. Make the model say it: "the connection pool is full", "the CPU is
+idle".
 
-**Start here.** Go to `_run_simulated_diagnostics` in
-[`sre_workflow.py`](sre_agent/src/sre_agent/sre_workflow.py).
+**Start here.** Go to `_metric_line` in
+[`simulated_llm.py`](sre_agent/src/sre_agent/simulated_llm.py).
 
 1. Compare the latest DB connection count with a pool size that you can configure.
 2. Compare the CPU fraction with a threshold.
@@ -103,11 +103,11 @@ capacity reached". Calculate the verdicts from the data.
 
 - With the healthy readings, the report shows a healthy pool. The healthy readings are the
   `trigger_error=False` series of `_mock_metric_series` in `app/main.py`.
-- With the incident readings, the report still shows saturation.
+- With the incident readings, the report shows saturation.
 - One unit test covers each case.
 
-Note: `simulate_incident.py` always makes an incident. A healthy trace gives no incident, and the
-report then has no metrics section. Thus, test the healthy case with a unit test.
+Note: `simulate_incident.py` always makes an incident. A healthy trace gives no incident, so test
+the healthy case with a unit test.
 
 ---
 
@@ -177,11 +177,12 @@ actions, with rollback steps. Thus, the diagnosis and the recommendation are sep
 
 1. Define a third `AdkAgent`.
 2. Add the new agent to the edges of the `AdkWorkflow`.
-3. Add an equivalent fixed section to `_run_simulated_diagnostics`. Thus, both **tiers** have the
-   same report structure.
+3. Teach the scripted model (`simulated_llm.py`) to answer the new agent's request, so that the
+   workflow also runs without a key.
 
-**Done when.** Both tiers write a report with a separate "Mitigation Plan" section. Test both tiers
-with `simulate_incident.py`: one time with `GEMINI_API_KEY` and one time without it.
+**Done when.** The report has a separate "Mitigation Plan" section, with Gemini and with the
+scripted model. Test both with `simulate_incident.py`: one time with `GEMINI_API_KEY` and one time
+without it.
 
 ---
 

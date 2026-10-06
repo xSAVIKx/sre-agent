@@ -16,11 +16,11 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # step -> (title, [(source roots on PYTHONPATH, test dir, unittest ids)])
 STEP_TESTS: dict[int, tuple[str, list[tuple[list[str], str, list[str]]]]] = {
-    1: ("Build an ADK agent", [(["sre_agent/src"], "sre_agent/test", ["test_adk_workflow.TestLogCorrelator"])]),
-    2: (
+    1: (
         "Connect the agents in a workflow",
         [(["sre_agent/src"], "sre_agent/test", ["test_adk_workflow.TestWorkflow"])],
     ),
+    2: ("Give the agent its tools", [(["sre_agent/src"], "sre_agent/test", ["test_adk_workflow.TestLogCorrelator"])]),
     3: (
         "Publish an A2A skill",
         [
