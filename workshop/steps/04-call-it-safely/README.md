@@ -2,6 +2,8 @@
 
 **Goal:** Make the Orchestrator call the SRE agent over A2A, and let it do nothing else.
 
+**Builds on:** [A2A basics](../../basics/a2a.md): 4. Task, 6. Metadata and extensions, 7. Client. [Antigravity SDK basics](../../basics/antigravity.md): 3. Policies.
+
 ## The idea, part 1: an A2A client
 
 The Orchestrator (`agent/src/agent/config.py`) is the agent that users talk to. It has one tool

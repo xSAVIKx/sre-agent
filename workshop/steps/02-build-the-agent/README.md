@@ -2,6 +2,8 @@
 
 **Goal:** Build the `log_correlator` as a complete ADK agent: a model, an instruction and tools.
 
+**Builds on:** [ADK basics](../../basics/adk.md): 1. Agent, 2. Tool, 3. Model, 6. Session state.
+
 ## The idea: an agent is a model, an instruction and tools
 
 ```python
@@ -73,6 +75,14 @@ With a `GEMINI_API_KEY`, Gemini decides which tools to call, and writes its own 
 
 * With a key: change `LOG_CORRELATOR_INSTRUCTION`, and compare the reports.
 * Write a new tool: an `async` function with type hints and a docstring. Add it to `tools`.
+* **Share a value through the session state.** An agent with `output_key` writes its answer into
+  the session state ([ADK basics, 6](../../basics/adk.md#6-session-state-and-output_key)):
+  1. Add `output_key="analysis"` to `log_correlator`. Run `uv run workshop/basics/try_adk.py`.
+     The last line now shows the analysis in the session state.
+  2. Add `output_key="trace_id"` to `trace_analyzer`.
+  3. In `fetch_telemetry`, log `ctx.state.get("trace_id")` next to `node_input`. Run
+     `uv run simulate_incident.py --engine-only`, and find the two values in the log. They are
+     the same trace ID: one came through the chain, one through the state.
 
 **Stuck?** Run `uv run workshop/step.py hint 2`, or ask the workshop coach in Antigravity. To apply
 the solution: `uv run workshop/step.py solve 2`.

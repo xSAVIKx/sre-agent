@@ -2,6 +2,8 @@
 
 **Goal:** Make the SRE agent offer a third skill, `write_post_mortem`, to other agents.
 
+**Builds on:** [A2A basics](../../basics/a2a.md): 1. Agent card, 2. Skill, 7. Server and client.
+
 ## The idea: agents talk with the A2A protocol
 
 The Orchestrator and the SRE agent are separate agents. They talk with the

@@ -2,7 +2,8 @@
 
 ## One week before
 
-Send the **"Before the workshop"** section of [README.md](README.md) to the attendees.
+Send the **"Before the workshop"** and **"Learn the basics"** sections of [README.md](README.md)
+to the attendees. The basics pages are the pre-reading: about 25 minutes.
 
 The `uv sync` download is the largest risk on the venue wifi. No other task needs the network.
 
@@ -31,7 +32,8 @@ dependency image.
 
 | Time | Item | Notes |
 |:--|:--|:--|
-| 0:00 | Introduction and demo | Use `step-05`. Start the chat UI and diagnose an incident. Show the SEV1 badge. Download the post-mortem. Then start the build. |
+| 0:00 | Introduction | Show the big picture and "One click, from start to end" from [`basics/README.md`](basics/README.md). |
+| 0:05 | Live demo | Use `step-05`. Start the chat UI and diagnose an incident. Show the SEV1 badge. Download the post-mortem. Then start the build. |
 | 0:10 | Step 0 | All attendees are on `step-00`, and `check.py 0` shows `ok`. Explain the architecture table. Show the "blocked by the safety policy" line. Tell attendees that step 4 fixes it. |
 | 0:20 | Step 1 | ADK workflow: draw the chain. Explain why `fetch_telemetry` is code and not an agent. Explain the scripted model: the ADK code is real without a key. |
 | 0:32 | Step 2 | ADK agent: show a tool docstring. If an attendee has a key, show the tool calls that Gemini chooses. |

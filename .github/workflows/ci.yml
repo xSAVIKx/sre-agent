@@ -107,6 +107,19 @@ jobs:
           grep -q "Identified Bottleneck" simulation.log
           grep -q "Incident Post-Mortem" simulation.log
 
+      # The "try it" commands of workshop/basics/. They run after the simulation, which
+      # writes the incident telemetry they read.
+      - name: Workshop basics scripts
+        shell: bash
+        run: |
+          uv run python workshop/basics/try_adk.py | tee adk.log
+          grep -q "The model asks for a tool: query_metrics" adk.log
+          uv run python workshop/basics/try_a2a.py --ui | tee a2a.log
+          grep -q "TASK_STATE_COMPLETED" a2a.log
+          grep -q "application/json+a2ui" a2a.log
+          uv run python workshop/basics/try_policy.py | tee policy.log
+          grep -Eq "run_command +⛔ deny" policy.log
+
   # The one-command installers (INSTALL.md), on a runner of each OS. They run in this
   # checkout, so they test the PR's code. uv is not preinstalled: the installer gets it,
   # as on a new laptop. Then the workshop commands must work on that OS.

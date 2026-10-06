@@ -3,6 +3,8 @@
 **Goal:** Make the chat show a red **SEV1** badge on the diagnosis, and make the **Diagnose**
 button of each incident work.
 
+**Builds on:** [A2UI basics](../../basics/a2ui.md): 3. Components, 4. Data model and binding, 5. Actions.
+
 ## The idea: agents send UI, not HTML
 
 The SRE agent sends Markdown for the model and **[A2UI](https://a2ui.org)** for people.
@@ -91,6 +93,13 @@ The Orchestrator sends a request to the SRE agent only when it is necessary.
 ## Stretch
 
 * Run `uv run workshop/check.py all`. All steps must be green ✅.
+* **Change the data, not the UI.** Open <http://localhost:8080/playground>, and select example 4
+  ([A2UI basics, 4](../../basics/a2ui.md#4-data-model-and-binding)):
+  1. Add a `Text` component bound to `/progress`, and add it to the column.
+  2. Add `updateDataModel` messages that set `/progress` to `"1/3"`, `"2/3"` and `"3/3"`.
+     Only the data changes: the components stay the same.
+  3. In `incident_list_surface` (`a2ui_surfaces.py`), add a line under the title that is bound
+     to `/updated`, and put the time of the scan into the data model.
 * Change the thresholds. Look at the change in the badge color.
 * Add a third custom component:
   1. Add a Pydantic model in `a2ui_surfaces.py`.

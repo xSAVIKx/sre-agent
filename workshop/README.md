@@ -52,6 +52,20 @@ uv run workshop/check.py 0         # checks your setup
 Optional: set `GEMINI_API_KEY` ([get a key](https://aistudio.google.com/apikey)):
 `export GEMINI_API_KEY=...` (macOS, Linux) or `$env:GEMINI_API_KEY = "..."` (PowerShell).
 
+## Learn the basics (25 minutes, before the workshop)
+
+The steps use four technologies. [`basics/`](basics/README.md) has one short page for each, with
+code from this repository and one command to try:
+
+| Page | Try it |
+|:--|:--|
+| [ADK](basics/adk.md): agents, tools, workflows | `uv run workshop/basics/try_adk.py` |
+| [A2A](basics/a2a.md): agent cards, skills, tasks | `uv run workshop/basics/try_a2a.py --ui` |
+| [Antigravity SDK](basics/antigravity.md): policies and hooks | `uv run workshop/basics/try_policy.py` |
+| [A2UI](basics/a2ui.md): surfaces, data, actions | `uv run workshop/chat.py`, then <http://localhost:8080/playground> |
+
+Each step starts with a **Builds on** line that links the basics it uses.
+
 ## Agenda
 
 | Time      | Step                                                           | File that you change                      |

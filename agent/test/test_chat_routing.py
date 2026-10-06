@@ -226,6 +226,13 @@ class TestChatRouting(unittest.TestCase):
                 self.assertEqual(self.client.post("/chat", json={"action": action}).status_code, 422)
         self.assertEqual(self.client.post("/chat", json={"prompt": " "}).status_code, 422)
 
+    def test_the_a2ui_playground_is_served(self) -> None:
+        page = self.client.get("/playground")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("/static/sre-a2ui.js", page.text)
+        examples = self.client.get("/static/playground-examples.json").json()
+        self.assertTrue(all(e["messages"][0]["createSurface"] for e in examples))
+
     def test_the_renderer_bundle_is_served(self) -> None:
         resp = self.client.get("/static/sre-a2ui.js")
         self.assertEqual(resp.status_code, 200)

@@ -3,6 +3,8 @@
 **Goal:** Make the SRE agent run its two ADK agents one after the other, with a code step
 between them.
 
+**Builds on:** [ADK basics](../../basics/adk.md): 4. Workflow, 5. Runner, session and events.
+
 ## The idea: an ADK workflow is a graph
 
 The SRE agent (`sre_agent/src/sre_agent/sre_workflow.py`) uses the
