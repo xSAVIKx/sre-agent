@@ -1,17 +1,18 @@
 --- a/sre_agent/src/sre_agent/a2ui_surfaces.py
 +++ b/sre_agent/src/sre_agent/a2ui_surfaces.py
-@@ -99,9 +99,7 @@
-     Returns:
-         "SEV1", "SEV2" or "SEV3".
-     """
--    # TODO(step-5): Return the first level in SEVERITY_THRESHOLDS whose threshold `contribution`
--    #   reaches. The thresholds go from the highest down.
--    return "SEV3"
-+    return next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
- 
- 
- def _messages(components: list[dict[str, Any]], data: dict[str, Any] | None = None) -> list[dict[str, Any]]:
-@@ -155,10 +153,10 @@
+@@ -141,10 +141,7 @@
+             "id": component_id,
+             "component": "Button",
+             "child": f"{component_id}-label",
+-            # TODO(step-5): The click must tell the agent which trace: add a "context" with
+-            #   {"traceId": trace_id} to the event. In a list row, trace_id is a data binding
+-            #   ({"path": "traceId"}): the browser puts in the trace ID of that row.
+-            "action": {"event": {"name": action}},
++            "action": {"event": {"name": action, "context": {"traceId": trace_id}}},
+         },
+         _text(f"{component_id}-label", label),
+     ]
+@@ -156,10 +153,10 @@
      A component is a JSON object: its ``id``, the catalog ``component`` it instantiates,
      and that component's properties - here `SeverityBadge.level` and `.contribution`.
      """

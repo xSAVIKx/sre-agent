@@ -1,28 +1,46 @@
 --- a/skills/sre_incident_solver/sre_workflow.py
 +++ b/skills/sre_incident_solver/sre_workflow.py
-@@ -105,10 +105,7 @@
-         "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
-         "in the telemetry and what to check; do not infer one from service names."
-     ),
--    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
--    #   on their type hints and docstrings. They are already imported at the top of this file:
--    #   query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem.
--    tools=[],
-+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-     model="gemini-3.8-flash",
- )
+@@ -70,14 +70,12 @@
  
+ trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
+ 
+-# TODO(step-1): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
+-#   - name: "log_correlator". The workflow and the logs use this name.
+-#   - model: MODEL. It is Gemini when GEMINI_API_KEY is set, and a scripted model if not.
+-#   - instruction: LOG_CORRELATOR_INSTRUCTION (above). It tells the model its job.
+-#   - tools: the four functions imported at the top of this file: query_metrics,
+-#     list_metric_descriptors, analyze_trace_cascade, generate_post_mortem. ADK reads their
+-#     type hints and docstrings, and tells the model how to call them.
+-log_correlator = AdkAgent(name="log_correlator", model=MODEL, instruction="Describe the trace.")
++log_correlator = AdkAgent(
++    name="log_correlator",
++    model=MODEL,
++    instruction=LOG_CORRELATOR_INSTRUCTION,
++    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
++)
+ 
+ 
+ @dataclass(frozen=True)
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -103,10 +103,7 @@
-         "the bottleneck span was slow or failed (e.g. no error message), say that the cause is not "
-         "in the telemetry and what to check; do not infer one from service names."
-     ),
--    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
--    #   on their type hints and docstrings. They are already imported at the top of this file:
--    #   query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem.
--    tools=[],
-+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-     model="gemini-3.8-flash",
- )
+@@ -68,14 +68,12 @@
  
+ trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
+ 
+-# TODO(step-1): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
+-#   - name: "log_correlator". The workflow and the logs use this name.
+-#   - model: MODEL. It is Gemini when GEMINI_API_KEY is set, and a scripted model if not.
+-#   - instruction: LOG_CORRELATOR_INSTRUCTION (above). It tells the model its job.
+-#   - tools: the four functions imported at the top of this file: query_metrics,
+-#     list_metric_descriptors, analyze_trace_cascade, generate_post_mortem. ADK reads their
+-#     type hints and docstrings, and tells the model how to call them.
+-log_correlator = AdkAgent(name="log_correlator", model=MODEL, instruction="Describe the trace.")
++log_correlator = AdkAgent(
++    name="log_correlator",
++    model=MODEL,
++    instruction=LOG_CORRELATOR_INSTRUCTION,
++    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
++)
+ 
+ 
+ @dataclass(frozen=True)
