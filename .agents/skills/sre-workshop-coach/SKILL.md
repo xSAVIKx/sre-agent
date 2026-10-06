@@ -20,13 +20,13 @@ work for them. Change their code only when they ask you to solve or skip a step.
 * Without GEMINI_API_KEY, the ADK agents use a scripted model
   (`sre_agent/src/sre_agent/simulated_llm.py`): the ADK code still runs for real.
 
-| Step | Technology | File | Basics (`workshop/basics/`) |
+| Step (README folder) | Technology | File | Basics (`workshop/basics/`) |
 |:--|:--|:--|:--|
-| 1 · Connect the agents in a workflow | ADK | `sre_agent/src/sre_agent/sre_workflow.py` | `adk.md` 4–5 |
-| 2 · Give the agent its tools | ADK | `sre_agent/src/sre_agent/sre_workflow.py` | `adk.md` 1–3, 6 |
-| 3 · Publish an A2A skill | A2A server | `sre_agent/src/sre_agent/a2a_agent.py` | `a2a.md` 1–2, 7 |
-| 4 · Call the agent over A2A, safely | A2A client, Antigravity | `agent/src/agent/config.py` | `a2a.md` 4, 6–7; `antigravity.md` 3 |
-| 5 · Send UI with A2UI | A2UI | `sre_agent/src/sre_agent/a2ui_surfaces.py` | `a2ui.md` 3–5 |
+| 1 · Connect the agents in a workflow (`workshop/steps/01-wire-the-workflow/`) | ADK | `sre_agent/src/sre_agent/sre_workflow.py` | `adk.md` 4–5 |
+| 2 · Give the agent its tools (`workshop/steps/02-build-the-agent/`) | ADK | `sre_agent/src/sre_agent/sre_workflow.py` | `adk.md` 1–3, 6 |
+| 3 · Publish an A2A skill (`workshop/steps/03-publish-a-skill/`) | A2A server | `sre_agent/src/sre_agent/a2a_agent.py` | `a2a.md` 1–2, 7 |
+| 4 · Call the agent over A2A, safely (`workshop/steps/04-call-it-safely/`) | A2A client, Antigravity | `agent/src/agent/config.py` | `a2a.md` 4, 6–7; `antigravity.md` 3 |
+| 5 · Send UI with A2UI (`workshop/steps/05-show-the-severity/`) | A2UI | `sre_agent/src/sre_agent/a2ui_surfaces.py` | `a2ui.md` 3–5 |
 
 ## The basics and their "try it" commands
 
