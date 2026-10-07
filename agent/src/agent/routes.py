@@ -411,7 +411,19 @@ async def get_chat_ui() -> HTMLResponse:
         raise HTTPException(status_code=500, detail=f"SRE Agent Chat UI Load Failure: {e!s}") from e
 
 
+@router.get("/playground", response_class=HTMLResponse, include_in_schema=False)
+async def get_a2ui_playground() -> FileResponse:
+    """A page to edit A2UI messages and see them rendered (workshop/basics/a2ui.md)."""
+    return FileResponse(os.path.join(os.path.dirname(__file__), "playground.html"), media_type="text/html")
+
+
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+
+
+@router.get("/static/playground-examples.json", include_in_schema=False)
+async def playground_examples() -> FileResponse:
+    """The example surfaces of the A2UI playground. A test validates them with a2ui-core."""
+    return FileResponse(os.path.join(STATIC_DIR, "playground-examples.json"), media_type="application/json")
 
 
 @router.get("/static/sre-a2ui.js", include_in_schema=False)

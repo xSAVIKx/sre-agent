@@ -46,7 +46,7 @@ To add a custom component:
 
 ### Rule: change the engine, not the skill mirror
 
-`skills/sre_incident_solver/` contains a copy of the SRE agent as an Antigravity Agent Skill. The
+`.agents/skills/sre_incident_solver/` contains a copy of the SRE agent as an Antigravity Agent Skill. The
 Antigravity CLI and the desktop app find it automatically. The running services import the
 `sre_agent` package.
 
@@ -156,7 +156,7 @@ The four services use one shared dependency image, `docker/base.Dockerfile`.
 Each package uses the `src/` + `test/` layout. When you run its tests from the workspace root, put
 its `src` directory on `PYTHONPATH`. The root suite `test/` contains a workspace-wide import smoke
 test. It also contains tests for `app/`, `inventory_agent/`, `sre_common/` and the
-`skills/sre_incident_solver/` mirror.
+`.agents/skills/sre_incident_solver/` mirror.
 
 ```bash
 PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test
@@ -186,14 +186,40 @@ uv run ruff format --check .   # drop --check to apply
 | Job | Checks |
 | :--- | :--- |
 | `ruff` | `ruff check` and `ruff format --check`. It also runs `workshop/build_steps.py` and fails when the workshop patches change. |
-| `tests` | The three test suites and the `simulate_incident.py` smoke test, on **Python 3.11 and 3.14**. |
+| `tests` | The three test suites, the `simulate_incident.py` smoke test and the `workshop/basics/` try-it scripts, on **Python 3.11 and 3.14**. |
 | `installer` | Runs `install.sh` (Linux, macOS) and `install.ps1` (Windows PowerShell 5.1) on a new runner, then `workshop/check.py all` and the simulation. Keep the installers' `UV_VERSION` equal to the CI `UV_VERSION`. |
 | `A2UI renderer bundle` | Rebuilds `agent/src/agent/static/sre-a2ui.js` and fails when the committed bundle is different. |
 | `docker images` | Runs `docker compose build` for the base image and all service images. |
 
+The `Docs` workflow (`.github/workflows/docs.yml`) builds the website in strict mode on each PR, and
+publishes it to GitHub Pages from `master`.
+
 Python 3.11 is the declared floor. Python 3.14 is the version in the Dockerfiles. Ruff runs one
 time only, because `target-version = "py311"` sets its rules for all interpreters. Dependabot keeps
 the declared floors and `uv.lock` current. See `.github/dependabot.yml`.
+
+---
+
+## 🎓 The workshop
+
+`workshop/` is a 90-minute workshop on the finished code. Its website is built from the same
+Markdown.
+
+* **The finished code is the only source.** `workshop/build_steps.py` has a solution/starter pair
+  for each `TODO(step-N)`. It generates `workshop/steps/0N-*/solution.patch` and (with
+  `--branch`) the local `workshop` branch and the tags `step-00` … `step-05`. Do not edit the
+  patches or the branch by hand.
+* **When you change code that a step covers**, update the `solution` (and `starter`) string in
+  `build_steps.py`. Then run `uv run python workshop/build_steps.py` and commit the patches. CI
+  fails when they are stale.
+* **Each step is independent:** its tests (`workshop/check.py`, `STEP_TESTS`) fail only because of
+  its own TODO. `uv run workshop/preflight.py` checks the full ladder at each tag, and what
+  attendees download from GitHub.
+* **Docs:** the step READMEs, `workshop/basics/`, `INSTALL.md` and `EXERCISES.md` are the website.
+  Check them with `uv run scripts/build_docs.py` (strict: a broken link fails).
+* **Agent skills** in `.agents/skills/`: `sre-agent-setup` (install), `sre-workshop-coach`
+  (attendees), `sre-workshop-facilitator` (prepare, publish, run, clean up), `sre-agent-deploy`
+  (Cloud Run). When you change a step, a command or a file name, update these skills too.
 
 ---
 

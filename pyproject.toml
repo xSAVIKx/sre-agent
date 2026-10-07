@@ -29,14 +29,7 @@ extend-exclude = [
     "mock_telemetry_data",
     "scratch_save_dir",
     "BLOGPOST.md",
-    "skills/sre_incident_solver/config.py",
-    "skills/sre_incident_solver/firestore_strategy.py",
-    "skills/sre_incident_solver/gcp_tools.py",
-    "skills/sre_incident_solver/incidents.py",
-    "skills/sre_incident_solver/inventory_client.py",
-    "skills/sre_incident_solver/itinerary.py",
-    "skills/sre_incident_solver/registry.py",
-    "skills/sre_incident_solver/sre_workflow.py",
+    ".agents/skills/sre_incident_solver/*.py",
 ]
 
 [tool.ruff.lint]
@@ -61,7 +54,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-# `skills/sre_incident_solver/` is a deliberate portable copy of the diagnostics
+# `.agents/skills/sre_incident_solver/` is a deliberate portable copy of the diagnostics
 # engine (see AGENTS.md); keeping it byte-comparable to the original matters more
 # than lint purity.
-"skills/sre_incident_solver/*" = ["E402", "F401"]
+".agents/skills/sre_incident_solver/*" = ["E402", "F401"]

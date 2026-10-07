@@ -17,7 +17,7 @@ class TestSkillMirror(unittest.TestCase):
 
     def test_skill_manifest_has_frontmatter(self) -> None:
         """Skill loaders read `name` and `description` from YAML frontmatter."""
-        text = (REPO_ROOT / "skills" / "sre_incident_solver" / "SKILL.md").read_text(encoding="utf-8")
+        text = (REPO_ROOT / ".agents" / "skills" / "sre_incident_solver" / "SKILL.md").read_text(encoding="utf-8")
         self.assertTrue(text.startswith("---\n"))
         frontmatter = text.split("---\n")[1]
         self.assertIn("name: sre_incident_solver", frontmatter)

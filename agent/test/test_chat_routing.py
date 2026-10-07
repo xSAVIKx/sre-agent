@@ -226,6 +226,13 @@ class TestChatRouting(unittest.TestCase):
                 self.assertEqual(self.client.post("/chat", json={"action": action}).status_code, 422)
         self.assertEqual(self.client.post("/chat", json={"prompt": " "}).status_code, 422)
 
+    def test_the_a2ui_playground_is_served(self) -> None:
+        page = self.client.get("/playground")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("/static/sre-a2ui.js", page.text)
+        examples = self.client.get("/static/playground-examples.json").json()
+        self.assertTrue(all(e["messages"][0]["createSurface"] for e in examples))
+
     def test_the_renderer_bundle_is_served(self) -> None:
         resp = self.client.get("/static/sre-a2ui.js")
         self.assertEqual(resp.status_code, 200)
@@ -264,7 +271,7 @@ class TestMockRoute(unittest.TestCase):
 
 
 class TestDiagnoseSreModeSelection(unittest.IsolatedAsyncioTestCase):
-    """In mock mode diagnose_sre only runs in-process when no sub-agent URL is set."""
+    """Every SRE call goes over A2A: to SRE_AGENT_URL, or on a laptop to a locally started SRE agent."""
 
     async def test_sre_agent_url_forces_a2a_even_in_mock_mode(self) -> None:
         call = mock.AsyncMock(return_value=mock.Mock(text="report"))
@@ -274,6 +281,17 @@ class TestDiagnoseSreModeSelection(unittest.IsolatedAsyncioTestCase):
         call.assert_awaited_once()
         self.assertEqual(call.await_args.args[0], "http://sre-agent:8080")
         self.assertEqual(call.await_args.args[2]["skill"], "diagnose_incident")
+
+    async def test_laptop_runs_start_the_sre_agent_locally(self) -> None:
+        call = mock.AsyncMock(return_value=mock.Mock(text="report"))
+        local = mock.Mock(return_value="http://127.0.0.1:9999")
+        with (
+            mock.patch.dict(os.environ, {"MOCK_GCP": "true", "SRE_AGENT_URL": ""}),
+            mock.patch.object(config, "call_agent", call),
+            mock.patch.object(config, "local_sre_agent_url", local),
+        ):
+            await config.diagnose_sre("diagnose")
+        self.assertEqual(call.await_args.args[0], "http://127.0.0.1:9999")
 
 
 if __name__ == "__main__":
@@ -316,7 +334,7 @@ class TestA2uiClient(unittest.IsolatedAsyncioTestCase):
             await config.diagnose_sre("diagnose")
         self.assertNotIn("a2uiClientCapabilities", call.await_args.args[2])
 
-    async def test_in_process_runs_build_the_same_surfaces(self) -> None:
+    async def test_laptop_runs_get_the_same_surfaces_over_a2a(self) -> None:
         import json
 
         from sre_agent import diagnosis

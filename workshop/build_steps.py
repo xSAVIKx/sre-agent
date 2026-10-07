@@ -57,89 +57,120 @@ class Step:
 STEPS: tuple[Step, ...] = (
     Step(
         1,
-        "01-find-the-bottleneck",
-        "Find the bottleneck",
+        "01-wire-the-workflow",
+        "Connect the agents in a workflow",
         (
             Edit(
-                "sre_agent/src/sre_agent/gcp_tools.py",
-                solution="""    # Calculate exclusive duration for all spans
-    exclusive_durations = {}
-    for s in spans:
-        span_id = s["spanId"]
-        child_ids = children_map[span_id]
-        covered_ms = _covered_ms(s, [span_map[cid] for cid in child_ids])
-        exclusive_durations[span_id] = max(0, inclusive_durations[span_id] - covered_ms)
-
-    # Find the bottleneck (the span with the highest exclusive duration)
-    bottleneck_span_id = max(exclusive_durations, key=exclusive_durations.get)
+                "sre_agent/src/sre_agent/sre_workflow.py",
+                solution="""        sre_diagnostics_workflow = AdkWorkflow(
+            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
+        )
 """,
-                starter="""    # TODO(step-1): Calculate the exclusive (self) duration of every span, then pick the bottleneck.
-    #   - A span's exclusive time is its inclusive time minus the time its children cover.
-    #     `children_map[span_id]` lists a span's child IDs, `span_map[child_id]` gives the child
-    #     span, and `_covered_ms(span, children)` returns the ms the children cover (overlaps
-    #     counted once). Never let it drop below 0.
-    #   - The bottleneck is the span with the largest exclusive duration.
-    exclusive_durations = {s["spanId"]: 0 for s in spans}
-    bottleneck_span_id = spans[0]["spanId"]
+                starter="""        # TODO(step-1): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
+        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
+        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
+        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.
+        sre_diagnostics_workflow = AdkWorkflow(name="sre_diagnostics_workflow", edges=[(START, trace_analyzer)])
 """,
             ),
         ),
     ),
     Step(
         2,
-        "02-feed-the-metrics",
-        "Feed the metrics",
+        "02-build-the-agent",
+        "Give the agent its tools",
         (
             Edit(
-                "app/main.py",
-                solution="""    # During the incident the app is idle-waiting on the database, so CPU stays low
-    # while the connection pool sits at its limit.
-    cpu = [0.18, 0.21, 0.24] if trigger_error else [0.18, 0.19, 0.17]
-    connections = [62, 97, DB_MAX_CONNECTIONS] if trigger_error else [12, 14, 13]
-    return [
-        {
-            "metric": {"type": CPU_METRIC, "labels": {"service_name": "sre-chaos-monkey"}},
-            "points": [{"value": v} for v in cpu],
-        },
-        {
-            "metric": {"type": DB_CONNECTIONS_METRIC, "labels": {"database_id": "db-primary"}},
-            "points": [{"value": v} for v in connections],
-        },
-    ]
+                "sre_agent/src/sre_agent/sre_workflow.py",
+                solution="""log_correlator = AdkAgent(
+    name="log_correlator",
+    model=MODEL,
+    instruction=LOG_CORRELATOR_INSTRUCTION,
+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
+)
 """,
-                starter="""    # TODO(step-2): Return two time series so the SRE agent's `query_metrics` tool finds data.
-    #   Each one looks like:
-    #     {"metric": {"type": <metric type>, "labels": {<label>: <value>}}, "points": [{"value": v}, ...]}
-    #   1. CPU_METRIC with label service_name="sre-chaos-monkey": readings are 0-1 fractions.
-    #   2. DB_CONNECTIONS_METRIC with label database_id="db-primary": when `trigger_error` is
-    #      True the last reading must be DB_MAX_CONNECTIONS (the pool is exhausted).
-    return []
+                starter="""# TODO(step-2): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
+#   - name: "log_correlator". The workflow and the logs use this name.
+#   - model: MODEL. It is Gemini when GEMINI_API_KEY is set, and a scripted model if not.
+#   - instruction: LOG_CORRELATOR_INSTRUCTION (above). It tells the model its job.
+#   - tools: the four functions imported at the top of this file: query_metrics,
+#     list_metric_descriptors, analyze_trace_cascade, generate_post_mortem. ADK reads their
+#     type hints and docstrings, and tells the model how to call them.
+log_correlator = AdkAgent(name="log_correlator", model=MODEL, instruction="Describe the trace.")
 """,
             ),
         ),
     ),
     Step(
         3,
-        "03-give-the-agent-tools",
-        "Give the agent its tools",
+        "03-publish-a-skill",
+        "Publish an A2A skill",
         (
             Edit(
-                "sre_agent/src/sre_agent/sre_workflow.py",
-                solution="""    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
+                "sre_agent/src/sre_agent/a2a_agent.py",
+                solution="""    if skill == WRITE_POST_MORTEM:
+        return run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id, ui=ui)
 """,
-                starter="""    # TODO(step-3): Give the LogCorrelator its toolbelt. Gemini decides when to call them, based
-    #   on their type hints and docstrings. They are already imported at the top of this file:
-    #   query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem.
-    tools=[],
+                starter="""    # TODO(step-3): Run the WRITE_POST_MORTEM skill: return
+    #   run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id, ui=ui).
+""",
+            ),
+            Edit(
+                "sre_agent/src/sre_agent/a2a_agent.py",
+                solution="""            AgentSkill(
+                id=WRITE_POST_MORTEM,
+                name="Write a post-mortem",
+                description=(
+                    "Writes the incident post-mortem of one trace from its spans and logs: overview, timeline, "
+                    "root cause and next steps. With a Gemini key, adds AI-generated analyst notes. Request "
+                    'metadata: skill="write_post_mortem", project_id, trace_id (optional: defaults to the most '
+                    "important recent incident)."
+                ),
+                tags=["sre", "post-mortem"],
+                examples=["Write the post-mortem for trace 1c65bf87e4be434ea6d6d7edc1ef8c97."],
+                output_modes=["text/markdown", "application/json"],
+            ),
+""",
+                starter="""            # TODO(step-3): Publish the post-mortem skill: an AgentSkill with id=WRITE_POST_MORTEM,
+            #   a name, a description (what it does, and its request metadata: skill, project_id,
+            #   trace_id), tags, examples and output_modes. Use the two skills above as examples.
 """,
             ),
         ),
     ),
     Step(
         4,
-        "04-lock-it-down",
-        "Lock the Orchestrator down",
+        "04-call-it-safely",
+        "Call the agent over A2A, safely",
         (
+            Edit(
+                "agent/src/agent/config.py",
+                solution="""    if sink is not None:  # a chat: its UI renders A2UI
+        metadata["a2uiClientCapabilities"] = A2UI_CLIENT_CAPABILITIES
+    try:
+        result = await call_agent(
+            base_url,
+            prompt,
+            metadata,
+            context_id=sink.context_id if sink else "",
+            on_progress=_emit_progress,
+            extensions=[A2UI_EXTENSION_URI] if sink is not None else None,
+        )
+        report = result.text
+        if sink is not None:
+            sink.a2ui = result.a2ui
+""",
+                starter="""    try:
+        # TODO(step-4): Send the request to the SRE agent over A2A, and keep its answer:
+        #   1. For a chat (`sink is not None`), add A2UI_CLIENT_CAPABILITIES to the metadata, under
+        #      the key "a2uiClientCapabilities". Then the SRE agent also sends A2UI surfaces.
+        #   2. result = await call_agent(base_url, prompt, metadata, context_id=..., on_progress=...,
+        #      extensions=...). Use sink.context_id (or "" without a sink), _emit_progress, and
+        #      [A2UI_EXTENSION_URI] for a chat (or None).
+        #   3. report = result.text. For a chat, also keep the surface: sink.a2ui = result.a2ui.
+        raise NotImplementedError("TODO(step-4): call the SRE agent over A2A")
+""",
+            ),
             Edit(
                 "agent/src/agent/config.py",
                 solution="""    return [deny("*"), allow("list_incidents"), allow("diagnose_sre"), allow("write_post_mortem")]
@@ -154,15 +185,16 @@ STEPS: tuple[Step, ...] = (
     Step(
         5,
         "05-show-the-severity",
-        "Show the severity",
+        "Send UI with A2UI",
         (
             Edit(
                 "sre_agent/src/sre_agent/a2ui_surfaces.py",
-                solution="""    return next(name for threshold, name in SEVERITY_THRESHOLDS if contribution >= threshold)
+                solution="""            "action": {"event": {"name": action, "context": {"traceId": trace_id}}},
 """,
-                starter="""    # TODO(step-5): Return the first level in SEVERITY_THRESHOLDS whose threshold `contribution`
-    #   reaches. The thresholds go from the highest down.
-    return "SEV3"
+                starter="""            # TODO(step-5): The click must tell the agent which trace: add a "context" with
+            #   {"traceId": trace_id} to the event. In a list row, trace_id is a data binding
+            #   ({"path": "traceId"}): the browser puts in the trace ID of that row.
+            "action": {"event": {"name": action}},
 """,
             ),
             Edit(
@@ -217,7 +249,7 @@ def _state(solved_through: int, head_files: dict[str, str]) -> dict[str, str]:
             mirrored = sync_skill.HEADER.format(name=name) + sync_skill._ABSOLUTE_IMPORT.sub(
                 r"\1from .\2 import", content
             )
-            files[f"skills/sre_incident_solver/{name}"] = mirrored
+            files[f".agents/skills/sre_incident_solver/{name}"] = mirrored
     return files
 
 
@@ -235,7 +267,7 @@ def _patch(before: dict[str, str], after: dict[str, str]) -> str:
 
 def _head_files() -> dict[str, str]:
     paths = {edit.path for step in STEPS for edit in step.edits}
-    paths |= {f"skills/sre_incident_solver/{p.removeprefix('sre_agent/src/sre_agent/')}" for p in paths}
+    paths |= {f".agents/skills/sre_incident_solver/{p.removeprefix('sre_agent/src/sre_agent/')}" for p in paths}
     files = {}
     for path in paths:
         try:

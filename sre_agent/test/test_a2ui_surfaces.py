@@ -6,7 +6,9 @@ types, dangling child references and orphaned components - so a surface that pas
 here is one the browser's renderer will accept.
 """
 
+import json
 import unittest
+from pathlib import Path
 
 from a2ui.core.processing.message_processor import MessageProcessor, MessageProcessorOptions
 from a2ui.core.validation import STRICT_VALIDATION
@@ -61,6 +63,13 @@ class TestSurfacesAreValidA2ui(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(messages[0]["createSurface"]["catalogId"], a2ui_surfaces.SRE_CATALOG_ID)
                 _render(messages)  # raises on any invalid message
+
+    def test_the_playground_examples_are_valid(self) -> None:
+        """The hand-written examples of the A2UI playground (workshop/basics/a2ui.md)."""
+        path = Path(__file__).resolve().parents[2] / "agent/src/agent/static/playground-examples.json"
+        for example in json.loads(path.read_text(encoding="utf-8")):
+            with self.subTest(example["title"]):
+                _render(example["messages"])
 
     def test_each_result_gets_its_own_surface(self) -> None:
         first, second = (a2ui_surfaces.incident_list_surface("demo", []) for _ in range(2))

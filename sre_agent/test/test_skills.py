@@ -90,22 +90,15 @@ class TestPostMortem(unittest.IsolatedAsyncioTestCase):
 
 class TestDiagnosisInputs(unittest.IsolatedAsyncioTestCase):
     async def test_requested_trace_is_diagnosed(self) -> None:
-        simulated = mock.AsyncMock(return_value="report")
-        with (
-            mock.patch.object(sre_workflow, "_run_simulated_diagnostics", simulated),
-            mock.patch.dict("os.environ", {"GEMINI_API_KEY": ""}),
-        ):
+        adk = mock.AsyncMock(return_value=sre_workflow.Diagnosis("report", "slow"))
+        with mock.patch.object(sre_workflow, "_run_adk_diagnostics", adk):
             await sre_workflow.run_sre_diagnostics(json.dumps(TRACES), "demo", trace_id="slow")
-        incident = simulated.await_args.args[0]
+        incident = adk.await_args.args[2]
         self.assertEqual((incident["traceId"], incident["durationMs"]), ("slow", 9000))
 
     async def test_question_and_candidates_reach_the_adk_workflow(self) -> None:
         adk = mock.AsyncMock(return_value=sre_workflow.Diagnosis("report", "err"))
-        with (
-            mock.patch.object(sre_workflow, "_run_adk_diagnostics", adk),
-            mock.patch.object(sre_workflow, "HAS_ADK", True),
-            mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k"}),
-        ):
+        with mock.patch.object(sre_workflow, "_run_adk_diagnostics", adk):
             await sre_workflow.run_sre_diagnostics(json.dumps(TRACES), "demo", question="why is it slow?")
         candidates, project, incident, question = adk.await_args.args
         self.assertEqual([c["traceId"] for c in json.loads(candidates)], ["err", "slow"])

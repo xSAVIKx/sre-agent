@@ -50,13 +50,18 @@ needs no GCP account and no API key.
    problem. Do not solve the workshop steps for the user:
    * Before step 4, the Orchestrator's safety policy blocks the tool call. Use
      `uv run simulate_incident.py --engine-only` to check the setup.
-   * Before step 1, the bottleneck is the wrong span (`/api/gateway`, 0.0 %).
+   * Before step 1, the report has no Root Cause Analysis section: the workflow stops after the
+     TraceAnalyzer.
 
 7. **Explain the result** in 3 to 5 sentences: which span is the bottleneck, its share of the
    request time, and the root cause from the post-mortem.
 
 8. **Offer the web chat:** `uv run workshop/chat.py`, then open <http://localhost:8080/chat>.
    It runs until the user presses Ctrl+C, so start it only when the user asks.
+
+9. **For the workshop:** suggest the basics (`workshop/basics/README.md`, about 25 minutes, also
+   on the website <https://xsavikx.github.io/sre-agent/>). For
+   questions about the steps or the basics, use the sre-workshop-coach skill.
 
 ## Problems and fixes
 

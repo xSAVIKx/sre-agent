@@ -1,7 +1,7 @@
 """Import smoke test for every module in the workspace.
 
 `agent/` and `sre_agent/` have unit tests. `app/`, `inventory_agent/`,
-`sre_common/` and the `skills/sre_incident_solver/` mirror do not, so nothing in
+`sre_common/` and the `.agents/skills/sre_incident_solver/` mirror do not, so nothing in
 CI used to import them at all - which is how
 `inventory_agent/discovery.py` came to annotate two functions with `Any` without
 importing it. That is a hard `NameError` on Python 3.11:
@@ -52,7 +52,7 @@ PACKAGES: dict[str, tuple[str, ...]] = {
     # AGENTS.md calls this a portable copy of the diagnostics engine that has to
     # keep working, and it is the one tree with no tests of its own. Its three
     # modules import cleanly today; this keeps them that way.
-    "skills": (
+    ".agents/skills": (
         "sre_incident_solver.config",
         "sre_incident_solver.firestore_strategy",
         "sre_incident_solver.gcp_tools",

@@ -1,6 +1,6 @@
 """Regenerates the portable Antigravity skill from the `sre_agent` package.
 
-`skills/sre_incident_solver/` is a mirror of the diagnostics engine that the
+`.agents/skills/sre_incident_solver/` is a mirror of the diagnostics engine that the
 Antigravity CLI and desktop app can load without the rest of the workspace. It
 used to be maintained by hand and drifted far behind the engine. This script
 copies the engine modules into the skill, rewriting `sre_agent.` absolute
@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCE_DIR = REPO_ROOT / "sre_agent" / "src" / "sre_agent"
-SKILL_DIR = REPO_ROOT / "skills" / "sre_incident_solver"
+SKILL_DIR = REPO_ROOT / ".agents" / "skills" / "sre_incident_solver"
 
 # The engine modules the workflow needs. The service-only modules (main.py,
 # routes.py) are deliberately left out: the skill has no HTTP server.
@@ -30,6 +30,7 @@ MODULES = (
     "inventory_client.py",
     "itinerary.py",
     "registry.py",
+    "simulated_llm.py",
     "sre_workflow.py",
 )
 

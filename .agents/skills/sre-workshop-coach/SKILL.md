@@ -1,6 +1,6 @@
 ---
 name: sre-workshop-coach
-description: Coaches a participant through the SRE agent workshop in this repository. It checks their progress, explains the current step, gives hints one level at a time, reviews their attempt, and lets them skip or jump to a step. Use when the user asks about the workshop, their progress or the next step, says they are stuck, asks for a hint or the solution, or wants to skip, jump or start again. For installation problems, use the sre-agent-setup skill.
+description: Coaches a participant through the SRE agent workshop in this repository. It teaches the basics of ADK, A2A, A2UI and the Antigravity SDK, checks their progress, explains the current step, gives hints one level at a time, reviews their attempt, and lets them skip or jump to a step. Use when the user asks about the workshop, their progress or the next step, asks what ADK, A2A, A2UI or an Antigravity policy is, says they are stuck, asks for a hint or the solution, or wants to skip, jump or start again. For installation problems, use the sre-agent-setup skill.
 ---
 
 # Coach the SRE agent workshop
@@ -14,7 +14,34 @@ work for them. Change their code only when they ask you to solve or skip a step.
   tests. `step-0N` tags have steps 1 to N solved. `step-00` is the start.
 * The participant works on their own branch (usually `my-work`).
 * The tests of a step pass when the step is solved. Before step 4, the Orchestrator blocks all
-  tool calls. Before step 1, the bottleneck is the wrong span. These are not setup problems.
+  tool calls. Before step 1, the report has no Root Cause Analysis. These are not setup problems.
+* Before step 4, the chat and `simulate_incident.py` (without `--engine-only`) also show
+  `Error: Failed to contact SRE Sub-Agent: TODO(step-4)`. This is expected.
+* Without GEMINI_API_KEY, the ADK agents use a scripted model
+  (`sre_agent/src/sre_agent/simulated_llm.py`): the ADK code still runs for real.
+
+| Step (README folder) | Technology | File | Basics (`workshop/basics/`) |
+|:--|:--|:--|:--|
+| 1 · Connect the agents in a workflow (`workshop/steps/01-wire-the-workflow/`) | ADK | `sre_agent/src/sre_agent/sre_workflow.py` | `adk.md` 4–5 |
+| 2 · Give the agent its tools (`workshop/steps/02-build-the-agent/`) | ADK | `sre_agent/src/sre_agent/sre_workflow.py` | `adk.md` 1–3, 6 |
+| 3 · Publish an A2A skill (`workshop/steps/03-publish-a-skill/`) | A2A server | `sre_agent/src/sre_agent/a2a_agent.py` | `a2a.md` 1–2, 7 |
+| 4 · Call the agent over A2A, safely (`workshop/steps/04-call-it-safely/`) | A2A client, Antigravity | `agent/src/agent/config.py` | `a2a.md` 4, 6–7; `antigravity.md` 3 |
+| 5 · Send UI with A2UI (`workshop/steps/05-show-the-severity/`) | A2UI | `sre_agent/src/sre_agent/a2ui_surfaces.py` | `a2ui.md` 3–5 |
+
+## The basics and their "try it" commands
+
+`workshop/basics/` has one page for each technology, with its key elements. Use these pages
+when the participant asks what a technology is, and for hint level 1. Each page has a command
+that shows the technology at work, with no code to write:
+
+| Technology | Page | Try it |
+|:--|:--|:--|
+| ADK | `workshop/basics/adk.md` | `uv run workshop/basics/try_adk.py`: the events of one agent run (tool calls, tool results, answer, state) |
+| A2A | `workshop/basics/a2a.md` | `uv run workshop/basics/try_a2a.py --ui`: the agent card, the raw JSON-RPC request, the streamed task |
+| Antigravity SDK | `workshop/basics/antigravity.md` | `uv run workshop/basics/try_policy.py`: the policy decision for each tool |
+| A2UI | `workshop/basics/a2ui.md` | `uv run workshop/chat.py`, then <http://localhost:8080/playground>: edit surfaces and click buttons |
+
+`workshop/basics/README.md` has the big picture and one click traced through all four.
 
 ## The command for all actions
 
@@ -40,14 +67,29 @@ Use `uv run workshop/step.py`. It works on macOS, Linux and Windows.
 ### "What do I do next?"
 
 Run `task N` for the next step. Explain the task in your own words in 3 to 5 sentences: the idea
-(from the README section "The idea"), the function to change and the expected result. Tell them
-to start, and to ask you when they want a hint.
+(from the README section "The idea"), the function to change and the expected result. Name the
+basics that the step builds on (its **Builds on** line). Tell them to start, and to ask you when
+they want a hint.
+
+### "What is ADK / A2A / A2UI / a policy?" or "Teach me …"
+
+1. Read the page in `workshop/basics/`. Explain the key elements in your own words, with the
+   example from this repository that the page uses. Keep it short: 3 to 6 sentences.
+2. Run its "try it" command (start the chat only when they ask), and explain the output.
+3. Name the workshop step that uses it.
+
+### "I finished all steps" or "I want more"
+
+Offer the **Stretch** section of the step README: step 2 (ADK session state with `output_key`),
+step 4 (`ask_user` for a new tool), step 5 (`updateDataModel` in the playground). Then
+`EXERCISES.md`.
 
 ### "I am stuck" or "give me a hint"
 
 Give one hint level at a time. Go to the next level only when they ask again.
 
-1. **Concept.** Explain the idea of the step with a small example. Do not mention code.
+1. **Concept.** Explain the idea of the step with a small example from its basics page. Do not
+   mention their code. Suggest the "try it" command of that page.
 2. **Where and what.** Name the file and the function (from `task N`), and what the test expects
    (from `hint N`).
 3. **Approach.** Describe the algorithm in steps, or give pseudo-code. Do not give the final code.
@@ -80,5 +122,5 @@ Use the sre-agent-setup skill.
   skip that step. Use `solve` or `goto` for this. Do not write the solution yourself.
 * Do not discard their work: do not run `git reset --hard`, `git checkout -- <file>`,
   `git stash drop`, `git clean` or force options.
-* Do not edit `skills/sre_incident_solver/`. It is generated.
+* Do not edit `.agents/skills/sre_incident_solver/`. It is generated.
 * Use short, plain sentences. Give one hint at a time.

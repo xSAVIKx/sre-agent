@@ -1,7 +1,9 @@
-# Step 5 · Show the severity (14 min)
+# Step 5 · Send UI with A2UI (12 min)
 
-**Goal:** Make the chat UI show a red **SEV1** badge at the top of the diagnosis and the
-post-mortem.
+**Goal:** Make the chat show a red **SEV1** badge on the diagnosis, and make the **Diagnose**
+button of each incident work.
+
+**Builds on:** [A2UI basics](../../basics/a2ui.md): 3. Components, 4. Data model and binding, 5. Actions.
 
 ## The idea: agents send UI, not HTML
 
@@ -27,16 +29,16 @@ sends HTML or code. The browser decides how each component looks:
 | How the browser shows a surface | The browser uses `@a2ui/lit` (`agent/web/src/sre-a2ui.js`, prebuilt into `agent/src/agent/static/sre-a2ui.js`). |
 | The catalog | The SRE catalog is the A2UI basic catalog (Card, Column, List, Tabs, Text, Button…) plus two custom components: `SeverityBadge` and `Download`. Each custom component has a schema on the two sides: a Pydantic model in Python and a Zod schema in the browser. |
 
-The severity comes from the share of the request time that one span owns. This span is the
-bottleneck from step 1:
+A surface can also send events back. A `Button` has an **action**. When the user clicks it, the
+browser sends the event name and its **context** to the agent. The Orchestrator changes
+`diagnose_incident` with `{"traceId": ...}` into the next chat turn, "Diagnose trace ….".
 
-| Bottleneck share | Level |
-|:-----------------|:------|
-| ≥ 90 %           | SEV1  |
-| ≥ 50 %           | SEV2  |
-| otherwise        | SEV3  |
+In the incident list, all rows use one template. The button's context is a **data binding**,
+`{"path": "traceId"}`: the browser puts in the trace ID of the row that the user clicked.
 
-`SEVERITY_THRESHOLDS` already contains this table.
+The severity comes from the share of the request time that the bottleneck span owns.
+`classify_severity` changes the share into a level: SEV1 at 90 % or more, SEV2 at 50 % or more,
+else SEV3.
 
 ## Your task
 
@@ -46,9 +48,9 @@ bottleneck from step 1:
    git grep -n "TODO(step-5)"
    ```
 
-2. In `classify_severity(contribution)`, return the level for a bottleneck share.
-3. In `_badge(bottleneck_share)`, return the `SeverityBadge` component.
-4. In `_badge(bottleneck_share)`, return `[]` when there is no bottleneck.
+2. In `_badge(bottleneck_share)`, return `[]` when there is no bottleneck. Else, return one
+   `SeverityBadge` component with its `level` and `contribution`.
+3. In `_button(...)`, add the trace to the event: `"context": {"traceId": trace_id}`.
 
 The diagnosis card and the post-mortem card put the return value of `_badge` first.
 
@@ -59,11 +61,11 @@ The diagnosis card and the post-mortem card put the return value of `_badge` fir
    ```bash
    uv run workshop/check.py 5
 
-   uv run simulate_incident.py                                 # fresh incident telemetry
+   uv run simulate_incident.py --engine-only                   # fresh incident telemetry
    uv run workshop/chat.py                                     # the web chat
    ```
 
-2. Open <http://localhost:8080/chat>.
+2. Open <http://localhost:8080/chat>. (Step 4 must be solved: the chat calls the SRE agent.)
 3. Ask **"What are the latest failures?"**. You see an **incident list** surface.
 4. Click **Diagnose** on a row. You see a diagnosis card.
 5. Make sure that the diagnosis card shows the red `SEV1 · bottleneck owns 99.3% of the request`
@@ -91,6 +93,13 @@ The Orchestrator sends a request to the SRE agent only when it is necessary.
 ## Stretch
 
 * Run `uv run workshop/check.py all`. All steps must be green ✅.
+* **Change the data, not the UI.** Open <http://localhost:8080/playground>, and select example 4
+  ([A2UI basics, 4](../../basics/a2ui.md#4-data-model-and-binding)):
+  1. Add a `Text` component bound to `/progress`, and add it to the column.
+  2. Add `updateDataModel` messages that set `/progress` to `"1/3"`, `"2/3"` and `"3/3"`.
+     Only the data changes: the components stay the same.
+  3. In `incident_list_surface` (`a2ui_surfaces.py`), add a line under the title that is bound
+     to `/updated`, and put the time of the scan into the data model.
 * Change the thresholds. Look at the change in the badge color.
 * Add a third custom component:
   1. Add a Pydantic model in `a2ui_surfaces.py`.

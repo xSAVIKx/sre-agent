@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Edit A2UI v0.9 messages and see how the chat renders them.">
+    <title>A2UI Playground</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧩</text></svg>">
+    <!-- The same A2UI renderer and SRE catalog as the chat (/chat). -->
+    <script type="module" src="/static/sre-a2ui.js"></script>
+    <style>
+        :root {
+            --bg: #0b0f19;
+            --panel: #111827;
+            --border: rgba(255, 255, 255, 0.12);
+            --text: #f3f4f6;
+            --muted: #9ca3af;
+            --primary: #818cf8;
+            --primary-fill: #4f46e5;
+            --danger: #f87171;
+            --warning: #f59e0b;
+            --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+        header, main { max-width: 1200px; margin: 0 auto; padding: 16px; }
+        header h1 { margin: 0 0 4px; font-size: 1.4rem; }
+        header p { margin: 0; color: var(--muted); }
+        a { color: var(--primary); }
+        main { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+        section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; min-width: 0; }
+        h2 { margin: 0 0 8px; font-size: 1rem; }
+        label { display: block; color: var(--muted); font-size: 0.9rem; margin-bottom: 4px; }
+        select, textarea, button { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; }
+        select { width: 100%; padding: 8px; margin-bottom: 8px; }
+        textarea { width: 100%; min-height: 420px; padding: 8px; font: 13px/1.4 var(--mono); resize: vertical; }
+        .controls { display: flex; gap: 8px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
+        .controls button { background: var(--primary-fill); border: 0; color: #fff; padding: 8px 16px; cursor: pointer; }
+        .hint { color: var(--muted); font-size: 0.85rem; }
+        #explain { color: var(--muted); margin: 0 0 8px; }
+        #error { color: var(--danger); font-family: var(--mono); font-size: 13px; white-space: pre-wrap; }
+        #log { font: 12px/1.4 var(--mono); white-space: pre-wrap; max-height: 220px; overflow: auto; margin: 0; }
+        button:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        /* The chat's theme for the A2UI components (see index.html). */
+        .sre-surface {
+            color-scheme: dark;
+            --a2ui-color-background: var(--bg);
+            --a2ui-color-on-background: var(--text);
+            --a2ui-color-surface: rgba(255, 255, 255, 0.03);
+            --a2ui-color-on-surface: var(--text);
+            --a2ui-color-primary: #6366f1;
+            --a2ui-color-on-primary: #fff;
+            --a2ui-color-secondary: rgba(255, 255, 255, 0.06);
+            --a2ui-color-on-secondary: var(--text);
+            --a2ui-color-border: var(--border);
+            --a2ui-border-radius: 10px;
+            --a2ui-font-size: 15px;
+            --sre-sev1: #ef4444;
+            --sre-sev2: var(--warning);
+            --sre-sev3: var(--primary);
+            --sre-focus: var(--primary);
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>🧩 A2UI Playground</h1>
+    <p>An agent sends UI as A2UI messages. Change the messages and see how the chat renders them.
+        Read <a href="https://a2ui.org">a2ui.org</a> and <code>workshop/basics/a2ui.md</code>.</p>
+</header>
+<main>
+    <section aria-labelledby="messages-title">
+        <h2 id="messages-title">Messages from the agent</h2>
+        <label for="example">Example</label>
+        <select id="example"></select>
+        <p id="explain"></p>
+        <label for="messages">A2UI v0.9 messages (a JSON array)</label>
+        <textarea id="messages" spellcheck="false"></textarea>
+        <div class="controls">
+            <button id="render" type="button">Render</button>
+            <span class="hint">or press Ctrl+Enter</span>
+        </div>
+        <div id="error" role="alert"></div>
+    </section>
+    <section aria-labelledby="result-title">
+        <h2 id="result-title">What the user sees</h2>
+        <div id="surface" class="sre-surface"></div>
+        <h2>Actions sent to the agent</h2>
+        <pre id="log" aria-live="polite">Click a button in the surface.</pre>
+    </section>
+</main>
+<script>
+    const select = document.getElementById('example');
+    const editor = document.getElementById('messages');
+    const explain = document.getElementById('explain');
+    const errorBox = document.getElementById('error');
+    const log = document.getElementById('log');
+    let examples = [];
+
+    function render() {
+        errorBox.textContent = '';
+        const target = document.getElementById('surface');
+        target.replaceChildren();
+        let messages;
+        try {
+            messages = JSON.parse(editor.value);
+        } catch (e) {
+            errorBox.textContent = `The JSON is not valid: ${e.message}`;
+            return;
+        }
+        // The renderer skips a component that is not in the catalog, with only a console warning.
+        // Show those warnings here, so the mistake is visible.
+        const warnings = [];
+        const warn = console.warn;
+        console.warn = (...args) => {
+            warnings.push(args.join(' '));
+            warn(...args);
+        };
+        try {
+            window.SreA2ui.renderSurface(target, messages, action => {
+                log.textContent = JSON.stringify(action, null, 2);
+            });
+        } catch (e) {
+            // The renderer validates each component against the catalog schema.
+            errorBox.textContent = `The renderer rejected the messages: ${e.message}`;
+        }
+        setTimeout(() => {  // the components render after this function returns
+            console.warn = warn;
+            if (warnings.length) errorBox.textContent += warnings.join('\n');
+        }, 500);
+    }
+
+    function show(index) {
+        const example = examples[index];
+        explain.textContent = example.explain;
+        editor.value = JSON.stringify(example.messages, null, 2);
+        log.textContent = 'Click a button in the surface.';
+        render();
+    }
+
+    select.addEventListener('change', () => show(select.selectedIndex));
+    document.getElementById('render').addEventListener('click', render);
+    editor.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) render();
+    });
+
+    Promise.all([
+        fetch('/static/playground-examples.json').then(r => r.json()),
+        customElements.whenDefined('sre-surface-host'),
+    ]).then(([loaded]) => {
+        examples = loaded;
+        for (const example of examples) select.add(new Option(example.title));
+        show(0);
+    });
+</script>
+</body>
+</html>

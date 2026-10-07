@@ -23,6 +23,8 @@ from the web chat. The full stack runs locally without GCP credentials, because 
 mode replaces the Google Cloud APIs.
 
 > **📦 Source code:** [`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)
+>
+> **🎓 Workshop website:** [`xsavikx.github.io/sre-agent`](https://xsavikx.github.io/sre-agent/): install, basics and step-by-step guide.
 
 **Google Cloud credits are provided for this project.**
 
@@ -180,7 +182,7 @@ flowchart LR
 | [`CODELAB.md`](CODELAB.md) | A step-by-step tutorial that builds the agent from the start. |
 | [`BLOGPOST.md`](BLOGPOST.md) | The architecture and the design decisions. |
 | [`AGENTS.md`](AGENTS.md) | Rules for AI agents and human contributors. |
-| [`workshop/`](workshop/README.md) | A 90-minute workshop. Each step has a tag and a test check. |
+| [`workshop/`](workshop/README.md) | A 90-minute workshop. Each step has a tag and a test check. Also on the [website](https://xsavikx.github.io/sre-agent/). |
 | [`EXERCISES.md`](EXERCISES.md) | Follow-up exercises to extend the project. |
 
 ---
@@ -210,7 +212,8 @@ The simulation does these steps:
 1. It deletes the telemetry from earlier runs. To keep it, add `--keep-data`.
 2. It calls the gateway of the target app with an error flag. This makes a synthetic database-timeout incident.
 3. It writes mock traces and logs to `mock_telemetry_data/` (gitignored).
-4. It starts the Orchestrator in mock mode. The Orchestrator calls `diagnose_sre`, which runs the workflow in the same process.
+4. It starts the Orchestrator in mock mode. The Orchestrator starts the SRE agent on a local port
+   and calls its `diagnose_incident` skill over A2A.
 5. It prints the Orchestrator reply and the full diagnosis. The diagnosis includes the
    **`/api/database` 99.3% bottleneck table** and the **`# 🚨 Incident Post-Mortem`**.
 
@@ -231,8 +234,8 @@ Inventory agent, the Firestore emulator and the target app.
    ```
 3. Open `http://localhost:8080/chat` and ask: "Diagnose the recent latency spikes".
 
-Without `GEMINI_API_KEY`, the Orchestrator and the SRE agent use deterministic simulation code.
-With `GEMINI_API_KEY`, they use Gemini. In both cases, the chat goes through the Orchestrator
+Without `GEMINI_API_KEY`, the Orchestrator uses simulation code, and the ADK agents of the SRE agent
+use a scripted model (`simulated_llm.py`). With `GEMINI_API_KEY`, they use Gemini. In both cases, the chat goes through the Orchestrator
 policy and calls the SRE agent over A2A.
 
 ---
@@ -326,12 +329,12 @@ read-only SRE agent.
 
 ### 2. The Antigravity CLI (`agy`)
 Use the CLI to work with the workspace from a terminal. The CLI finds the skill in
-[`skills/sre_incident_solver/`](skills/sre_incident_solver). To run the full diagnosis loop, use the
+[`.agents/skills/sre_incident_solver/`](.agents/skills/sre_incident_solver). To run the full diagnosis loop, use the
 local simulation (`uv run simulate_incident.py`).
 
 ### 3. Antigravity 2.0 (Visual Workspace)
-The desktop application finds the skills in the `skills/` directory. When you open this repository,
-it shows the `sre_incident_solver` skill from [`SKILL.md`](skills/sre_incident_solver/SKILL.md).
+The desktop application finds the skills in the `.agents/skills/` directory. When you open this repository,
+it shows the `sre_incident_solver` skill from [`SKILL.md`](.agents/skills/sre_incident_solver/SKILL.md).
 You can then run and audit SRE tasks in the graphical interface.
 
 ---

@@ -1,0 +1,314 @@
+[
+ {
+  "title": "1 · A card with a button",
+  "explain": "Components are a flat list. Each one has an id, and refers to its children by id. The root is the component with the id \"root\". Click the button: the action log shows the event that the agent receives.",
+  "messages": [
+   {
+    "version": "v0.9",
+    "createSurface": {
+     "surfaceId": "hello",
+     "catalogId": "https://github.com/xSAVIKx/sre-agent/a2ui/catalogs/sre/v1/catalog.json"
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateComponents": {
+     "surfaceId": "hello",
+     "components": [
+      {
+       "id": "root",
+       "component": "Card",
+       "child": "body"
+      },
+      {
+       "id": "body",
+       "component": "Column",
+       "children": [
+        "title",
+        "text",
+        "hello"
+       ]
+      },
+      {
+       "id": "title",
+       "component": "Text",
+       "text": "👋 Hello, A2UI",
+       "variant": "h2"
+      },
+      {
+       "id": "text",
+       "component": "Text",
+       "text": "An agent sent this card as **JSON**, not as HTML.",
+       "variant": "body"
+      },
+      {
+       "id": "hello",
+       "component": "Button",
+       "child": "hello-label",
+       "action": {
+        "event": {
+         "name": "say_hello",
+         "context": {
+          "from": "the playground"
+         }
+        }
+       }
+      },
+      {
+       "id": "hello-label",
+       "component": "Text",
+       "text": "Say hello"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "title": "2 · A list from the data model",
+  "explain": "The List repeats the \"row\" template for each item in /incidents. Inside a row, {\"path\": \"summary\"} reads the field of that item. The button's context sends the traceId of the row that you click.",
+  "messages": [
+   {
+    "version": "v0.9",
+    "createSurface": {
+     "surfaceId": "list",
+     "catalogId": "https://github.com/xSAVIKx/sre-agent/a2ui/catalogs/sre/v1/catalog.json"
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateComponents": {
+     "surfaceId": "list",
+     "components": [
+      {
+       "id": "root",
+       "component": "Card",
+       "child": "body"
+      },
+      {
+       "id": "body",
+       "component": "Column",
+       "children": [
+        "title",
+        "incidents"
+       ]
+      },
+      {
+       "id": "title",
+       "component": "Text",
+       "text": "📋 Recent incidents",
+       "variant": "h2"
+      },
+      {
+       "id": "incidents",
+       "component": "List",
+       "children": {
+        "componentId": "row",
+        "path": "/incidents"
+       }
+      },
+      {
+       "id": "row",
+       "component": "Row",
+       "children": [
+        "summary",
+        "diagnose"
+       ]
+      },
+      {
+       "id": "summary",
+       "component": "Text",
+       "text": {
+        "path": "summary"
+       }
+      },
+      {
+       "id": "diagnose",
+       "component": "Button",
+       "child": "diagnose-label",
+       "action": {
+        "event": {
+         "name": "diagnose_incident",
+         "context": {
+          "traceId": {
+           "path": "traceId"
+          }
+         }
+        }
+       }
+      },
+      {
+       "id": "diagnose-label",
+       "component": "Text",
+       "text": "Diagnose"
+      }
+     ]
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateDataModel": {
+     "surfaceId": "list",
+     "path": "/",
+     "value": {
+      "incidents": [
+       {
+        "traceId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "summary": "❌ **failing** `/api/gateway`"
+       },
+       {
+        "traceId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "summary": "🐢 **slow** `/api/backend`"
+       }
+      ]
+     }
+    }
+   }
+  ]
+ },
+ {
+  "title": "3 · The SRE catalog",
+  "explain": "SeverityBadge and Download are not in the A2UI basic catalog: this project adds them (agent/web/src/sre-a2ui.js). A functionCall action runs in the browser and does not go to the agent.",
+  "messages": [
+   {
+    "version": "v0.9",
+    "createSurface": {
+     "surfaceId": "sre",
+     "catalogId": "https://github.com/xSAVIKx/sre-agent/a2ui/catalogs/sre/v1/catalog.json"
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateComponents": {
+     "surfaceId": "sre",
+     "components": [
+      {
+       "id": "root",
+       "component": "Card",
+       "child": "body"
+      },
+      {
+       "id": "body",
+       "component": "Column",
+       "children": [
+        "severity",
+        "title",
+        "actions"
+       ]
+      },
+      {
+       "id": "severity",
+       "component": "SeverityBadge",
+       "level": "SEV1",
+       "contribution": 99.3
+      },
+      {
+       "id": "title",
+       "component": "Text",
+       "text": "🔬 Incident diagnosis",
+       "variant": "h2"
+      },
+      {
+       "id": "actions",
+       "component": "Row",
+       "children": [
+        "docs",
+        "download"
+       ]
+      },
+      {
+       "id": "docs",
+       "component": "Button",
+       "child": "docs-label",
+       "action": {
+        "functionCall": {
+         "call": "openUrl",
+         "args": {
+          "url": "https://a2ui.org"
+         }
+        }
+       }
+      },
+      {
+       "id": "docs-label",
+       "component": "Text",
+       "text": "Open a2ui.org"
+      },
+      {
+       "id": "download",
+       "component": "Download",
+       "label": "Download",
+       "filename": "hello.md",
+       "content": "# Hello from A2UI\n"
+      }
+     ]
+    }
+   }
+  ]
+ },
+ {
+  "title": "4 · Update the data, not the UI",
+  "explain": "The components bind to /status. A later updateDataModel message changes only the data, and the UI shows the new value. An agent can send progress this way.",
+  "messages": [
+   {
+    "version": "v0.9",
+    "createSurface": {
+     "surfaceId": "progress",
+     "catalogId": "https://github.com/xSAVIKx/sre-agent/a2ui/catalogs/sre/v1/catalog.json"
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateComponents": {
+     "surfaceId": "progress",
+     "components": [
+      {
+       "id": "root",
+       "component": "Card",
+       "child": "body"
+      },
+      {
+       "id": "body",
+       "component": "Column",
+       "children": [
+        "title",
+        "status"
+       ]
+      },
+      {
+       "id": "title",
+       "component": "Text",
+       "text": "⏳ Diagnosis",
+       "variant": "h2"
+      },
+      {
+       "id": "status",
+       "component": "Text",
+       "text": {
+        "path": "/status"
+       }
+      }
+     ]
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateDataModel": {
+     "surfaceId": "progress",
+     "path": "/",
+     "value": {
+      "status": "Fetching traces…"
+     }
+    }
+   },
+   {
+    "version": "v0.9",
+    "updateDataModel": {
+     "surfaceId": "progress",
+     "path": "/status",
+     "value": "✅ Done: the bottleneck is `/api/database`."
+    }
+   }
+  ]
+ }
+]

@@ -17,27 +17,33 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # step -> (title, [(source roots on PYTHONPATH, test dir, unittest ids)])
 STEP_TESTS: dict[int, tuple[str, list[tuple[list[str], str, list[str]]]]] = {
     1: (
-        "Find the bottleneck",
+        "Connect the agents in a workflow",
+        [(["sre_agent/src"], "sre_agent/test", ["test_adk_workflow.TestWorkflow"])],
+    ),
+    2: ("Give the agent its tools", [(["sre_agent/src"], "sre_agent/test", ["test_adk_workflow.TestLogCorrelator"])]),
+    3: (
+        "Publish an A2A skill",
         [
             (
                 ["sre_agent/src"],
                 "sre_agent/test",
                 [
-                    "test_gcp_tools.TestGcpToolsMetrics.test_analyze_trace_cascade_mock",
-                    "test_gcp_tools.TestGcpToolsMetrics.test_analyze_trace_cascade_overlapping_children_and_duplicate_span",
+                    "test_a2a_agent.TestAgentCard.test_card_advertises_the_public_url_and_skills",
+                    "test_a2a_agent.TestA2AFlow.test_skill_metadata_selects_the_pipeline",
                 ],
             )
         ],
     ),
-    2: ("Feed the metrics", [([], "test", ["test_app_mock_metrics"])]),
-    3: ("Give the agent its tools", [(["sre_agent/src"], "sre_agent/test", ["test_workflow_agents"])]),
     4: (
-        "Lock the Orchestrator down",
+        "Call the agent over A2A, safely",
         [
             (
                 ["agent/src"],
                 "agent/test",
                 [
+                    "test_chat_routing.TestDiagnoseSreOverA2A.test_progress_streams_and_report_returns",
+                    "test_chat_routing.TestDiagnoseSreOverA2A.test_failed_task_becomes_an_error_report",
+                    "test_chat_routing.TestA2uiClient.test_chat_calls_request_surfaces_and_keep_them",
                     "test_chat_routing.TestMockPolicyEvaluation",
                     "test_chat_routing.TestChatRouting",
                     "test_sdk_contract.TestAntigravityContract.test_orchestrator_policy_survives_the_trip_into_the_harness",
@@ -45,7 +51,16 @@ STEP_TESTS: dict[int, tuple[str, list[tuple[list[str], str, list[str]]]]] = {
             )
         ],
     ),
-    5: ("Show the severity", [(["sre_agent/src"], "sre_agent/test", ["test_severity_badge"])]),
+    5: (
+        "Send UI with A2UI",
+        [
+            (
+                ["sre_agent/src"],
+                "sre_agent/test",
+                ["test_severity_badge", "test_a2ui_surfaces.TestIncidentList.test_buttons_send_the_rows_trace_back"],
+            )
+        ],
+    ),
 }
 
 # The output has emoji. On Windows, a pipe (for example in Git Bash) is not UTF-8 by default.

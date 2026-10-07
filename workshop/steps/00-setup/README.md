@@ -36,10 +36,9 @@
    uv run simulate_incident.py --engine-only
    ```
 
-4. Read the report. Find the two errors:
-
-   * **Identified Bottleneck** shows `/api/gateway` with `0 ms`. Step 1 fixes this.
-   * **Observability Metrics** shows `No CPU utilization data available.` Step 2 fixes this.
+4. Read the report. It has the cascade table, the **Identified Bottleneck** (`/api/database`,
+   99.3 %) and the post-mortem. Deterministic tools make these parts. The analysis of the ADK
+   agents is not there yet: steps 1 and 2 add it.
 
 The command does these tasks:
 
@@ -55,11 +54,12 @@ tool calls. You fix this in step 4. Until then, use `--engine-only`.
 
 | Layer | Location | Function |
 |:--|:--|:--|
-| Target app | `app/main.py` | Makes the incident: traces and logs. After step 2, it also makes metrics. |
-| Tools | `sre_agent/src/sre_agent/gcp_tools.py` | Async Python functions that the agents call. The type hints and docstrings become the LLM tool schema. Each tool has an `if IS_MOCK:` branch that reads local files. |
-| SRE agent | `sre_agent/src/sre_agent/sre_workflow.py` | ADK multi-agent graph: `trace_analyzer → fetch_telemetry → log_correlator`. It also has a deterministic simulation for use without an API key. |
-| Orchestrator | `agent/src/agent/config.py` | The Antigravity agent that users talk to. It has only three tools, one for each SRE agent skill: `list_incidents`, `diagnose_sre` and `write_post_mortem`. The policy must allow each tool. |
-| A2UI surfaces | `sre_agent/src/sre_agent/a2ui_surfaces.py` | Makes an A2UI v0.9 surface for each result. A surface contains catalog components, not HTML. |
+| Target app | `app/main.py` | Makes the incident: traces, logs and metrics. |
+| Tools | `sre_agent/src/sre_agent/gcp_tools.py` | Async Python functions that the agents call. The type hints and docstrings become the LLM tool schema. Each tool has an `if IS_MOCK:` branch that reads local files. `analyze_trace_cascade` finds the bottleneck span: the span with the most time of its own (exclusive time). |
+| SRE agent | `sre_agent/src/sre_agent/sre_workflow.py` | ADK multi-agent graph: `trace_analyzer → fetch_telemetry → log_correlator` (steps 1 and 2). Without an API key, the agents use a scripted model, `simulated_llm.py`. |
+| SRE agent over A2A | `sre_agent/src/sre_agent/a2a_agent.py` | The agent card and its skills (step 3). ADK's `to_a2a()` serves it. |
+| Orchestrator | `agent/src/agent/config.py` | The Antigravity agent that users talk to. It calls the SRE agent over A2A, with one tool for each skill (step 4). A deny-by-default policy must allow each tool. |
+| A2UI surfaces | `sre_agent/src/sre_agent/a2ui_surfaces.py` | Makes an A2UI v0.9 surface for each result. A surface contains catalog components, not HTML (step 5). |
 | Chat UI | `agent/src/agent/routes.py`, `index.html`, `static/sre-a2ui.js` | Streams the agent output over SSE. Shows the replies and the A2UI surfaces with `@a2ui/lit`. |
 
 To see your progress at any time, run `uv run workshop/step.py status`.

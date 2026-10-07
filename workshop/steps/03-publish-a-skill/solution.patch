@@ -1,0 +1,36 @@
+--- a/sre_agent/src/sre_agent/a2a_agent.py
++++ b/sre_agent/src/sre_agent/a2a_agent.py
+@@ -53,8 +53,8 @@
+     ui = a2ui_surfaces.client_renders_sre_catalog(metadata)
+     if skill == LIST_INCIDENTS:
+         return run_list_incidents(project_id=project_id, ui=ui)
+-    # TODO(step-3): Run the WRITE_POST_MORTEM skill: return
+-    #   run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id, ui=ui).
++    if skill == WRITE_POST_MORTEM:
++        return run_post_mortem(prompt=prompt, project_id=project_id, trace_id=trace_id, ui=ui)
+     if skill not in ("", DIAGNOSE_INCIDENT):
+         raise ValueError(
+             f"Unknown skill {skill!r}: expected one of {LIST_INCIDENTS}, {DIAGNOSE_INCIDENT}, {WRITE_POST_MORTEM}"
+@@ -174,9 +174,19 @@
+                 ],
+                 output_modes=["text/markdown"],
+             ),
+-            # TODO(step-3): Publish the post-mortem skill: an AgentSkill with id=WRITE_POST_MORTEM,
+-            #   a name, a description (what it does, and its request metadata: skill, project_id,
+-            #   trace_id), tags, examples and output_modes. Use the two skills above as examples.
++            AgentSkill(
++                id=WRITE_POST_MORTEM,
++                name="Write a post-mortem",
++                description=(
++                    "Writes the incident post-mortem of one trace from its spans and logs: overview, timeline, "
++                    "root cause and next steps. With a Gemini key, adds AI-generated analyst notes. Request "
++                    'metadata: skill="write_post_mortem", project_id, trace_id (optional: defaults to the most '
++                    "important recent incident)."
++                ),
++                tags=["sre", "post-mortem"],
++                examples=["Write the post-mortem for trace 1c65bf87e4be434ea6d6d7edc1ef8c97."],
++                output_modes=["text/markdown", "application/json"],
++            ),
+         ],
+     )
+ 

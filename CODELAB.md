@@ -338,7 +338,7 @@ trace_analyzer = AdkAgent(
         "ranked best candidate first; ... "
         "Return ONLY its raw 32-character hex traceId. ..."
     ),
-    model="gemini-3.8-flash",
+    model=MODEL,
 )
 
 log_correlator = AdkAgent(
@@ -349,7 +349,7 @@ log_correlator = AdkAgent(
         "and recommend a mitigation plan. ..."
     ),
     tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-    model="gemini-3.8-flash",
+    model=MODEL,
 )
 
 # Inside _run_adk_diagnostics(), after the @node(name="fetch_telemetry") function:
@@ -358,28 +358,22 @@ sre_diagnostics_workflow = AdkWorkflow(
 )
 ```
 
-The function `diagnose` selects one of **two tiers**. Thus, the project always writes a report,
-with or without a Gemini API key. `run_sre_diagnostics` calls `diagnose` and returns only the
-report text.
+`MODEL` selects the model of both agents. Thus, the same ADK workflow runs with or without a
+Gemini API key:
 
 ```python
-async def diagnose(
-    traces_json: str, project_id: str | None = None, question: str = "", trace_id: str | None = None
-) -> Diagnosis:
-    # …select the incident (incidents.find_incident); if there is none, return an "all healthy" report…
-    if HAS_ADK and os.environ.get("GEMINI_API_KEY"):
-        return await _run_adk_diagnostics(json.dumps(candidates), project_id, incident, question)  # Gemini
-    report = await _run_simulated_diagnostics(incident, project_id)  # offline
-    return Diagnosis(report, incident.get("traceId"), failed=report.startswith(SIMULATION_FAILURE))
+def _model() -> str | BaseLlm:
+    """Gemini when GEMINI_API_KEY is set. Else a scripted model, so the same ADK workflow runs offline."""
+    return GEMINI_MODEL if os.environ.get("GEMINI_API_KEY") else SimulatedLlm()
 ```
 
-| Tier | Condition | How it works |
+| Model | Condition | How it works |
 |:-----|:----------|:-------------|
-| ADK | `google-adk` is installed and `GEMINI_API_KEY` is set | Gemini runs the TraceAnalyzer and the LogCorrelator. |
-| Simulated | All other cases | Fixed Python code reads the mock files. The result is the same for each run. |
+| Gemini | `GEMINI_API_KEY` is set | Gemini runs the TraceAnalyzer and the LogCorrelator, and chooses the tool calls. |
+| `SimulatedLlm` | No key | An ADK `BaseLlm` subclass in `simulated_llm.py` answers with fixed rules: it picks the first candidate trace, calls `query_metrics`, and writes the analysis from the logs. The workflow and the tool calls are real ADK. |
 
-Both tiers end the report with the cascade table and the post-mortem. The A2UI surfaces and the
-tests use these two sections.
+With both models, the report ends with the cascade table and the post-mortem. The workflow adds
+them from the tools, and the A2UI surfaces and the tests use them.
 
 ---
 
@@ -597,7 +591,7 @@ AGENT DIAGNOSIS REPORT
 ## Step 9 (Optional): Package as an Antigravity Skill
 
 The repository also contains a portable copy of the diagnostics code. This copy is an **Antigravity
-Agent Skill** in [`skills/sre_incident_solver/`](skills/sre_incident_solver). The Antigravity CLI
+Agent Skill** in [`.agents/skills/sre_incident_solver/`](.agents/skills/sre_incident_solver). The Antigravity CLI
 and the Antigravity desktop app find skills in this format automatically. A skill is a folder with
 a metadata file, `SKILL.md`:
 
