@@ -1,0 +1,79 @@
+# The workshop website. Build it with `uv run scripts/build_docs.py`: the script copies the
+# Markdown of workshop/, INSTALL.md and EXERCISES.md into build/site-src/ first.
+site_name: "Workshop: Build an SRE Agent"
+site_description: Build an SRE agent with ADK, A2A, A2UI and the Antigravity SDK. A 90-minute hands-on workshop.
+site_url: https://xsavikx.github.io/sre-agent/
+repo_url: https://github.com/xSAVIKx/sre-agent
+repo_name: xSAVIKx/sre-agent
+edit_uri: ""
+docs_dir: build/site-src
+site_dir: site
+
+nav:
+  - Home: index.md
+  - Install: install.md
+  - Basics:
+      - Overview: basics/index.md
+      - ADK: basics/adk.md
+      - A2A: basics/a2a.md
+      - Antigravity SDK: basics/antigravity.md
+      - A2UI: basics/a2ui.md
+  - Steps:
+      - 0 · Setup and tour: steps/00-setup/index.md
+      - 1 · Connect the agents: steps/01-wire-the-workflow/index.md
+      - 2 · Give the agent its tools: steps/02-build-the-agent/index.md
+      - 3 · Publish an A2A skill: steps/03-publish-a-skill/index.md
+      - 4 · Call it over A2A, safely: steps/04-call-it-safely/index.md
+      - 5 · Send UI with A2UI: steps/05-show-the-severity/index.md
+      - 6 · Wrap-up: steps/06-wrap-up/index.md
+  - Exercises: exercises.md
+  - Facilitator notes: FACILITATOR.md
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.footer
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  nav:
+    omitted_files: warn
+  links:
+    not_found: warn
+    anchors: warn
+    unrecognized_links: warn

@@ -31,3 +31,7 @@ scratch_save_dir/
 
 # A2UI renderer bundle sources: only the built agent/src/agent/static/sre-a2ui.js is committed
 node_modules/
+
+# The workshop website (scripts/build_docs.py)
+/build/
+/site/
