@@ -1,5 +1,5 @@
---- a/skills/sre_incident_solver/sre_workflow.py
-+++ b/skills/sre_incident_solver/sre_workflow.py
+--- a/.agents/skills/sre_incident_solver/sre_workflow.py
++++ b/.agents/skills/sre_incident_solver/sre_workflow.py
 @@ -70,14 +70,12 @@
  
  trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
