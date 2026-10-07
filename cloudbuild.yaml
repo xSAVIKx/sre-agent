@@ -14,7 +14,8 @@
 # https://<service>-<project number>.<region>.run.app, so the services can be wired
 # together before any of them exists and nothing has to wait for another deploy.
 #
-# Run through ./deploy.sh, which computes the substitutions.
+# ./deploy.sh passes the substitutions it computed. A push trigger passes none of them, so
+# the build finds the base image itself. The service URLs use Cloud Build's PROJECT_NUMBER.
 
 steps:
   - id: base
@@ -24,36 +25,54 @@ steps:
       - -c
       - |
         set -euo pipefail
-        if [ "${_BUILD_BASE}" = "true" ]; then
-          docker build -f docker/base.Dockerfile -t "${_BASE_IMAGE}" .
-          docker push "${_BASE_IMAGE}"
+        base="${_BASE_IMAGE}"
+        if [ -z "$$base" ]; then
+          # No image given (a trigger): the same order as deploy.sh. The published image
+          # for this uv.lock, else the copy cached in Artifact Registry, else a new build.
+          tag="$$(bash scripts/base-image.sh tag)"
+          cached="${_IMAGE_PREFIX}/sre-agent-base:$$tag"
+          if docker pull "ghcr.io/xsavikx/sre-agent-base:$$tag"; then
+            base="ghcr.io/xsavikx/sre-agent-base:$$tag"
+          elif docker pull "$$cached"; then
+            base="$$cached"
+          else
+            docker build -f docker/base.Dockerfile -t "$$cached" .
+            docker push "$$cached"
+            base="$$cached"
+          fi
+        elif [ "${_BUILD_BASE}" = "true" ]; then
+          docker build -f docker/base.Dockerfile -t "$$base" .
+          docker push "$$base"
         else
-          docker pull "${_BASE_IMAGE}"
+          docker pull "$$base"
         fi
+        # The service builds read the image from here.
+        echo "$$base" > /workspace/base-image
+        echo "Base image: $$base"
 
   - id: build-app
     name: gcr.io/cloud-builders/docker
     waitFor: [base]
     entrypoint: bash
-    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f app/Dockerfile -t ${_IMAGE_PREFIX}/sre-chaos-monkey . && docker push ${_IMAGE_PREFIX}/sre-chaos-monkey']
+    args: [-c, 'docker build --build-arg BASE_IMAGE=$$(cat /workspace/base-image) -f app/Dockerfile -t ${_IMAGE_PREFIX}/sre-chaos-monkey . && docker push ${_IMAGE_PREFIX}/sre-chaos-monkey']
 
   - id: build-inventory
     name: gcr.io/cloud-builders/docker
     waitFor: [base]
     entrypoint: bash
-    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f inventory_agent/Dockerfile -t ${_IMAGE_PREFIX}/inventory-agent . && docker push ${_IMAGE_PREFIX}/inventory-agent']
+    args: [-c, 'docker build --build-arg BASE_IMAGE=$$(cat /workspace/base-image) -f inventory_agent/Dockerfile -t ${_IMAGE_PREFIX}/inventory-agent . && docker push ${_IMAGE_PREFIX}/inventory-agent']
 
   - id: build-sre
     name: gcr.io/cloud-builders/docker
     waitFor: [base]
     entrypoint: bash
-    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f sre_agent/Dockerfile -t ${_IMAGE_PREFIX}/sre-sub-agent . && docker push ${_IMAGE_PREFIX}/sre-sub-agent']
+    args: [-c, 'docker build --build-arg BASE_IMAGE=$$(cat /workspace/base-image) -f sre_agent/Dockerfile -t ${_IMAGE_PREFIX}/sre-sub-agent . && docker push ${_IMAGE_PREFIX}/sre-sub-agent']
 
   - id: build-agent
     name: gcr.io/cloud-builders/docker
     waitFor: [base]
     entrypoint: bash
-    args: [-c, 'docker build --build-arg BASE_IMAGE=${_BASE_IMAGE} -f agent/Dockerfile -t ${_IMAGE_PREFIX}/sre-agent . && docker push ${_IMAGE_PREFIX}/sre-agent']
+    args: [-c, 'docker build --build-arg BASE_IMAGE=$$(cat /workspace/base-image) -f agent/Dockerfile -t ${_IMAGE_PREFIX}/sre-agent . && docker push ${_IMAGE_PREFIX}/sre-agent']
 
   - id: deploy-app
     name: gcr.io/google.com/cloudsdktool/cloud-sdk
@@ -147,11 +166,10 @@ substitutions:
   _JOB_NAME: inventory-scanner-job
   _BASE_IMAGE: ''
   _BUILD_BASE: 'false'
-  _PROJECT_NUMBER: ''
   _IMAGE_PREFIX: ${_GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}
-  _URL_APP: https://sre-chaos-monkey-${_PROJECT_NUMBER}.${_GCP_REGION}.run.app
-  _URL_INVENTORY: https://inventory-agent-${_PROJECT_NUMBER}.${_GCP_REGION}.run.app
-  _URL_SRE: https://sre-sub-agent-${_PROJECT_NUMBER}.${_GCP_REGION}.run.app
+  _URL_APP: https://sre-chaos-monkey-${PROJECT_NUMBER}.${_GCP_REGION}.run.app
+  _URL_INVENTORY: https://inventory-agent-${PROJECT_NUMBER}.${_GCP_REGION}.run.app
+  _URL_SRE: https://sre-sub-agent-${PROJECT_NUMBER}.${_GCP_REGION}.run.app
 
 options:
   logging: CLOUD_LOGGING_ONLY
