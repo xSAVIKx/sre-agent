@@ -7,22 +7,31 @@ to the attendees. The basics pages are the pre-reading: about 25 minutes.
 
 The `uv sync` download is the largest risk on the venue wifi. No other task needs the network.
 
-Docker and a `GEMINI_API_KEY` are **optional** for attendees. All steps work offline in the
-deterministic simulation.
+Docker and a `GEMINI_API_KEY` are **optional** for attendees. All steps work offline: without a
+key, the ADK agents use a scripted model.
+
+Share the website: <https://xsavikx.github.io/sre-agent/>. It has the install commands, the basics
+and all steps.
 
 ## The day before
 
-1. Do these commands:
+1. On `master`, rebuild the workshop branch and tags, then run the preflight:
 
    ```bash
-   uv run workshop/check.py 0
-   git switch --detach step-00 && uv run workshop/check.py all   # 1-5 must all be ❌
-   git switch --detach step-05 && uv run workshop/check.py all   # 1-5 must all be ✅
+   uv run python workshop/build_steps.py --branch
+   uv run workshop/preflight.py --demo <SRE Orchestrator URL>
    ```
 
+   The preflight checks the solution patches, the step ladder at each tag (`step-00`: all ❌,
+   `step-05`: all ✅), the branch and the tags on GitHub, the installers, the website and the
+   demo. Each ❌ line tells you how to fix it, for example the `git push` command for the tags.
 2. For the production demo in step 6, run `./bootstrap.sh && ./deploy.sh` **the day before**.
 3. Record the URLs that `deploy.sh` shows.
-4. After the session, run `./cleanup.sh`.
+4. After the session, run `./cleanup.sh`, and delete or rotate the Gemini keys that you shared.
+
+An agent can do these tasks with you: open the repository in Antigravity, or run `agy`, and ask
+"Prepare the workshop for tomorrow". The `sre-workshop-facilitator` skill asks before each push
+or deployment.
 
 The first deployment into a new project takes approximately 6 minutes. A redeployment takes
 approximately 3 minutes. All four services build and deploy in parallel on the prebuilt

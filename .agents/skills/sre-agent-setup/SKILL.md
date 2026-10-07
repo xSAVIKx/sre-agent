@@ -59,7 +59,8 @@ needs no GCP account and no API key.
 8. **Offer the web chat:** `uv run workshop/chat.py`, then open <http://localhost:8080/chat>.
    It runs until the user presses Ctrl+C, so start it only when the user asks.
 
-9. **For the workshop:** suggest the basics (`workshop/basics/README.md`, about 25 minutes). For
+9. **For the workshop:** suggest the basics (`workshop/basics/README.md`, about 25 minutes, also
+   on the website <https://xsavikx.github.io/sre-agent/>). For
    questions about the steps or the basics, use the sre-workshop-coach skill.
 
 ## Problems and fixes

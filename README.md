@@ -23,6 +23,8 @@ from the web chat. The full stack runs locally without GCP credentials, because 
 mode replaces the Google Cloud APIs.
 
 > **📦 Source code:** [`github.com/xSAVIKx/sre-agent`](https://github.com/xSAVIKx/sre-agent)
+>
+> **🎓 Workshop website:** [`xsavikx.github.io/sre-agent`](https://xsavikx.github.io/sre-agent/): install, basics and step-by-step guide.
 
 **Google Cloud credits are provided for this project.**
 
@@ -180,7 +182,7 @@ flowchart LR
 | [`CODELAB.md`](CODELAB.md) | A step-by-step tutorial that builds the agent from the start. |
 | [`BLOGPOST.md`](BLOGPOST.md) | The architecture and the design decisions. |
 | [`AGENTS.md`](AGENTS.md) | Rules for AI agents and human contributors. |
-| [`workshop/`](workshop/README.md) | A 90-minute workshop. Each step has a tag and a test check. |
+| [`workshop/`](workshop/README.md) | A 90-minute workshop. Each step has a tag and a test check. Also on the [website](https://xsavikx.github.io/sre-agent/). |
 | [`EXERCISES.md`](EXERCISES.md) | Follow-up exercises to extend the project. |
 
 ---
