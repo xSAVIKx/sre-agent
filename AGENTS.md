@@ -216,7 +216,9 @@ Markdown.
   its own TODO. `uv run workshop/preflight.py` checks the full ladder at each tag, and what
   attendees download from GitHub.
 * **Docs:** the step READMEs, `workshop/basics/`, `INSTALL.md` and `EXERCISES.md` are the website.
-  Check them with `uv run scripts/build_docs.py` (strict: a broken link fails).
+  Check them with `uv run scripts/build_docs.py` (strict: a broken link fails). The build adds a
+  collapsed hint and solution to each step page from `build_steps.py` and the `solution.patch`
+  files, so do not write solutions into the READMEs.
 * **Setup prompt:** `workshop/setup-prompt.txt` is the copy-paste prompt that lets an agent install
   the workshop from an empty folder. `README.md`, `INSTALL.md` and `workshop/README.md` show it
   between `setup-prompt` markers; a test keeps the copies equal. Change the file, then the copies.
