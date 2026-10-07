@@ -321,7 +321,7 @@ echo -e "\n${BLUE}[5/5] Building and deploying all services in parallel...${NC}"
 gcloud builds submit --config=cloudbuild.yaml \
     --region="$GCP_REGION" \
     --service-account="projects/${GCP_PROJECT}/serviceAccounts/${BUILD_SA_EMAIL}" \
-    --substitutions=_GCP_REGION="$GCP_REGION",_PROJECT_NUMBER="$PROJECT_NUMBER",_BASE_IMAGE="$BASE_IMAGE",_BUILD_BASE="$BUILD_BASE" .
+    --substitutions=_GCP_REGION="$GCP_REGION",_BASE_IMAGE="$BASE_IMAGE",_BUILD_BASE="$BUILD_BASE" .
 
 echo -e "\n${GREEN}===============================================${NC}"
 echo -e "${GREEN}           Deployment Completed Successfully!  ${NC}"
