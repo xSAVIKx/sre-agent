@@ -217,6 +217,9 @@ Markdown.
   attendees download from GitHub.
 * **Docs:** the step READMEs, `workshop/basics/`, `INSTALL.md` and `EXERCISES.md` are the website.
   Check them with `uv run scripts/build_docs.py` (strict: a broken link fails).
+* **Setup prompt:** `workshop/setup-prompt.txt` is the copy-paste prompt that lets an agent install
+  the workshop from an empty folder. `README.md`, `INSTALL.md` and `workshop/README.md` show it
+  between `setup-prompt` markers; a test keeps the copies equal. Change the file, then the copies.
 * **Agent skills** in `.agents/skills/`: `sre-agent-setup` (install), `sre-workshop-coach`
   (attendees), `sre-workshop-facilitator` (prepare, publish, run, clean up), `sre-agent-deploy`
   (Cloud Run). When you change a step, a command or a file name, update these skills too.

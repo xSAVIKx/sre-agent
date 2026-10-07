@@ -29,6 +29,9 @@ nav:
   - Exercises: exercises.md
   - Facilitator notes: FACILITATOR.md
 
+extra_css:
+  - extra.css
+
 theme:
   name: material
   palette:

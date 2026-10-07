@@ -19,6 +19,35 @@ A `GEMINI_API_KEY` is optional:
 
 ## Before the workshop (10 minutes, at home)
 
+### 🤖 Let your agent set it up
+
+Open an **empty folder** in [Antigravity](https://antigravity.google), or run `agy` in an empty
+folder (any coding agent works). Paste this prompt. The agent installs everything, checks the
+setup and runs a first incident. It asks before it installs anything.
+
+Short version, for an agent that can read web pages: "Set up the workshop with the instructions in
+https://xsavikx.github.io/sre-agent/llms.txt".
+
+<!-- setup-prompt:start (copy of workshop/setup-prompt.txt; a test keeps them equal) -->
+```text
+Set up the SRE agent workshop on this computer: https://github.com/xSAVIKx/sre-agent
+
+1. Find my operating system and shell. Ask me before you install anything.
+2. Run the workshop installer. It installs uv (and Python, if necessary), clones the repository into ./sre-agent, creates my branch "my-work" at the tag step-00, installs the dependencies and checks the setup.
+   - macOS or Linux: curl -LsSf https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.sh | sh -s -- --workshop
+   - Windows (PowerShell): $env:SRE_AGENT_WORKSHOP = "1"; powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.ps1 | iex"
+   - If you cannot run the installer, do the same by hand: install uv (https://docs.astral.sh/uv/), then run git clone https://github.com/xSAVIKx/sre-agent.git, cd sre-agent, git switch -c my-work step-00, uv sync --all-packages.
+   - The workshop needs git. If git is missing, tell me how to install it on my system.
+3. In ./sre-agent, run: uv run workshop/check.py 0. All lines must say "ok". Fix red lines with "Problems and fixes" on https://xsavikx.github.io/sre-agent/install/
+4. Run: uv run simulate_incident.py --engine-only. Explain the result in 3 sentences.
+5. Read the skills in .agents/skills/ of the repository, and use them for my next questions (sre-workshop-coach for the workshop steps).
+
+Do not ask for my GEMINI_API_KEY, and do not write it into a file.
+```
+<!-- setup-prompt:end -->
+
+### Or run the installer yourself
+
 You need **git** and a terminal. Do the installation at home: it downloads a few hundred megabytes, and
 the wifi at events is often slow.
 
