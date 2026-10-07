@@ -327,12 +327,12 @@ read-only SRE agent.
 
 ### 2. The Antigravity CLI (`agy`)
 Use the CLI to work with the workspace from a terminal. The CLI finds the skill in
-[`skills/sre_incident_solver/`](skills/sre_incident_solver). To run the full diagnosis loop, use the
+[`.agents/skills/sre_incident_solver/`](.agents/skills/sre_incident_solver). To run the full diagnosis loop, use the
 local simulation (`uv run simulate_incident.py`).
 
 ### 3. Antigravity 2.0 (Visual Workspace)
-The desktop application finds the skills in the `skills/` directory. When you open this repository,
-it shows the `sre_incident_solver` skill from [`SKILL.md`](skills/sre_incident_solver/SKILL.md).
+The desktop application finds the skills in the `.agents/skills/` directory. When you open this repository,
+it shows the `sre_incident_solver` skill from [`SKILL.md`](.agents/skills/sre_incident_solver/SKILL.md).
 You can then run and audit SRE tasks in the graphical interface.
 
 ---

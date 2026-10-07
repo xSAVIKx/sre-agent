@@ -46,7 +46,7 @@ To add a custom component:
 
 ### Rule: change the engine, not the skill mirror
 
-`skills/sre_incident_solver/` contains a copy of the SRE agent as an Antigravity Agent Skill. The
+`.agents/skills/sre_incident_solver/` contains a copy of the SRE agent as an Antigravity Agent Skill. The
 Antigravity CLI and the desktop app find it automatically. The running services import the
 `sre_agent` package.
 
@@ -156,7 +156,7 @@ The four services use one shared dependency image, `docker/base.Dockerfile`.
 Each package uses the `src/` + `test/` layout. When you run its tests from the workspace root, put
 its `src` directory on `PYTHONPATH`. The root suite `test/` contains a workspace-wide import smoke
 test. It also contains tests for `app/`, `inventory_agent/`, `sre_common/` and the
-`skills/sre_incident_solver/` mirror.
+`.agents/skills/sre_incident_solver/` mirror.
 
 ```bash
 PYTHONPATH=agent/src     uv run python -m unittest discover -s agent/test

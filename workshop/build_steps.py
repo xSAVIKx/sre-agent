@@ -249,7 +249,7 @@ def _state(solved_through: int, head_files: dict[str, str]) -> dict[str, str]:
             mirrored = sync_skill.HEADER.format(name=name) + sync_skill._ABSOLUTE_IMPORT.sub(
                 r"\1from .\2 import", content
             )
-            files[f"skills/sre_incident_solver/{name}"] = mirrored
+            files[f".agents/skills/sre_incident_solver/{name}"] = mirrored
     return files
 
 
@@ -267,7 +267,7 @@ def _patch(before: dict[str, str], after: dict[str, str]) -> str:
 
 def _head_files() -> dict[str, str]:
     paths = {edit.path for step in STEPS for edit in step.edits}
-    paths |= {f"skills/sre_incident_solver/{p.removeprefix('sre_agent/src/sre_agent/')}" for p in paths}
+    paths |= {f".agents/skills/sre_incident_solver/{p.removeprefix('sre_agent/src/sre_agent/')}" for p in paths}
     files = {}
     for path in paths:
         try:

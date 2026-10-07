@@ -591,7 +591,7 @@ AGENT DIAGNOSIS REPORT
 ## Step 9 (Optional): Package as an Antigravity Skill
 
 The repository also contains a portable copy of the diagnostics code. This copy is an **Antigravity
-Agent Skill** in [`skills/sre_incident_solver/`](skills/sre_incident_solver). The Antigravity CLI
+Agent Skill** in [`.agents/skills/sre_incident_solver/`](.agents/skills/sre_incident_solver). The Antigravity CLI
 and the Antigravity desktop app find skills in this format automatically. A skill is a folder with
 a metadata file, `SKILL.md`:
 

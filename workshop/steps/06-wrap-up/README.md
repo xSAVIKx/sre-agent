@@ -33,13 +33,21 @@ layer.
 
 ## Use the Antigravity skill
 
-`skills/sre_incident_solver/` contains the same SRE agent as an **Antigravity Agent Skill**
-(`SKILL.md` + code).
+`.agents/skills/sre_incident_solver/` contains the same SRE agent as an **Antigravity Agent
+Skill** (`SKILL.md` + code). `scripts/sync_skill.py` generates the skill from `sre_agent/`. Thus,
+the skill always agrees with the code that you built.
 
-`scripts/sync_skill.py` generates the skill from `sre_agent/`. Thus, the skill always agrees with
-the code that you built.
+Antigravity finds the skills in `.agents/skills/` when you open this repository:
 
-To load the skill in your own Antigravity agent, use the `skills_paths` option of the SDK.
+1. Run `uv run simulate_incident.py --engine-only`. It makes an incident.
+2. Open the repository in the Antigravity app, or run `agy` in it.
+3. Ask: "Use the sre_incident_solver skill to diagnose the latest incident."
+
+The agent reads `SKILL.md` and runs the diagnosis (it asks before it runs a command). This is a third way to use the same engine:
+in the chat (A2A), in a terminal (`simulate_incident.py`), and as a skill of a coding agent.
+
+The same folder has the workshop skills: `sre-agent-setup`, `sre-workshop-coach` and
+`sre-agent-deploy`.
 
 ## Next steps
 

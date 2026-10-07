@@ -27,7 +27,7 @@ From the repository root, with telemetry produced by `uv run simulate_incident.p
 project and `MOCK_GCP=false`):
 
 ```bash
-PYTHONPATH=skills:sre_common/src MOCK_GCP=true uv run python -c "
+PYTHONPATH=.agents/skills:sre_common/src MOCK_GCP=true uv run python -c "
 import asyncio
 from sre_incident_solver.gcp_tools import query_traces
 from sre_incident_solver.sre_workflow import run_sre_diagnostics

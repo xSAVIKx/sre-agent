@@ -125,7 +125,7 @@ Open the repository in [Antigravity](https://antigravity.google), or run `agy` i
 The coach explains and gives hints one level at a time. It changes your code only when you ask it
 to solve or skip a step.
 
-The `solution.patch` files also change `skills/sre_incident_solver/`. This directory is a generated
+The `solution.patch` files also change `.agents/skills/sre_incident_solver/`. This directory is a generated
 copy of the SRE agent (see [step 6](steps/06-wrap-up/README.md)). Do not edit it.
 
 ## The two commands that you use in all steps

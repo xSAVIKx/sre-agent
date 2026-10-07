@@ -122,5 +122,5 @@ Use the sre-agent-setup skill.
   skip that step. Use `solve` or `goto` for this. Do not write the solution yourself.
 * Do not discard their work: do not run `git reset --hard`, `git checkout -- <file>`,
   `git stash drop`, `git clean` or force options.
-* Do not edit `skills/sre_incident_solver/`. It is generated.
+* Do not edit `.agents/skills/sre_incident_solver/`. It is generated.
 * Use short, plain sentences. Give one hint at a time.

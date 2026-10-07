@@ -1,5 +1,5 @@
---- a/skills/sre_incident_solver/sre_workflow.py
-+++ b/skills/sre_incident_solver/sre_workflow.py
+--- a/.agents/skills/sre_incident_solver/sre_workflow.py
++++ b/.agents/skills/sre_incident_solver/sre_workflow.py
 @@ -271,11 +271,9 @@
  
      try:
