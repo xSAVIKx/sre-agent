@@ -58,11 +58,14 @@ theme:
 
 markdown_extensions:
   - admonition
+  - pymdownx.details
   - attr_list
   - tables
   - toc:
       permalink: true
-  - pymdownx.highlight
+  - pymdownx.highlight:
+      # Adds language-<name> to each code block (scripts/build_docs.py wraps only language-text).
+      pygments_lang_class: true
   - pymdownx.inlinehilite
   - pymdownx.emoji:
       emoji_index: !!python/name:material.extensions.emoji.twemoji

@@ -138,6 +138,9 @@ One command moves you through the workshop. It works on macOS, Linux and Windows
 
 Without N, `task`, `hint`, `solution` and `solve` use your next step.
 
+On the [website](https://xsavikx.github.io/sre-agent/), each step page also ends with a collapsed
+**hint** (where to change the code) and **solution** (the change as a diff).
+
 `goto` loses nothing: it commits your changes on your current branch, then starts a new branch
 (for example `my-step-3`). To go back, use `git switch my-work`.
 
