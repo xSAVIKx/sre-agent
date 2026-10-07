@@ -8,6 +8,33 @@ You need only a terminal and an internet connection. The installer gets everythi
 
 You do not need administrator rights, Docker, Node.js, a GCP account or an API key.
 
+## 🤖 Let your agent set it up
+
+Open an **empty folder** in [Antigravity](https://antigravity.google), or run `agy` in an empty
+folder (any coding agent works). Paste this prompt. The agent installs everything, checks the
+setup and runs a first incident. It asks before it installs anything.
+
+Short version, for an agent that can read web pages: "Set up the workshop with the instructions in
+https://xsavikx.github.io/sre-agent/llms.txt".
+
+<!-- setup-prompt:start (copy of workshop/setup-prompt.txt; a test keeps them equal) -->
+```text
+Set up the SRE agent workshop on this computer: https://github.com/xSAVIKx/sre-agent
+
+1. Find my operating system and shell. Ask me before you install anything.
+2. Run the workshop installer. It installs uv (and Python, if necessary), clones the repository into ./sre-agent, creates my branch "my-work" at the tag step-00, installs the dependencies and checks the setup.
+   - macOS or Linux: curl -LsSf https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.sh | sh -s -- --workshop
+   - Windows (PowerShell): $env:SRE_AGENT_WORKSHOP = "1"; powershell -ExecutionPolicy ByPass -c "irm https://raw.githubusercontent.com/xSAVIKx/sre-agent/master/install.ps1 | iex"
+   - If you cannot run the installer, do the same by hand: install uv (https://docs.astral.sh/uv/), then run git clone https://github.com/xSAVIKx/sre-agent.git, cd sre-agent, git switch -c my-work step-00, uv sync --all-packages.
+   - The workshop needs git. If git is missing, tell me how to install it on my system.
+3. In ./sre-agent, run: uv run workshop/check.py 0. All lines must say "ok". Fix red lines with "Problems and fixes" on https://xsavikx.github.io/sre-agent/install/
+4. Run: uv run simulate_incident.py --engine-only. Explain the result in 3 sentences.
+5. Read the skills in .agents/skills/ of the repository, and use them for my next questions (sre-workshop-coach for the workshop steps).
+
+Do not ask for my GEMINI_API_KEY, and do not write it into a file.
+```
+<!-- setup-prompt:end -->
+
 ## One command
 
 **macOS and Linux:**
@@ -75,24 +102,26 @@ To use Gemini instead of the scripted simulation, set `GEMINI_API_KEY`
 * macOS and Linux: `export GEMINI_API_KEY=...`
 * Windows (PowerShell): `$env:GEMINI_API_KEY = "..."`
 
-## Let an agent set it up (optional)
+## Agent help in the repository
 
-This repository has three [Antigravity](https://antigravity.google) skills in `.agents/skills/`.
-The Antigravity app and the Antigravity CLI (`agy`) find them automatically when you open the
-repository:
+After the installation, the repository has [Antigravity](https://antigravity.google) skills in
+`.agents/skills/`. The Antigravity app and the Antigravity CLI (`agy`) find them automatically
+when you open the repository:
 
 | Skill | What the agent does |
 |:--|:--|
 | `sre-agent-setup` | Installs uv and the dependencies, checks the setup, prepares the workshop branch, runs the simulation, explains the result and fixes common problems. |
 | `sre-workshop-coach` | Shows your workshop progress, explains the next step, gives hints one level at a time, checks your code, and skips or jumps steps when you ask. |
+| `sre-workshop-facilitator` | For the person who runs the workshop: checks that everything is ready, publishes the steps and the website, and cleans up. |
+| `sre_incident_solver` | The SRE agent itself as a skill: diagnoses the latest incident. |
 | `sre-agent-deploy` | Guides you through `bootstrap.sh`, `deploy.sh`, the verification and `cleanup.sh`. It asks for your approval before each step that costs money. |
 
 The agent never asks for your API key: you set it yourself.
 
 ### Prompts that you can use
 
-Open the repository in the Antigravity app, or run `agy` in the repository directory. Then use
-one of these prompts:
+Open the repository (the `sre-agent` folder) in the Antigravity app, or run `agy` in it. Then
+use one of these prompts:
 
 ```text
 Set up this project on my computer, run the incident simulation and explain the result.

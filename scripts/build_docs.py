@@ -26,6 +26,11 @@ MKDOCS = ["uvx", "--from", "mkdocs==1.6.1", "--with", "mkdocs-material==9.7.7", 
 
 # Repository files that are not under workshop/, and their place on the site.
 EXTRA_PAGES = {"INSTALL.md": "install.md", "EXERCISES.md": "exercises.md"}
+# Text blocks (the setup prompt, log output) wrap, so readers see them whole before they copy.
+EXTRA_CSS = (
+    '.md-typeset div.highlight:not([class*="language-"]) :is(pre, code)'
+    " { white-space: pre-wrap; overflow-wrap: anywhere; }\n"
+)
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
 
 
@@ -85,6 +90,26 @@ def assemble() -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         markdown = (REPO_ROOT / repo_path).read_text(encoding="utf-8")
         target.write_text(rewrite_links(markdown, repo_path, pages), encoding="utf-8")
+    (SOURCE / "extra.css").write_text(EXTRA_CSS, encoding="utf-8")
+    (SOURCE / "llms.txt").write_text(llms_txt(), encoding="utf-8")
+
+
+def llms_txt() -> str:
+    """/llms.txt: what an agent needs to set up the workshop, and where to read more."""
+    prompt = (REPO_ROOT / "workshop" / "setup-prompt.txt").read_text(encoding="utf-8").rstrip()
+    links = {
+        "Install, with problems and fixes": "install/",
+        "Basics of ADK, A2A, A2UI and the Antigravity SDK": "basics/",
+        "Step 0, setup and tour": "steps/00-setup/",
+    }
+    site = "https://xsavikx.github.io/sre-agent/"
+    return (
+        "# Workshop: Build an SRE Agent\n\n"
+        "> A 90-minute workshop: build an SRE agent with ADK, A2A, A2UI and the Antigravity SDK.\n\n"
+        "## Instructions for an agent that sets up the workshop\n\n"
+        f"{prompt}\n\n"
+        "## Pages\n\n" + "".join(f"- [{title}]({site}{path})\n" for title, path in links.items())
+    )
 
 
 def main(argv: list[str]) -> int:

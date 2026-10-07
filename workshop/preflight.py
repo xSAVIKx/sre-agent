@@ -106,6 +106,7 @@ def main(argv: list[str]) -> int:
     check_url("The installer for macOS and Linux", f"{RAW}/install.sh", "--workshop")
     check_url("The installer for Windows", f"{RAW}/install.ps1", "Workshop")
     check_url("The workshop website", SITE, "Build an SRE Agent")
+    check_url("The setup prompt for agents", f"{SITE}llms.txt", "Set up the SRE agent workshop")
     if "--demo" in argv:
         demo = argv[argv.index("--demo") + 1].rstrip("/")
         print("\n== The demo deployment")
