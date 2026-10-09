@@ -14,6 +14,8 @@ Open an **empty folder** in [Antigravity](https://antigravity.google), or run `a
 folder (any coding agent works). Paste this prompt. The agent installs everything, checks the
 setup and runs a first incident. It asks before it installs anything.
 
+No agent yet? See [Install the Antigravity CLI](#install-the-antigravity-cli-optional).
+
 Short version, for an agent that can read web pages: "Set up the workshop with the instructions in
 https://xsavikx.github.io/sre-agent/llms.txt".
 
@@ -79,7 +81,7 @@ workshop (the tag `step-00`).
 | `--dir DIR` | `-Dir DIR` | `SRE_AGENT_DIR` | The directory for the repository. Default: `sre-agent`. |
 | `--ref REF` | `-Ref REF` | `SRE_AGENT_REF` | The branch or tag to get. Default: `master`. |
 | `--workshop` | `-Workshop` | `SRE_AGENT_WORKSHOP=1` | Prepare for the workshop (see above). |
-| `--agent` | `-Agent` | | Start the Antigravity CLI with the setup skill after the installation. |
+| `--agent` | `-Agent` | | Start the Antigravity CLI with the setup skill after the installation. The installer does not install the CLI: see [Install the Antigravity CLI](#install-the-antigravity-cli-optional). |
 
 With a pipe (`| sh`, `| iex`), use the environment variables, or `sh -s -- <options>`.
 
@@ -103,6 +105,30 @@ To use Gemini instead of the scripted simulation, set `GEMINI_API_KEY`
 * Windows (PowerShell): `$env:GEMINI_API_KEY = "..."`
 
 ## Agent help in the repository
+
+### Install the Antigravity CLI (optional)
+
+You do not need an agent for the workshop: `uv run workshop/step.py` gives the hints and the
+solutions, and skips steps. The Antigravity CLI (`agy`) is an agent in your terminal. It can do
+the setup for you, and coach you through the steps.
+
+Install it at home: the download is approximately 55 MB (macOS) to 190 MB (Windows).
+
+```bash
+# macOS and Linux
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://antigravity.google/cli/install.ps1 | iex
+```
+
+Then run `agy` one time. It opens your browser: sign in with your Google account. For more
+information, see [Get started with the Antigravity CLI](https://antigravity.google/docs/getting-started?tab=cli).
+If you prefer an app, use the [Antigravity app](https://antigravity.google/download).
+
+### The skills
 
 After the installation, the repository has [Antigravity](https://antigravity.google) skills in
 `.agents/skills/`. The Antigravity app and the Antigravity CLI (`agy`) find them automatically
@@ -167,6 +193,7 @@ The deployment scripts (`bootstrap.sh`, `deploy.sh`, `cleanup.sh`) need bash and
 | `import ...: failed` in the setup check | Run `uv sync --all-packages` in the repository directory. |
 | `port 8080: in use` | Stop the other program, or use `uv run workshop/chat.py --port 8090`. |
 | `git: no workshop steps` | Run `git fetch origin --tags`. |
+| `would clobber existing tag` (the installer stops at "Preparing the workshop") | The workshop steps changed after you installed. Run `git fetch origin --tags --force`, then run the installer again. |
 | `The workshop needs git` | Install git: `xcode-select --install` (macOS), `winget install --id Git.Git -e` (Windows) or your package manager (Linux). Then open a new terminal. |
 | Windows on arm64 (for example Snapdragon laptops): `Failed to build grpcio` | Use x64 Python. Windows runs it with emulation: `uv sync --all-packages --python cpython-3.13-windows-x86_64-none`. The installer does this for you. |
 | Windows: `running scripts is disabled on this system` | Use the `powershell -ExecutionPolicy ByPass ...` command above. |

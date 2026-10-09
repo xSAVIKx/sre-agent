@@ -25,6 +25,9 @@ Open an **empty folder** in [Antigravity](https://antigravity.google), or run `a
 folder (any coding agent works). Paste this prompt. The agent installs everything, checks the
 setup and runs a first incident. It asks before it installs anything.
 
+No agent yet? [Install the Antigravity CLI](../INSTALL.md#install-the-antigravity-cli-optional)
+(optional).
+
 Short version, for an agent that can read web pages: "Set up the workshop with the instructions in
 https://xsavikx.github.io/sre-agent/llms.txt".
 
@@ -156,6 +159,20 @@ Open the repository in [Antigravity](https://antigravity.google), or run `agy` i
 
 The coach explains and gives hints one level at a time. It changes your code only when you ask it
 to solve or skip a step.
+
+The coach is optional: `step.py` does the same without an agent. To use the coach in a terminal,
+install the Antigravity CLI at home (approximately 55 MB to 190 MB), then run `agy` one time and
+sign in with your Google account:
+
+```bash
+# macOS and Linux
+curl -fsSL https://antigravity.google/cli/install.sh | bash
+```
+
+```powershell
+# Windows (PowerShell)
+irm https://antigravity.google/cli/install.ps1 | iex
+```
 
 The `solution.patch` files also change `.agents/skills/sre_incident_solver/`. This directory is a generated
 copy of the SRE agent (see [step 6](steps/06-wrap-up/README.md)). Do not edit it.

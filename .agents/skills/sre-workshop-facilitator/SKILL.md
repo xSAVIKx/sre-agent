@@ -49,7 +49,10 @@ You help the person who runs the workshop. Attendees use the sre-workshop-coach 
    It checks the patches, the step ladder at each tag, the branch and tags on GitHub, the
    installers, the website and the demo. Fix each ❌ with the hint on its line.
 4. If GitHub has an older `workshop` branch or no tags, the preflight shows the push command.
-   Ask the user, then run it.
+   Ask the user, then run it. Exception: after attendees have installed, do not move the tags for a
+   change to the documentation only (`git diff --stat refs/heads/workshop HEAD` shows only `.md`
+   files). In each older clone, `git fetch --tags` and the installer then fail with `would clobber
+   existing tag`. Tell the user that the red line for the workshop branch is then correct.
 5. For the cloud demo, use the sre-agent-deploy skill. Then run the preflight again with `--demo`.
 6. Rehearse one attendee: in a new folder, run the workshop installer from `INSTALL.md`, then
    `uv run workshop/step.py status`. Expect: branch `my-work`, steps 1–5 ❌.
