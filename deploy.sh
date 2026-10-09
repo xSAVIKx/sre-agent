@@ -151,95 +151,98 @@ if [ "$SKIP_INFRA" = "false" ]; then
     sleep 10
 
     # 4. Grant Least-Privilege IAM Roles
+    # --condition=None on each binding: once a policy has any binding with a condition (connecting
+    # Cloud Build to GitHub adds one), gcloud asks for a condition at every new binding. None adds
+    # the binding without a condition, and without the question.
     echo -e "\n${BLUE}[3/5] Assigning IAM roles (least-privilege)...${NC}"
 
     # Target App Roles (Write-only telemetry)
     echo "Assigning roles to target application service account..."
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
-        --role="roles/cloudtrace.agent" >/dev/null
+        --role="roles/cloudtrace.agent" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${APP_SA_EMAIL}" \
-        --role="roles/logging.logWriter" >/dev/null
+        --role="roles/logging.logWriter" --condition=None >/dev/null
     echo -e "${GREEN}✓ Granted roles/cloudtrace.agent & roles/logging.logWriter to target app${NC}"
 
     # SRE Agent Roles (Read-only telemetry & Firestore)
     echo "Assigning roles to SRE agent service account..."
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/cloudtrace.user" >/dev/null
+        --role="roles/cloudtrace.user" --condition=None >/dev/null
     # Write access to Cloud Trace for the agents' *own* spans (sre_common.tracing).
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/cloudtrace.agent" >/dev/null
+        --role="roles/cloudtrace.agent" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/logging.viewer" >/dev/null
+        --role="roles/logging.viewer" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/monitoring.viewer" >/dev/null
+        --role="roles/monitoring.viewer" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/datastore.user" >/dev/null
+        --role="roles/datastore.user" --condition=None >/dev/null
     gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
         --member="serviceAccount:${AGENT_SA_EMAIL}" \
-        --role="roles/secretmanager.secretAccessor" >/dev/null
+        --role="roles/secretmanager.secretAccessor" --condition=None >/dev/null
     echo -e "${GREEN}✓ Granted roles/cloudtrace.user, roles/cloudtrace.agent, roles/logging.viewer, roles/monitoring.viewer, roles/datastore.user & secretAccessor to SRE Agent${NC}"
 
     # SRE Build Roles (Least Privilege Cloud Build logging, storage, and deployment access)
     echo "Assigning roles to SRE Build service account..."
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/logging.logWriter" >/dev/null
+        --role="roles/logging.logWriter" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/storage.admin" >/dev/null
+        --role="roles/storage.admin" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/run.admin" >/dev/null
+        --role="roles/run.admin" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/artifactregistry.writer" >/dev/null
+        --role="roles/artifactregistry.writer" --condition=None >/dev/null
     gcloud secrets add-iam-policy-binding GEMINI_API_KEY \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/secretmanager.secretAccessor" >/dev/null
+        --role="roles/secretmanager.secretAccessor" --condition=None >/dev/null
     echo -e "${GREEN}✓ Granted logging, storage, run admin, artifactregistry.writer & secretAccessor roles to SRE Build SA${NC}"
 
     # Inventory Agent Roles (Firestore access, running Cloud Run Jobs, logging)
     echo "Assigning roles to Inventory Agent service account..."
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
-        --role="roles/datastore.user" >/dev/null
+        --role="roles/datastore.user" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
-        --role="roles/run.developer" >/dev/null
+        --role="roles/run.developer" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
-        --role="roles/logging.logWriter" >/dev/null
+        --role="roles/logging.logWriter" --condition=None >/dev/null
     # Read-only search of the project's databases (Firestore, Spanner, Cloud SQL).
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
-        --role="roles/cloudasset.viewer" >/dev/null
+        --role="roles/cloudasset.viewer" --condition=None >/dev/null
     gcloud projects add-iam-policy-binding "$GCP_PROJECT" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
-        --role="roles/cloudtrace.agent" >/dev/null
+        --role="roles/cloudtrace.agent" --condition=None >/dev/null
     echo -e "${GREEN}✓ Granted roles/datastore.user, roles/run.developer, roles/logging.logWriter, roles/cloudasset.viewer & roles/cloudtrace.agent to Inventory Agent SA${NC}"
 
     # Allow SRE Build SA to act as the SRE application service accounts
     echo "Allowing SRE Build SA to act as application and agent service accounts..."
     gcloud iam service-accounts add-iam-policy-binding "$APP_SA_EMAIL" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/iam.serviceAccountUser" >/dev/null || true
+        --role="roles/iam.serviceAccountUser" --condition=None >/dev/null || true
     gcloud iam service-accounts add-iam-policy-binding "$AGENT_SA_EMAIL" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/iam.serviceAccountUser" >/dev/null || true
+        --role="roles/iam.serviceAccountUser" --condition=None >/dev/null || true
     gcloud iam service-accounts add-iam-policy-binding "$INVENTORY_SA_EMAIL" \
         --member="serviceAccount:${BUILD_SA_EMAIL}" \
-        --role="roles/iam.serviceAccountUser" >/dev/null || true
+        --role="roles/iam.serviceAccountUser" --condition=None >/dev/null || true
     # Allow Inventory Agent SA to act as itself to execute jobs
     gcloud iam service-accounts add-iam-policy-binding "$INVENTORY_SA_EMAIL" \
         --member="serviceAccount:${INVENTORY_SA_EMAIL}" \
-        --role="roles/iam.serviceAccountUser" >/dev/null || true
+        --role="roles/iam.serviceAccountUser" --condition=None >/dev/null || true
     echo -e "${GREEN}✓ Allowed Service Account User delegations${NC}"
 
     # Grant Service Account User to active gcloud account to run the build as the build SA
@@ -253,7 +256,7 @@ if [ "$SKIP_INFRA" = "false" ]; then
         echo "Granting roles/iam.serviceAccountUser to active deployer account ($ACTIVE_ACCOUNT)..."
         gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA_EMAIL" \
             --member="$MEMBER" \
-            --role="roles/iam.serviceAccountUser" >/dev/null || true
+            --role="roles/iam.serviceAccountUser" --condition=None >/dev/null || true
     fi
 
     # Create Artifact Registry repository for regional images if it doesn't exist

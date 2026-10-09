@@ -127,9 +127,11 @@ delete_sa() {
     echo "Removing IAM policy bindings for $sa_name..."
     local role
     for role in "$@"; do
+        # --all: also the copies with a condition. Without it, gcloud asks which binding to
+        # remove when the policy has conditions, and the question is hidden by &>/dev/null.
         gcloud projects remove-iam-policy-binding "$GCP_PROJECT" \
             --member="serviceAccount:${sa_email}" \
-            --role="$role" &>/dev/null || true
+            --role="$role" --all &>/dev/null || true
     done
     gcloud iam service-accounts delete "$sa_email" --quiet
     echo -e "${GREEN}✓ Deleted service account: $sa_email${NC}"
