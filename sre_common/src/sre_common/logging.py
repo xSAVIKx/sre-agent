@@ -153,12 +153,30 @@ class StructuredGcpLoggingFormatter(logging.Formatter):
         return json.dumps(log_entry)
 
 
+# Libraries that log each protocol message at DEBUG, some as multi-line dumps.
+_CHATTY_LIBRARIES = ("a2a", "asyncio", "httpcore", "sse_starlette")
+
+
+def quiet_libraries(level: int) -> None:
+    """Keeps the libraries' own DEBUG lines out of a DEBUG log: it then shows this project's
+    debug lines. Above DEBUG, also hides the full agent card that the A2A client logs, and the
+    line for each HTTP request."""
+    for name in _CHATTY_LIBRARIES:
+        logging.getLogger(name).setLevel(max(level, logging.INFO))
+    details = logging.WARNING if level > logging.DEBUG else logging.INFO
+    logging.getLogger("a2a.client.card_resolver").setLevel(details)
+    # One line for each HTTP request. Cloud Run logs the requests itself.
+    logging.getLogger("uvicorn.access").setLevel(details)
+
+
 def setup_logging(service_name: str, level: int = logging.INFO) -> None:
     """Configures application-wide logging with service name identifier.
 
     Uses StructuredGcpLoggingFormatter for JSON logs if deployed to the cloud
-    (or if LOG_FORMAT=json), and a readable console format otherwise.
+    (or if LOG_FORMAT=json), and a readable console format otherwise. LOG_LEVEL (for example
+    DEBUG) overrides `level`.
     """
+    level = logging.getLevelNamesMapping().get(os.environ.get("LOG_LEVEL", "").upper(), level)
     is_cloud = os.environ.get("K_SERVICE") is not None
     log_format = os.environ.get("LOG_FORMAT", "json" if is_cloud else "text").lower()
 
@@ -173,9 +191,7 @@ def setup_logging(service_name: str, level: int = logging.INFO) -> None:
     if log_format == "json":
         handler.setFormatter(StructuredGcpLoggingFormatter(service_name=service_name))
     else:
-        formatter = logging.Formatter(
-            fmt=f"%(asctime)s [%(levelname)s] [{service_name}] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
-        )
+        formatter = logging.Formatter(fmt="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
         handler.setFormatter(formatter)
 
     root_logger.addHandler(handler)
@@ -185,3 +201,5 @@ def setup_logging(service_name: str, level: int = logging.INFO) -> None:
         logger.handlers = []
         logger.propagate = True
         logger.setLevel(level)
+
+    quiet_libraries(level)

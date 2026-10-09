@@ -117,7 +117,7 @@ async def find_matching_template(
     """
 
     if IS_MOCK or db is None:
-        logger.info(f"[Mock Match] Finding local template for resource_type: {resource_type}")
+        logger.debug(f"[Mock Match] Finding local template for resource_type: {resource_type}")
         for template in DEFAULT_TEMPLATES:
             if template["resource_type"] == resource_type:
                 return template

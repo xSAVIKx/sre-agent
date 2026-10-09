@@ -68,6 +68,7 @@ uv run workshop/step.py solve 3
 | `Error: Failed to contact SRE Sub-Agent: TODO(step-4)` | This is correct before step 4: the Orchestrator does not call the SRE agent yet. |
 | The report has no **Root Cause Analysis** section | This is correct before step 1: the workflow stops after the TraceAnalyzer. |
 | Port 8080 is in use | Use `uv run workshop/chat.py --port 8081` and open `http://localhost:8081/chat`. |
+| An attendee wants to see more of the log | Add `--verbose` to `simulate_incident.py` or `workshop/chat.py`. It shows the debug lines, the library warnings and each HTTP request. |
 | The cloud demo finds no anomalous trace | Cloud Trace receives spans with a delay. After `curl .../api/gateway?trigger_error=true`, wait approximately 2 minutes. Then ask the agent. |
 | The chat shows "All systems are healthy" | There is no incident telemetry. From the repository root, run `uv run simulate_incident.py` first. |
 | An attendee with a key gets different text | This is correct. Gemini writes the text. The tools make the cascade table and the post-mortem, so these are the same. |

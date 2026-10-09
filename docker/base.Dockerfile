@@ -7,8 +7,11 @@
 # .github/workflows/base-image.yml; scripts/base-image.sh computes the hash
 # (of uv.lock and this file).
 
+# The Python image comes from mirror.gcr.io: Google's free cache of popular Docker Hub images (the
+# same tags and digests). Docker Hub limits anonymous pulls, and shared CI runners get 429 errors.
+
 # Stage 1: resolve and install the dependencies with uv
-FROM python:3.14-slim AS builder
+FROM mirror.gcr.io/library/python:3.14-slim AS builder
 WORKDIR /workspace
 
 # Keep in step with UV_VERSION in .github/workflows/ci.yml.
@@ -27,7 +30,7 @@ COPY sre_common/pyproject.toml sre_common/pyproject.toml
 RUN uv sync --frozen --no-dev --all-packages --no-install-workspace
 
 # Stage 2: runtime image without uv
-FROM python:3.14-slim
+FROM mirror.gcr.io/library/python:3.14-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

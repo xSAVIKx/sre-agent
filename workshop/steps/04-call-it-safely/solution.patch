@@ -1,6 +1,6 @@
 --- a/agent/src/agent/config.py
 +++ b/agent/src/agent/config.py
-@@ -453,15 +453,20 @@
+@@ -451,15 +451,20 @@
      }
      if trace_id:
          metadata["trace_id"] = trace_id
@@ -29,7 +29,7 @@
      except Exception as e:
          logger.error(f"Failed to communicate with SRE sub-agent: {e}")
          report = f"Error: Failed to contact SRE Sub-Agent: {e!s}"
-@@ -560,9 +565,7 @@
+@@ -558,9 +563,7 @@
  
  def build_safety_policies() -> list[Any]:
      """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""

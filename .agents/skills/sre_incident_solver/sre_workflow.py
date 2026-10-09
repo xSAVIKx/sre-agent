@@ -152,7 +152,8 @@ async def _run_adk_diagnostics(
         except Exception as e:
             if IS_MOCK:
                 # Expected in the standalone simulation: no Inventory Agent is running.
-                logger.info(f"Inventory Agent unavailable in mock mode ({e}); using the built-in mock topology.")
+                logger.info("No Inventory Agent in this local run: using the built-in mock topology.")
+                logger.debug(f"Inventory Agent error: {e}")
             else:
                 logger.error(f"Failed to query Inventory Agent: {e}")
 

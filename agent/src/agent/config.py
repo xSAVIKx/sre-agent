@@ -118,9 +118,7 @@ def summarize_report(report: str) -> str:
 MOCK_HISTORY_DB: dict[str, list[dict[str, Any]]] = {}
 
 if not HAS_ANTIGRAVITY:
-    logger.warning(
-        "google-antigravity is not active or GEMINI_API_KEY is missing. Using simulated agent config fallbacks."
-    )
+    logger.info("No GEMINI_API_KEY (or no google-antigravity): the Orchestrator uses its scripted rules, not Gemini.")
 
     class Text:
         def __init__(self, text: str, step_index: int = 0) -> None:

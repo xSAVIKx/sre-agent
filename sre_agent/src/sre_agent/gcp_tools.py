@@ -94,12 +94,12 @@ def _load_mock_file(filename: str) -> Any:
         Deserialized JSON content or None if file loading fails.
     """
     path = os.path.join(MOCK_DATA_DIR, filename)
-    logger.info(f"[Mock Telemetry Check] Looking for mock file: {path}")
+    logger.debug(f"[Mock Telemetry Check] Looking for mock file: {path}")
     if os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
-                logger.info(f"[Mock Telemetry Check] Successfully loaded mock data from: {path}")
+                logger.debug(f"[Mock Telemetry Check] Successfully loaded mock data from: {path}")
                 return data
         except Exception as e:
             logger.error(f"Error loading mock file {path}: {e}")
@@ -327,7 +327,7 @@ async def query_traces(project_id: str | None = None, limit: int = 10) -> str:
         logger.info(f"[GCP Observability] Querying mock traces from '{MOCK_DATA_DIR}' (limit={limit})")
         traces = _load_mock_file("traces.json")
         if traces:
-            logger.info(f"[GCP Observability] Retrieved {len(traces)} mock traces")
+            logger.debug(f"[GCP Observability] Retrieved {len(traces)} mock traces")
             return json.dumps(traces[:limit], indent=2)
         logger.warning("[GCP Observability] No mock traces found in directory")
         return json.dumps({"error": "No mock traces found. Run simulate_incident.py first."}, indent=2)
@@ -413,10 +413,10 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
         A formatted JSON string representing the trace spans and timeline.
     """
     if IS_MOCK:
-        logger.info(f"[GCP Observability] Retrieving details for mock Trace ID: {trace_id}")
+        logger.debug(f"[GCP Observability] Retrieving details for mock Trace ID: {trace_id}")
         trace_details = _load_mock_file(f"trace_{trace_id}.json")
         if trace_details:
-            logger.info(f"[GCP Observability] Loaded detailed spans for mock trace {trace_id}")
+            logger.debug(f"[GCP Observability] Loaded detailed spans for mock trace {trace_id}")
             return json.dumps(trace_details, indent=2)
 
         # Fallback search inside traces.json
@@ -427,7 +427,7 @@ async def get_trace_details(trace_id: str, project_id: str | None = None) -> str
         if traces:
             for t in traces:
                 if t.get("traceId") == trace_id:
-                    logger.info(f"[GCP Observability] Found trace {trace_id} in fallback traces.json list")
+                    logger.debug(f"[GCP Observability] Found trace {trace_id} in fallback traces.json list")
                     return json.dumps(t, indent=2)
         logger.warning(f"[GCP Observability] Mock Trace ID {trace_id} not found in any local mock files")
         return json.dumps({"error": f"Trace ID {trace_id} not found in mock data."}, indent=2)
@@ -564,7 +564,7 @@ async def query_logs_by_trace(trace_id: str, project_id: str | None = None, limi
                 logs = [log for log in all_logs if log.get("traceId") == trace_id]
 
         if logs:
-            logger.info(f"[GCP Observability] Found {len(logs)} mock logs correlated with trace {trace_id}")
+            logger.debug(f"[GCP Observability] Found {len(logs)} mock logs correlated with trace {trace_id}")
             formatted_logs = []
             for log in logs[:limit]:
                 msg = log.get("message", "")
@@ -818,7 +818,7 @@ async def query_metrics(filter_expression: str, duration_minutes: int = 15, proj
 
             filtered_metrics.append(ts)
 
-        logger.info(f"[GCP Observability] Found {len(filtered_metrics)} matching mock metrics")
+        logger.debug(f"[GCP Observability] Found {len(filtered_metrics)} matching mock metrics")
         return json.dumps(filtered_metrics, indent=2)
 
     resolved_project = _get_project_id(project_id)
@@ -1052,7 +1052,7 @@ async def analyze_trace_cascade(trace_id: str, project_id: str | None = None) ->
     Returns:
         A Markdown report showing trace hierarchy, self-execution time, and the identified bottleneck.
     """
-    logger.info(f"Analyzing cascade for trace: {trace_id}")
+    logger.debug(f"Analyzing cascade for trace: {trace_id}")
     details_str = await get_trace_details(trace_id, project_id)
     try:
         data = json.loads(details_str)
@@ -1299,7 +1299,7 @@ async def generate_post_mortem(trace_id: str, project_id: str | None = None) -> 
     Returns:
         A Markdown post-mortem document.
     """
-    logger.info(f"Generating post-mortem for trace: {trace_id}")
+    logger.debug(f"Generating post-mortem for trace: {trace_id}")
     details_str = await get_trace_details(trace_id, project_id)
     logs_str = await query_logs_by_trace(trace_id, project_id)
 
