@@ -68,18 +68,12 @@ the checks pass on your computer, CI usually passes too.
 ### Where to Add Your Code
 
 ```mermaid
-flowchart LR
-    Q["query_traces"] --> TA["🕵️ TraceAnalyzer"]
-    TA --> FT["fetch_telemetry<br/>(topology enrichment)"]
-    FT --> LC["🩺 LogCorrelator<br/>+ tools"]
-    LC --> PM["analyze_trace_cascade<br/>generate_post_mortem"]
-    PM --> A2["A2UI surfaces<br/>(a2ui_surfaces.py)"] --> UI["💬 web chat + 📥"]
-    E1(["🧩 Ex.1–3: new tools / better report"]) -.-> LC & PM
-    E2(["🧩 Ex.4: severity in the post-mortem"]) -.-> PM
-    E3(["🧩 Ex.5–6: new ADK node / multi-trace"]) -.-> FT
-    E4(["🧩 Ex.7: human-in-the-loop write tool"]) -.-> LC
-    E5(["🧩 Ex.9: RAG runbooks"]) -.-> FT
-    E6(["🧩 Ex.8 & Capstone: notify / auto-trigger"]) -.-> Q
+flowchart TB
+    Q["query_traces<br/>🧩 Ex. 8 and Capstone: notify, auto-trigger"] --> TA["🕵️ TraceAnalyzer"]
+    TA --> FT["fetch_telemetry (topology enrichment)<br/>🧩 Ex. 5–6: new ADK node, multi-trace<br/>🧩 Ex. 9: RAG runbooks"]
+    FT --> LC["🩺 LogCorrelator + tools<br/>🧩 Ex. 1–3: new tools<br/>🧩 Ex. 7: human-in-the-loop write tool"]
+    LC --> PM["analyze_trace_cascade<br/>generate_post_mortem<br/>🧩 Ex. 1–3: better report<br/>🧩 Ex. 4: severity in the post-mortem"]
+    PM --> A2["A2UI surfaces (a2ui_surfaces.py)"] --> UI["💬 web chat + 📥"]
 ```
 
 ---

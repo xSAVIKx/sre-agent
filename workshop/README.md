@@ -178,12 +178,12 @@ calls. To see all the details (debug lines, library warnings and each HTTP reque
 ## Architecture
 
 ```mermaid
-flowchart LR
-    User(["👤 You"]) -->|/chat| ORCH["🛡️ Orchestrator<br/>Antigravity agent<br/>deny('*') + allow one tool per SRE skill"]
-    ORCH -->|"list_incidents · diagnose_sre · write_post_mortem"| SRE["🔬 SRE engine<br/>ADK: TraceAnalyzer → LogCorrelator"]
-    SRE -->|tools| T["query_metrics · analyze_trace_cascade<br/>generate_post_mortem"]
-    APP["🐒 Target app"] -->|traces · logs · metrics| DATA[("mock_telemetry_data/")]
-    T --> DATA
+flowchart TB
+    User(["👤 You"]) -->|/chat| ORCH["🛡️ Orchestrator<br/>Antigravity agent<br/>deny('*') + allow one tool<br/>per SRE skill"]
+    ORCH -->|"list_incidents · diagnose_sre · write_post_mortem"| SRE["🔬 SRE engine · ADK<br/>TraceAnalyzer<br/>→ LogCorrelator"]
+    SRE -->|tools| T["query_metrics<br/>analyze_trace_cascade<br/>generate_post_mortem"]
+    T --> DATA[("mock_telemetry_data/")]
+    APP["🐒 Target app"] -->|"traces · logs · metrics"| DATA
 ```
 
 In this workshop, "SRE agent" is the diagnostics engine in `sre_agent/`. The diagram and the commands call it "SRE engine".
