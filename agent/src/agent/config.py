@@ -451,20 +451,15 @@ async def _call_sre_skill(
     }
     if trace_id:
         metadata["trace_id"] = trace_id
-    if sink is not None:  # a chat: its UI renders A2UI
-        metadata["a2uiClientCapabilities"] = A2UI_CLIENT_CAPABILITIES
     try:
-        result = await call_agent(
-            base_url,
-            prompt,
-            metadata,
-            context_id=sink.context_id if sink else "",
-            on_progress=_emit_progress,
-            extensions=[A2UI_EXTENSION_URI] if sink is not None else None,
-        )
-        report = result.text
-        if sink is not None:
-            sink.a2ui = result.a2ui
+        # TODO(step-4): Send the request to the SRE agent over A2A, and keep its answer:
+        #   1. For a chat (`sink is not None`), add A2UI_CLIENT_CAPABILITIES to the metadata, under
+        #      the key "a2uiClientCapabilities". Then the SRE agent also sends A2UI surfaces.
+        #   2. result = await call_agent(base_url, prompt, metadata, context_id=..., on_progress=...,
+        #      extensions=...). Use sink.context_id (or "" without a sink), _emit_progress, and
+        #      [A2UI_EXTENSION_URI] for a chat (or None).
+        #   3. report = result.text. For a chat, also keep the surface: sink.a2ui = result.a2ui.
+        raise NotImplementedError("TODO(step-4): call the SRE agent over A2A")
     except Exception as e:
         logger.error(f"Failed to communicate with SRE sub-agent: {e}")
         report = f"Error: Failed to contact SRE Sub-Agent: {e!s}"
@@ -563,7 +558,9 @@ SYSTEM_INSTRUCTIONS = (
 
 def build_safety_policies() -> list[Any]:
     """Returns the Orchestrator's tool-call policies: deny everything, allow delegation."""
-    return [deny("*"), allow("list_incidents"), allow("diagnose_sre"), allow("write_post_mortem")]
+    # TODO(step-4): Everything is denied, so the Orchestrator cannot even delegate. Keep the
+    #   deny-by-default rule and add one `allow(...)` per tool it needs: one per SRE agent skill.
+    return [deny("*")]
 
 
 def load_agent_config(config_path: str = "agent/agent_config.json") -> LocalAgentConfig:

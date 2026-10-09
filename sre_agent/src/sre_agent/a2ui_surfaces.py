@@ -141,7 +141,10 @@ def _button(component_id: str, label: str, action: str, trace_id: str | dict[str
             "id": component_id,
             "component": "Button",
             "child": f"{component_id}-label",
-            "action": {"event": {"name": action, "context": {"traceId": trace_id}}},
+            # TODO(step-5): The click must tell the agent which trace: add a "context" with
+            #   {"traceId": trace_id} to the event. In a list row, trace_id is a data binding
+            #   ({"path": "traceId"}): the browser puts in the trace ID of that row.
+            "action": {"event": {"name": action}},
         },
         _text(f"{component_id}-label", label),
     ]
@@ -153,10 +156,10 @@ def _badge(bottleneck_share: float | None) -> list[dict[str, Any]]:
     A component is a JSON object: its ``id``, the catalog ``component`` it instantiates,
     and that component's properties - here `SeverityBadge.level` and `.contribution`.
     """
-    if bottleneck_share is None:
-        return []
-    level = classify_severity(bottleneck_share)
-    return [{"id": "severity", "component": "SeverityBadge", "level": level, "contribution": bottleneck_share}]
+    # TODO(step-5): Without a bottleneck there is no badge: return []. Otherwise return one
+    #   component: {"id": "severity", "component": "SeverityBadge", "level": <classify_severity>,
+    #   "contribution": <the share>}. The cards list it first, and the browser draws it.
+    return []
 
 
 def _card(children: list[str], components: list[dict[str, Any]]) -> list[dict[str, Any]]:

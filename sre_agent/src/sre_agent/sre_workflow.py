@@ -70,12 +70,14 @@ LOG_CORRELATOR_INSTRUCTION = (
 
 trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
 
-log_correlator = AdkAgent(
-    name="log_correlator",
-    model=MODEL,
-    instruction=LOG_CORRELATOR_INSTRUCTION,
-    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
-)
+# TODO(step-2): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
+#   - name: "log_correlator". The workflow and the logs use this name.
+#   - model: MODEL. It is Gemini when GEMINI_API_KEY is set, and a scripted model if not.
+#   - instruction: LOG_CORRELATOR_INSTRUCTION (above). It tells the model its job.
+#   - tools: the four functions imported at the top of this file: query_metrics,
+#     list_metric_descriptors, analyze_trace_cascade, generate_post_mortem. ADK reads their
+#     type hints and docstrings, and tells the model how to call them.
+log_correlator = AdkAgent(name="log_correlator", model=MODEL, instruction="Describe the trace.")
 
 
 @dataclass(frozen=True)
@@ -270,9 +272,11 @@ async def _run_adk_diagnostics(
 
     try:
         # Define the ADK 2.0 graph workflow
-        sre_diagnostics_workflow = AdkWorkflow(
-            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
-        )
+        # TODO(step-1): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
+        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
+        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
+        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.
+        sre_diagnostics_workflow = AdkWorkflow(name="sre_diagnostics_workflow", edges=[(START, trace_analyzer)])
 
         session_service = InMemorySessionService()
         runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
