@@ -72,14 +72,12 @@ LOG_CORRELATOR_INSTRUCTION = (
 
 trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
 
-# TODO(step-2): Build the LogCorrelator as an ADK agent: AdkAgent(name=..., model=..., ...).
-#   - name: "log_correlator". The workflow and the logs use this name.
-#   - model: MODEL. It is Gemini when GEMINI_API_KEY is set, and a scripted model if not.
-#   - instruction: LOG_CORRELATOR_INSTRUCTION (above). It tells the model its job.
-#   - tools: the four functions imported at the top of this file: query_metrics,
-#     list_metric_descriptors, analyze_trace_cascade, generate_post_mortem. ADK reads their
-#     type hints and docstrings, and tells the model how to call them.
-log_correlator = AdkAgent(name="log_correlator", model=MODEL, instruction="Describe the trace.")
+log_correlator = AdkAgent(
+    name="log_correlator",
+    model=MODEL,
+    instruction=LOG_CORRELATOR_INSTRUCTION,
+    tools=[query_metrics, list_metric_descriptors, analyze_trace_cascade, generate_post_mortem],
+)
 
 
 @dataclass(frozen=True)
