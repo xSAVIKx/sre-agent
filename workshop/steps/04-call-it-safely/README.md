@@ -19,9 +19,17 @@ All three tools use `_call_sre_skill`, which calls `call_agent(...)` from `sre_c
 `call_agent` reads the agent card, sends one A2A message, forwards the progress updates, and
 returns the result.
 
-A chat also asks for **A2UI** (step 5). The request says which UI components the chat can show:
-`A2UI_CLIENT_CAPABILITIES` in the metadata, and the A2UI extension URI. Then the SRE agent also
-sends a surface.
+**Why the TODO has A2UI lines.** The SRE agent sends UI (A2UI surfaces, step 5) only to a caller
+that asks for it, and a chat asks in its A2A request. These three lines of the TODO are the client
+side of A2UI:
+
+* `metadata["a2uiClientCapabilities"] = A2UI_CLIENT_CAPABILITIES`: the components that the chat
+  can draw (its catalog).
+* `extensions=[A2UI_EXTENSION_URI]`: turns on the A2UI extension for this request.
+* `sink.a2ui = result.a2ui`: keeps the surface that comes back, so that the chat can show it.
+
+They are here because they are part of the A2A request. Without them, the chat shows only text.
+Step 5 explains A2UI, and changes the other side: the surfaces that the SRE agent builds.
 
 On your laptop, there is no SRE agent service. The Orchestrator starts the SRE agent on a free
 local port (`agent/src/agent/local_sre.py`). The calls are real A2A over HTTP, as in production.
@@ -93,6 +101,11 @@ SDK receives your policy as
 * Why one Orchestrator tool for each skill, and not one generic `call_sre_agent(skill=...)`? Each
   tool gets its own policy decision. For example, you can `ask_user` before a post-mortem, and
   always allow the incident list.
+* The agent card already lists the skills. Why does the Orchestrator still define its own tools?
+  A skill on a card has no parameter schema: the tools give the model typed arguments, such as
+  `trace_id`. And the Orchestrator decides what it may do, not the remote agent: a new skill on
+  the card must not give the Orchestrator a new power without a review. You saw this: step 3 put
+  `write_post_mortem` on the card, and the chat can use it only after this step.
 
 ## Stretch: human in the loop
 

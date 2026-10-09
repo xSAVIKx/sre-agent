@@ -25,7 +25,7 @@ sends HTML or code. The browser decides how each component looks:
 | Topic | Details |
 |:--|:--|
 | Where the SRE agent makes the surfaces | `sre_agent/src/sre_agent/a2ui_surfaces.py` makes one surface for each result: the incident list, the diagnosis and the post-mortem. |
-| How a surface moves | Each message is an A2A data part with the type `application/json+a2ui`. The SRE agent sends these parts only to callers that declare A2UI client capabilities. The Orchestrator declares them for its chat. |
+| How a surface moves | Each message is an A2A data part with the type `application/json+a2ui`. The SRE agent sends these parts only to callers that declare A2UI client capabilities. The Orchestrator declares them for its chat: you wrote this in step 4 (`a2uiClientCapabilities` and the A2UI extension). |
 | How the browser shows a surface | The browser uses `@a2ui/lit` (`agent/web/src/sre-a2ui.js`, prebuilt into `agent/src/agent/static/sre-a2ui.js`). |
 | The catalog | The SRE catalog is the A2UI basic catalog (Card, Column, List, Tabs, Text, Button…) plus two custom components: `SeverityBadge` and `Download`. Each custom component has a schema on the two sides: a Pydantic model in Python and a Zod schema in the browser. |
 
