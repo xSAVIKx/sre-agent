@@ -18,16 +18,14 @@ an incident for the agents to find.
 ## The big picture
 
 ```mermaid
-flowchart LR
-    U["🧑 You, in the chat"] <-->|A2UI surfaces and actions| O
-    subgraph O["🤖 Orchestrator · Antigravity SDK"]
-        P["policy: deny * , allow 3 tools"]
-    end
+flowchart TB
+    U["🧑 You, in the chat"]
+    O["🤖 Orchestrator<br/>Antigravity SDK<br/>policy: deny *, allow 3 tools"]
+    S["🩺 SRE agent · ADK<br/>trace_analyzer<br/>→ fetch_telemetry<br/>→ log_correlator"]
+    T[("traces · logs · metrics")]
+    U <-->|"A2UI: surfaces and actions"| O
     O <-->|"A2A: agent card, then messages"| S
-    subgraph S["🩺 SRE agent · ADK"]
-        W["workflow: trace_analyzer → fetch_telemetry → log_correlator"]
-    end
-    S -->|tools| T[("traces, logs, metrics")]
+    S -->|tools| T
 ```
 
 * **The Antigravity SDK** runs the Orchestrator: the agent that you talk to. Its policy lets it

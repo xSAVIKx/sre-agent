@@ -22,9 +22,9 @@ An ADK `Workflow` connects these **nodes**. A node can be an agent or a function
 `edges` is a chain: each node gets the output of the node before it.
 
 ```mermaid
-flowchart LR
+flowchart TB
     S([START]) --> TA["🕵️ trace_analyzer"]
-    TA -->|trace ID| FT["fetch_telemetry<br/>(Python)"]
+    TA -->|trace ID| FT["fetch_telemetry (Python)"]
     FT -->|spans + logs| LC["🩺 log_correlator"]
 ```
 
