@@ -72,13 +72,19 @@ uv run workshop/basics/try_a2a.py --ui     # also ask for A2UI
 The script uses plain HTTP and JSON, so you see the protocol itself. Look for these items in the
 output:
 
-1. The **agent card** and its three skills.
+1. The **agent card** and its skills: `list_incidents` and `diagnose_incident`. Step 3 adds
+   `write_post_mortem`.
 2. The **request**: a JSON-RPC `SendStreamingMessage` with the header `A2A-Version: 1.0`, a
    message, and the metadata `skill`.
 3. The **stream**: the task (`SUBMITTED`), status updates (`WORKING`, with progress text), the
-   **artifact** with text, data and A2UI parts, and at the end `COMPLETED`.
+   **artifact** with text, data and A2UI parts, and at the end `COMPLETED`. Each A2UI part gets
+   one line: its media type, `application/json+a2ui`, and the message: `createSurface`,
+   `updateComponents` (with the component types) or `updateDataModel`.
+4. With `--ui`, at the end: the **A2UI messages** of the result, in full. Paste them into the
+   [playground](a2ui.md#try-it-the-playground) to see the UI.
 
-Add `--raw` to see the full JSON of each event. Try `diagnose_incident` as the skill.
+Add `--raw` to see the full JSON of each event. Try `diagnose_incident` as the skill. If the
+script says that there is no incident yet, run `uv run simulate_incident.py --engine-only` first.
 
 ## In the workshop
 
