@@ -50,6 +50,9 @@ The command does these tasks:
 The safety policy blocks the tool call on purpose. At this time, the Orchestrator denies *all*
 tool calls. You fix this in step 4. Until then, use `--engine-only`.
 
+With a `GEMINI_API_KEY`, the Orchestrator is Gemini. It tries the tools, the policy denies each
+call, and Gemini tells you so in its own words, for example ``Denied by policy "*"``.
+
 ## 3. Tour (5 minutes, with the facilitator)
 
 | Layer | Location | Function |

@@ -61,7 +61,11 @@ At this time, the `log_correlator` has a weak instruction and no tools. It canno
 3. Look at **Observability Metrics** in the report. It now shows real values: CPU at `0.24` and
    100 database connections. The connection pool is full: this is the cause of the timeout.
 
-With a `GEMINI_API_KEY`, Gemini decides which tools to call, and writes its own analysis.
+With a `GEMINI_API_KEY`, Gemini decides which tools to call, and writes its own analysis. It
+usually lists the metrics first (`Listing mock metric descriptors` in the log), then queries the
+database connection count. **Observability Metrics** then shows the connections rising to 100.
+The instruction tells it to check the metrics: without that sentence, Gemini often calls no tool
+at all.
 
 ## Discuss
 
@@ -73,7 +77,8 @@ With a `GEMINI_API_KEY`, Gemini decides which tools to call, and writes its own 
 
 ## Stretch
 
-* With a key: change `LOG_CORRELATOR_INSTRUCTION`, and compare the reports.
+* With a key: in `LOG_CORRELATOR_INSTRUCTION`, remove the sentence that starts with "Always check
+  the metrics". Run again. Does Gemini still call a tool? What does it write about the cause now?
 * Write a new tool: an `async` function with type hints and a docstring. Add it to `tools`.
 * **Share a value through the session state.** An agent with `output_key` writes its answer into
   the session state ([ADK basics, 6](../../basics/adk.md#6-session-state-and-output_key)):
