@@ -1,6 +1,6 @@
 --- a/.agents/skills/sre_incident_solver/sre_workflow.py
 +++ b/.agents/skills/sre_incident_solver/sre_workflow.py
-@@ -272,11 +272,9 @@
+@@ -274,11 +274,9 @@
  
      try:
          # Define the ADK 2.0 graph workflow
@@ -17,7 +17,7 @@
          runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -270,11 +270,9 @@
+@@ -272,11 +272,9 @@
  
      try:
          # Define the ADK 2.0 graph workflow

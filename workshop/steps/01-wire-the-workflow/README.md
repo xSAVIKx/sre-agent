@@ -63,6 +63,10 @@ agents use Gemini.
 3. Look at **Observability Metrics**. It says `Not checked: this agent has no query_metrics tool`.
    Step 2 fixes this.
 
+With a `GEMINI_API_KEY`, Gemini writes its own text: the sections can have other titles, and
+there is no `Not checked` line. The agent has no tools yet, so it can only guess the cause from
+the spans and logs.
+
 The cascade table and the post-mortem come after the agents' text. The workflow adds them from
 the tools, so they are always correct.
 

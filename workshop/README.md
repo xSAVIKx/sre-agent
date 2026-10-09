@@ -15,7 +15,11 @@ A `GEMINI_API_KEY` is optional:
 
 * With a key, the agents use Gemini to find the root cause.
 * Without a key, the same ADK agents use a scripted model that answers with fixed rules. The
-  workflow, the tool calls and the A2A calls are the same.
+  workflow and the A2A calls are the same.
+
+The step pages show the results **without a key**. With a key, the cascade table, the severity
+badge, the post-mortem and the A2A calls are the same. Gemini writes its own text and chooses its
+own tool calls, and a run takes 20 to 40 seconds instead of 2.
 
 ## Before the workshop (10 minutes, at home)
 
