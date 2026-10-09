@@ -52,7 +52,7 @@ def _parts(parts: list[dict]) -> str:
         if "text" in part:
             lines.append(f"text: {part['text'][:70]!r}")
         elif "data" in part and mime == A2UI_MIME_TYPE:
-            lines.append(f"A2UI {_a2ui(part['data'])}")
+            lines.append(f"data ({mime}): {_a2ui(part['data'])}")
         elif "data" in part:
             lines.append(
                 f"data{' (' + mime + ')' if mime else ''}: {json.dumps(part['data'], ensure_ascii=False)[:60]}…"

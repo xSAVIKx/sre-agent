@@ -78,7 +78,8 @@ output:
    message, and the metadata `skill`.
 3. The **stream**: the task (`SUBMITTED`), status updates (`WORKING`, with progress text), the
    **artifact** with text, data and A2UI parts, and at the end `COMPLETED`. Each A2UI part gets
-   one line: `createSurface`, `updateComponents` (with the component types) or `updateDataModel`.
+   one line: its media type, `application/json+a2ui`, and the message: `createSurface`,
+   `updateComponents` (with the component types) or `updateDataModel`.
 4. With `--ui`, at the end: the **A2UI messages** of the result, in full. Paste them into the
    [playground](a2ui.md#try-it-the-playground) to see the UI.
 
