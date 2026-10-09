@@ -73,6 +73,7 @@ needs no GCP account and no API key.
 | `import ...: failed` in `check.py 0` | Run `uv sync --all-packages` from the repository root. |
 | `port 8080: in use` | Stop the other program, or use `uv run workshop/chat.py --port 8090`. |
 | `git: no workshop steps` | Run `git fetch origin --tags`. |
+| `would clobber existing tag` (the installer stops at "Preparing the workshop") | The workshop steps changed after you installed. Run `git fetch origin --tags --force`, then run the installer again. |
 | Windows on arm64: `Failed to build grpcio` | Run `uv sync --all-packages --python cpython-3.13-windows-x86_64-none`. x64 Python runs with emulation, and all dependencies have x64 versions. |
 | Windows: `running scripts is disabled on this system` | Use `powershell -ExecutionPolicy ByPass -File install.ps1`. |
 | Colors show as `[32m` | The terminal has no ANSI colors. This is not a problem. |

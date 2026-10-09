@@ -73,6 +73,7 @@ uv run workshop/step.py solve 3
 | An attendee with a key gets different text | This is correct. Gemini writes the text. The tools make the cascade table and the post-mortem, so these are the same. |
 | An attendee is behind or lost | `uv run workshop/step.py status` shows their progress. `uv run workshop/step.py goto N` commits their changes and starts the step N on a new branch. |
 | `solve N` reports that the solution does not fit | The attendee changed the code of the step. Use `goto N+1`. |
+| `would clobber existing tag` | The tags moved on GitHub after the attendee installed. Run `git fetch origin --tags --force`, then the installer again. |
 
 ## Maintaining the steps
 
@@ -85,6 +86,10 @@ The completed code is the source of truth. The steps come from the completed cod
 * `uv run python workshop/build_steps.py --branch` builds the linear `workshop` branch and the
   local `step-00`…`step-05` tags again from `HEAD`. It does not change your working tree.
 * To publish, run `git push -f origin workshop` and `git push -f origin 'refs/tags/step-*'`.
+* After attendees install, do not move the tags for a change to the documentation only. In each
+  clone made before the push, `git fetch --tags` (and thus the installer) fails with `would clobber
+  existing tag`. The website shows the new documentation. The preflight line for the workshop branch
+  is then red, and that is correct.
 
 CI generates the patches again. If a patch is out of date, CI fails. Thus, CI finds a refactor
 that moves the code of a step before the refactor breaks the workshop. If this occurs, update the

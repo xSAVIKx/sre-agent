@@ -38,6 +38,9 @@ Open an **empty folder** in [Antigravity](https://antigravity.google), or run `a
 folder (any coding agent works). Paste this prompt. The agent installs everything, checks the
 setup and runs a first incident. It asks before it installs anything.
 
+No agent yet? [Install the Antigravity CLI](INSTALL.md#install-the-antigravity-cli-optional)
+(optional).
+
 Short version, for an agent that can read web pages: "Set up the workshop with the instructions in
 https://xsavikx.github.io/sre-agent/llms.txt".
 
@@ -359,7 +362,8 @@ The Orchestrator cannot read files, run commands or call other URLs. It can only
 read-only SRE agent.
 
 ### 2. The Antigravity CLI (`agy`)
-Use the CLI to work with the workspace from a terminal. The CLI finds the skill in
+Use the CLI to work with the workspace from a terminal. To install it, see
+[Install the Antigravity CLI](INSTALL.md#install-the-antigravity-cli-optional). The CLI finds the skill in
 [`.agents/skills/sre_incident_solver/`](.agents/skills/sre_incident_solver). To run the full diagnosis loop, use the
 local simulation (`uv run simulate_incident.py`).
 
