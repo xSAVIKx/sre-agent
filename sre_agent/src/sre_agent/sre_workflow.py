@@ -272,11 +272,9 @@ async def _run_adk_diagnostics(
 
     try:
         # Define the ADK 2.0 graph workflow
-        # TODO(step-1): The workflow stops after the TraceAnalyzer. Make it a chain of 4 nodes:
-        #   START -> trace_analyzer -> fetch_telemetry -> log_correlator.
-        #   A tuple in `edges` is a chain: each node gets the output of the node before it. Thus
-        #   fetch_telemetry gets the trace ID, and log_correlator gets the spans and logs.
-        sre_diagnostics_workflow = AdkWorkflow(name="sre_diagnostics_workflow", edges=[(START, trace_analyzer)])
+        sre_diagnostics_workflow = AdkWorkflow(
+            name="sre_diagnostics_workflow", edges=[(START, trace_analyzer, fetch_telemetry, log_correlator)]
+        )
 
         session_service = InMemorySessionService()
         runner = Runner(node=sre_diagnostics_workflow, app_name="sre_diagnostics", session_service=session_service)
