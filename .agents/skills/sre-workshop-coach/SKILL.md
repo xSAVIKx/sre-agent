@@ -19,6 +19,8 @@ work for them. Change their code only when they ask you to solve or skip a step.
   `Error: Failed to contact SRE Sub-Agent: TODO(step-4)`. This is expected.
 * Without GEMINI_API_KEY, the ADK agents use a scripted model
   (`sre_agent/src/sre_agent/simulated_llm.py`): the ADK code still runs for real.
+* The log of `simulate_incident.py` and `workshop/chat.py` shows only the steps of a run. To
+  debug, add `--verbose`: it shows the debug lines, the library warnings and each HTTP request.
 
 | Step (README folder) | Technology | File | Basics (`workshop/basics/`) |
 |:--|:--|:--|:--|

@@ -22,7 +22,7 @@ from typing import Any
 from sre_common.middleware import target_project_contextvar
 
 from sre_agent import a2ui_surfaces
-from sre_agent.config import PROJECT_ID
+from sre_agent.config import IS_MOCK, PROJECT_ID
 from sre_agent.firestore_strategy import get_sre_session, save_sre_session
 from sre_agent.gcp_tools import TRACE_SCAN_SIZE, console_links, find_bottleneck, generate_post_mortem, query_traces
 from sre_agent.incidents import find_incident
@@ -93,8 +93,13 @@ async def run_diagnosis(
             services = topology.get("discovered_resources", {}).get("services", [])
             yield Progress(f"✅ Topology cached successfully. Resolved {len(services)} active compute services.")
     except Exception as e:
-        logger.error(f"Failed to query the Inventory Agent: {e}")
-        yield Progress("⚠️ Inventory Agent query failed. Proceeding with default service topology parameters.")
+        if IS_MOCK:
+            # Expected in a local run: no Inventory Agent is running. The workflow logs it.
+            logger.debug(f"No Inventory Agent in this local run: {e}")
+            yield Progress("🧭 No Inventory Agent in this local run: using the built-in topology.")
+        else:
+            logger.error(f"Failed to query the Inventory Agent: {e}")
+            yield Progress("⚠️ Inventory Agent query failed. Proceeding with default service topology parameters.")
 
     # 2. Recent traces
     yield Progress(f"🔍 Fetching recent traces from project `{resolved_project}`...")

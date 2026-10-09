@@ -236,3 +236,6 @@ syntax. CI tests Python 3.11 and 3.14, so code that needs Python 3.12 or later f
 * Use native container generics (for example `list[str]`, `dict[str, Any]`). Do not import `List` or
   `Dict` from `typing`.
 * Use the union operator `|` for optional types (for example `str | None`). Do not use `Optional[str]`.
+* Log each step of a run at INFO: a call to another agent, a workflow node, a tool call. Log the
+  details (file loads, repeated fetches, full payloads) at DEBUG. The workshop attendees read the
+  INFO log. `--verbose` (or `LOG_LEVEL=DEBUG`) shows the details.

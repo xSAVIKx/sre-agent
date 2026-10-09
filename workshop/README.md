@@ -171,6 +171,10 @@ uv run simulate_incident.py --engine-only   # straight to the SRE engine (skips 
 uv run workshop/chat.py
 ```
 
+The log shows one line for each step of a run: the A2A calls, the workflow nodes and the tool
+calls. To see all the details (debug lines, library warnings and each HTTP request), add
+`--verbose` to either command.
+
 ## Architecture
 
 ```mermaid

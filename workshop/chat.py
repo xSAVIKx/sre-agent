@@ -4,7 +4,8 @@ The chat runs in mock mode: it reads the telemetry that `uv run simulate_inciden
 and it needs no GCP project. This command works the same on macOS, Linux and Windows.
 
 Options:
-    --port N  The port for the chat. Default: 8080.
+    --port N   The port for the chat. Default: 8080.
+    --verbose  Show all the logs: debug lines, library warnings and each HTTP request.
 """
 
 import os
@@ -21,6 +22,8 @@ def main(argv: list[str]) -> int:
             print(f"Port {port} is in use. Stop the other program, or use: uv run workshop/chat.py --port 8090")
             return 1
     os.environ.setdefault("MOCK_GCP", "true")
+    if "--verbose" in argv:
+        os.environ["LOG_LEVEL"] = "DEBUG"  # see sre_common.logging.setup_logging
     print(f"The chat is at http://localhost:{port}/chat (press Ctrl+C to stop)")
     uvicorn.run("agent.main:app", port=port)
     return 0

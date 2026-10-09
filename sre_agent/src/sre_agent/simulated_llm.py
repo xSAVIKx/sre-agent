@@ -65,7 +65,8 @@ class SimulatedLlm(BaseLlm):
                         )
                         for n, query in enumerate(METRIC_QUERIES.values())
                     ],
-                )
+                ),
+                usage_metadata=_no_tokens(),
             )
         else:
             metrics = [_metric_line(label, results.get(f"metrics-{n}")) for n, label in enumerate(METRIC_QUERIES)]
@@ -75,7 +76,14 @@ class SimulatedLlm(BaseLlm):
 
 
 def _reply(text: str) -> LlmResponse:
-    return LlmResponse(content=types.Content(role="model", parts=[types.Part(text=text)]))
+    return LlmResponse(content=types.Content(role="model", parts=[types.Part(text=text)]), usage_metadata=_no_tokens())
+
+
+def _no_tokens() -> types.GenerateContentResponseUsageMetadata:
+    """The token usage of a scripted answer: none. Without it, ADK warns at each answer."""
+    return types.GenerateContentResponseUsageMetadata(
+        prompt_token_count=0, candidates_token_count=0, total_token_count=0
+    )
 
 
 def _pick_trace(text: str) -> str:

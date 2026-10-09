@@ -7,21 +7,32 @@ locally to analyze the mock files and output a diagnostic report.
 Flags:
     --engine-only  Run the SRE diagnostics engine directly, without the Orchestrator.
     --keep-data    Keep telemetry from previous runs instead of starting clean.
+    --verbose      Show all the logs: debug lines, library warnings and the app's JSON log lines.
 """
 
 import asyncio
+import contextlib
+import io
 import logging
 import os
 import shutil
 import sys
+
+from sre_common.logging import quiet_libraries
 
 # Ensure workspace root is in Python path
 sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 # The report has emoji. On Windows, a pipe (for example in Git Bash) is not UTF-8 by default.
 sys.stdout.reconfigure(encoding="utf-8")
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+VERBOSE = "--verbose" in sys.argv or os.environ.get("LOG_LEVEL", "").upper() == "DEBUG"
+if VERBOSE:
+    os.environ["LOG_LEVEL"] = "DEBUG"  # also shows ADK's warnings (see sre_agent/__init__.py)
+
+# Configure logging: short lines, and only the steps of the run (--verbose adds the details).
+LOG_LEVEL = logging.DEBUG if VERBOSE else logging.INFO
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+quiet_libraries(LOG_LEVEL)
 logger = logging.getLogger("simulator")
 
 
@@ -68,8 +79,10 @@ async def run_simulation() -> None:
         scope = {"type": "http", "headers": []}
         request = Request(scope)
         # Run gateway request with error=True to trigger database connection error
-        # This writes trace details and logs to the local mock directory
-        await gateway(request, trigger_error=True)
+        # This writes trace details and logs to the local mock directory. The app also prints
+        # each log line as JSON, for Cloud Logging: --verbose shows them.
+        with contextlib.redirect_stdout(sys.stdout if VERBOSE else io.StringIO()):
+            await gateway(request, trigger_error=True)
     except HTTPException as e:
         if isinstance(e.detail, dict) and "trace_id" in e.detail:
             trace_id = e.detail["trace_id"]
