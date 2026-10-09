@@ -1,6 +1,6 @@
 --- a/.agents/skills/sre_incident_solver/sre_workflow.py
 +++ b/.agents/skills/sre_incident_solver/sre_workflow.py
-@@ -70,14 +70,12 @@
+@@ -72,14 +72,12 @@
  
  trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
  
@@ -23,7 +23,7 @@
  @dataclass(frozen=True)
 --- a/sre_agent/src/sre_agent/sre_workflow.py
 +++ b/sre_agent/src/sre_agent/sre_workflow.py
-@@ -68,14 +68,12 @@
+@@ -70,14 +70,12 @@
  
  trace_analyzer = AdkAgent(name="trace_analyzer", model=MODEL, instruction=TRACE_ANALYZER_INSTRUCTION)
  
