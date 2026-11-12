@@ -1,0 +1,70 @@
+{#-
+  Additions to the Material theme for the workshop website (mkdocs.yml: theme.custom_dir).
+-#}
+{% extends "base.html" %}
+
+{% block extrahead %}
+  {#- Link previews (Open Graph, Twitter) and structured data (JSON-LD) for each page. -#}
+  {%- set is_home = page and page.is_homepage -%}
+  {%- set title = config.site_name if is_home or not page or not page.title else page.title ~ " - " ~ config.site_name -%}
+  {%- set description = (page.meta.description if page and page.meta and page.meta.description) or config.site_description -%}
+  {%- set url = (page.canonical_url if page and page.canonical_url) or config.site_url -%}
+  <meta property="og:site_name" content="{{ config.site_name }}">
+  <meta property="og:title" content="{{ title }}">
+  <meta property="og:description" content="{{ description }}">
+  <meta property="og:url" content="{{ url }}">
+  <meta property="og:type" content="{{ 'website' if is_home else 'article' }}">
+  <meta property="og:locale" content="en_US">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="{{ title }}">
+  <meta name="twitter:description" content="{{ description }}">
+  {%- set author = {"@type": "Person", "name": config.site_author, "url": "https://serhiichuk.dev/"} -%}
+  {%- if is_home -%}
+    {%- set ld = {"@context": "https://schema.org", "@type": "WebSite", "name": config.site_name, "description": description, "url": url, "inLanguage": "en", "author": author, "publisher": author} -%}
+  {%- else -%}
+    {%- set ld = {"@context": "https://schema.org", "@type": "TechArticle", "headline": title, "description": description, "url": url, "inLanguage": "en", "author": author, "isPartOf": {"@type": "WebSite", "name": config.site_name, "url": config.site_url}} -%}
+  {%- endif %}
+  <script type="application/ld+json">{{ ld | tojson }}</script>
+
+  <script>
+    // Material for MkDocs loads mermaid.min.js (about 1 MB, every diagram type) as soon as
+    // a page with a diagram loads. When window.mermaid already exists, Material uses it.
+    // This replacement loads the ESM build of Mermaid (it fetches only the diagram types
+    // that the page uses), and only when a diagram comes near the visible area.
+    (() => {
+      let options;
+      let loaded;
+      const load = () => (loaded ||= import("https://unpkg.com/mermaid@11.17.2/dist/mermaid.esm.min.mjs").then(
+        ({ default: mermaid }) => { mermaid.initialize(options); return mermaid; }));
+      const visible = (text) => new Promise((resolve) => {
+        const diagram = [...document.querySelectorAll("pre.mermaid")].find((el) => el.textContent === text);
+        if (!diagram || !("IntersectionObserver" in window)) return resolve();
+        const observer = new IntersectionObserver((entries) => {
+          if (entries.some((entry) => entry.isIntersecting)) { observer.disconnect(); resolve(); }
+        }, { rootMargin: "50% 0px" });
+        observer.observe(diagram);
+      });
+      window.mermaid = {
+        initialize(value) { options = value; },
+        async render(id, text) { await visible(text); return (await load()).render(id, text); },
+      };
+    })();
+  </script>
+
+  {%- if config.repo_url and "github.com/" in config.repo_url %}
+  <script>
+    // Material asks the GitHub API for the latest release, to show its version beside the
+    // repository link. This repository has no releases, so that request gets a 404, which
+    // the browser logs as an error on each page. Send that one request to an empty data URL:
+    // Material ignores the empty answer and still shows the stars and forks.
+    // Delete this script when the repository publishes releases.
+    (() => {
+      const releases = "https://api.github.com/repos/{{ config.repo_url.split('github.com/')[1].strip('/') }}/releases/latest";
+      const open = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url, ...rest) {
+        return open.call(this, method, String(url) === releases ? "data:," : url, ...rest);
+      };
+    })();
+  </script>
+  {%- endif %}
+{% endblock %}

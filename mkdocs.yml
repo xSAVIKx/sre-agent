@@ -3,9 +3,14 @@
 site_name: "Workshop: Build an SRE Agent"
 site_description: Build an SRE agent with ADK, A2A, A2UI and the Antigravity SDK. A 90-minute hands-on workshop.
 site_url: https://xsavikx.github.io/sre-agent/
+site_author: Yurii Serhiichuk
 repo_url: https://github.com/xSAVIKx/sre-agent
 repo_name: xSAVIKx/sre-agent
 edit_uri: ""
+copyright: >-
+  By <a href="https://serhiichuk.dev/">Yurii Serhiichuk</a> ·
+  <a href="https://serhiichuk.dev/blog/building-an-sre-agent-with-adk-and-antigravity/">Blog post about this workshop</a> ·
+  <a href="https://xsavikx.github.io/">More projects</a>
 docs_dir: build/site-src
 site_dir: site
 
@@ -29,11 +34,21 @@ nav:
   - Exercises: exercises.md
   - Facilitator notes: FACILITATOR.md
 
+plugins:
+  - search
+  # The build downloads the Google Fonts and the site serves them, so no font CSS blocks
+  # the first render from another host. overrides/main.html loads Mermaid from unpkg.
+  - privacy:
+      assets_exclude:
+        - unpkg.com/*
+
 extra_css:
   - extra.css
 
 theme:
   name: material
+  # overrides/: link previews and structured data, a lazy Mermaid loader, a named search dialog.
+  custom_dir: overrides
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

@@ -34,7 +34,15 @@ MKDOCS = ["uvx", "--from", "mkdocs==1.6.1", "--with", "mkdocs-material==9.7.7", 
 # Repository files that are not under workshop/, and their place on the site.
 EXTRA_PAGES = {"INSTALL.md": "install.md", "EXERCISES.md": "exercises.md"}
 # Text blocks (the setup prompt, log output) wrap, so readers see them whole before they copy.
-EXTRA_CSS = ".md-typeset .language-text :is(pre, code) { white-space: pre-wrap; overflow-wrap: anywhere; }\n"
+EXTRA_CSS = (
+    ".md-typeset .language-text :is(pre, code) { white-space: pre-wrap; overflow-wrap: anywhere; }\n"
+    # Accessibility (WCAG AA). Links in text have an underline, not only a different colour.
+    ".md-typeset :is(p, li, td, th, dd, blockquote) a:not(.md-button), .md-copyright a"
+    " { text-decoration: underline; text-underline-offset: 0.15em; }\n"
+    # Code comments and variables, and the footer text, get a contrast of at least 4.5:1.
+    '[data-md-color-scheme="default"] { --md-code-hl-comment-color: #616161; --md-code-hl-variable-color: #616161; }\n'
+    ".md-copyright { color: var(--md-footer-fg-color--light); }\n"
+)
 ITEM = re.compile(r"(\s*)([*-]|\d+\.)\s+\S")
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
 
