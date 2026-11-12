@@ -34,7 +34,7 @@
     (() => {
       let options;
       let loaded;
-      const load = () => (loaded ||= import("https://unpkg.com/mermaid@11/dist/mermaid.esm.min.mjs").then(
+      const load = () => (loaded ||= import("https://unpkg.com/mermaid@11.17.2/dist/mermaid.esm.min.mjs").then(
         ({ default: mermaid }) => { mermaid.initialize(options); return mermaid; }));
       const visible = (text) => new Promise((resolve) => {
         const diagram = [...document.querySelectorAll("pre.mermaid")].find((el) => el.textContent === text);
