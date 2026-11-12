@@ -35,3 +35,5 @@ node_modules/
 # The workshop website (scripts/build_docs.py)
 /build/
 /site/
+# The downloads of the privacy plugin (the self-hosted fonts)
+/.cache/
