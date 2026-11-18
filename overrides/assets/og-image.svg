@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <!-- The link preview image of the workshop site (og:image, twitter:image).
+       Source of og-image.png. To render the PNG again, see scripts/render_og_image.sh. -->
+  <rect width="1200" height="630" fill="#3f51b5"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2">
+    <circle cx="1060" cy="260" r="70"/>
+    <circle cx="1060" cy="260" r="120"/>
+  </g>
+  <!-- An agent graph: the Orchestrator and its remote agents. -->
+  <g stroke="#c5cae9" stroke-width="3">
+    <line x1="1060" y1="260" x2="985" y2="360"/>
+    <line x1="1060" y1="260" x2="1135" y2="360"/>
+    <line x1="1060" y1="260" x2="1060" y2="140"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="1060" cy="260" r="22"/>
+    <circle cx="985" cy="360" r="14"/>
+    <circle cx="1135" cy="360" r="14"/>
+    <circle cx="1060" cy="140" r="14"/>
+  </g>
+  <!-- A latency line with one spike: the incident. -->
+  <polyline fill="none" stroke="#ff8a80" stroke-width="5" stroke-linejoin="round" stroke-linecap="round"
+    points="80,560 180,548 260,556 340,540 420,552 480,536 530,470 580,548 680,540 780,552 880,538 980,546 1120,536"/>
+  <g font-family="Roboto, 'DejaVu Sans', Arial, sans-serif" fill="#ffffff">
+    <text x="80" y="120" font-size="30" font-weight="700" letter-spacing="4" fill="#c5cae9">WORKSHOP · 90 MINUTES</text>
+    <text x="80" y="215" font-size="76" font-weight="700">Build an SRE Agent</text>
+    <text x="80" y="285" font-size="34" fill="#e8eaf6">Agents that find the root cause of an incident,</text>
+    <text x="80" y="330" font-size="34" fill="#e8eaf6">call each other over A2A and send UI with A2UI.</text>
+    <g font-size="28" font-weight="700">
+      <rect x="80" y="380" width="104" height="52" rx="26" fill="#ffffff" fill-opacity="0.16"/>
+      <text x="132" y="416" text-anchor="middle">ADK</text>
+      <rect x="198" y="380" width="104" height="52" rx="26" fill="#ffffff" fill-opacity="0.16"/>
+      <text x="250" y="416" text-anchor="middle">A2A</text>
+      <rect x="316" y="380" width="124" height="52" rx="26" fill="#ffffff" fill-opacity="0.16"/>
+      <text x="378" y="416" text-anchor="middle">A2UI</text>
+      <rect x="454" y="380" width="300" height="52" rx="26" fill="#ffffff" fill-opacity="0.16"/>
+      <text x="604" y="416" text-anchor="middle">Antigravity SDK</text>
+    </g>
+    <text x="1120" y="610" font-size="24" text-anchor="end" fill="#c5cae9">xsavikx.github.io/sre-agent</text>
+  </g>
+</svg>
