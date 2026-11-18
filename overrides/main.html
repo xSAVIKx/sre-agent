@@ -15,16 +15,100 @@
   <meta property="og:url" content="{{ url }}">
   <meta property="og:type" content="{{ 'website' if is_home else 'article' }}">
   <meta property="og:locale" content="en_US">
-  <meta name="twitter:card" content="summary">
+  {#- overrides/assets/og-image.png comes from og-image.svg (scripts/render_og_image.sh). -#}
+  {%- set image = config.site_url ~ "assets/og-image.png" -%}
+  {%- set image_alt = "Workshop: Build an SRE Agent. A 90-minute workshop with ADK, A2A, A2UI and the Antigravity SDK." %}
+  <meta property="og:image" content="{{ image }}">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="{{ image_alt }}">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ title }}">
   <meta name="twitter:description" content="{{ description }}">
-  {%- set author = {"@type": "Person", "name": config.site_author, "url": "https://serhiichuk.dev/"} -%}
+  <meta name="twitter:image" content="{{ image }}">
+  <meta name="twitter:image:alt" content="{{ image_alt }}">
+  {%- set author = {
+    "@type": "Person",
+    "@id": "https://serhiichuk.dev/#person",
+    "name": config.site_author,
+    "url": "https://serhiichuk.dev/",
+    "sameAs": ["https://github.com/xSAVIKx", "https://xsavikx.github.io/"],
+  } -%}
+  {%- set website = {"@type": "WebSite", "@id": config.site_url ~ "#website", "name": config.site_name, "url": config.site_url} -%}
+  {%- set course_ref = {"@type": "Course", "@id": config.site_url ~ "#course", "name": config.site_name, "url": config.site_url} -%}
+  {%- set topics = ["Agent Development Kit (ADK)", "Agent2Agent protocol (A2A)", "A2UI", "Antigravity SDK",
+                    "Site reliability engineering (SRE)", "Observability", "Incident root cause analysis", "Multi-agent systems"] -%}
   {%- if is_home -%}
-    {%- set ld = {"@context": "https://schema.org", "@type": "WebSite", "name": config.site_name, "description": description, "url": url, "inLanguage": "en", "author": author, "publisher": author} -%}
+    {%- set graph = [
+      {
+        "@type": "WebSite",
+        "@id": website["@id"],
+        "name": config.site_name,
+        "url": config.site_url,
+        "description": description,
+        "inLanguage": "en",
+        "author": author,
+        "publisher": author,
+      },
+      {
+        "@type": "Course",
+        "@id": course_ref["@id"],
+        "name": config.site_name,
+        "url": config.site_url,
+        "description": description,
+        "image": image,
+        "inLanguage": "en",
+        "educationalLevel": "Intermediate",
+        "learningResourceType": "Workshop",
+        "teaches": topics,
+        "keywords": "ADK, A2A, A2UI, Antigravity SDK, SRE, observability, AI agents, Gemini",
+        "timeRequired": "PT1H30M",
+        "isAccessibleForFree": true,
+        "provider": author,
+        "author": author,
+        "offers": {"@type": "Offer", "category": "Free", "price": 0, "priceCurrency": "USD"},
+        "hasCourseInstance": {"@type": "CourseInstance", "courseMode": "online", "courseWorkload": "PT1H30M", "instructor": author},
+        "isPartOf": {"@id": website["@id"]},
+      },
+      {
+        "@type": "SoftwareSourceCode",
+        "@id": config.repo_url ~ "#code",
+        "name": config.repo_name,
+        "description": "The code of the workshop: an SRE agent built with ADK, A2A, A2UI and the Antigravity SDK.",
+        "codeRepository": config.repo_url,
+        "url": config.repo_url,
+        "programmingLanguage": "Python",
+        "license": "https://opensource.org/licenses/MIT",
+        "author": author,
+      },
+    ] -%}
+  {%- elif page and page.title -%}
+    {%- set graph = [
+      {
+        "@type": "TechArticle",
+        "headline": page.title,
+        "name": title,
+        "description": description,
+        "url": url,
+        "image": image,
+        "inLanguage": "en",
+        "author": author,
+        "isPartOf": [website, course_ref],
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": config.site_name, "item": config.site_url},
+          {"@type": "ListItem", "position": 2, "name": page.title, "item": url},
+        ],
+      },
+    ] -%}
   {%- else -%}
-    {%- set ld = {"@context": "https://schema.org", "@type": "TechArticle", "headline": title, "description": description, "url": url, "inLanguage": "en", "author": author, "isPartOf": {"@type": "WebSite", "name": config.site_name, "url": config.site_url}} -%}
+    {#- A page with no title, for example 404.html. -#}
+    {%- set graph = [website] -%}
   {%- endif %}
-  <script type="application/ld+json">{{ ld | tojson }}</script>
+  <script type="application/ld+json">{{ {"@context": "https://schema.org", "@graph": graph} | tojson }}</script>
 
   <script>
     // Material for MkDocs loads mermaid.min.js (about 1 MB, every diagram type) as soon as
