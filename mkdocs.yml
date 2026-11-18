@@ -10,7 +10,7 @@ edit_uri: ""
 copyright: >-
   By <a href="https://serhiichuk.dev/">Yurii Serhiichuk</a> ·
   <a href="https://serhiichuk.dev/blog/building-an-sre-agent-with-adk-and-antigravity/">Blog post about this workshop</a> ·
-  <a href="https://xsavikx.github.io/">More projects</a>
+  <a href="https://xsavikx.github.io/">Part of Yurii Serhiichuk's open-source projects</a>
 docs_dir: build/site-src
 site_dir: site
 
@@ -36,19 +36,24 @@ nav:
 
 plugins:
   - search
-  # The build downloads the Google Fonts and the site serves them, so no font CSS blocks
-  # the first render from another host. overrides/main.html loads Mermaid from unpkg.
+  # The site serves its own copy of each external asset, so no CSS blocks the first render
+  # from another host. overrides/main.html loads Mermaid from unpkg.
   - privacy:
       assets_exclude:
         - unpkg.com/*
 
 extra_css:
+  # The shared identity (neutrals and system fonts) of xSAVIKx/xSAVIKx.github.io/identity.
+  # A vendored copy: do not edit it. To update it, copy the new file from the hub.
+  - assets/stylesheets/ys-mkdocs-material.css
   - extra.css
 
 theme:
   name: material
   # overrides/: link previews and structured data, a lazy Mermaid loader, a named search dialog.
   custom_dir: overrides
+  # System fonts only (the shared identity): no Google Fonts.
+  font: false
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

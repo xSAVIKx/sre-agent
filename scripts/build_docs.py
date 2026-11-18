@@ -41,6 +41,9 @@ EXTRA_CSS = (
     " { text-decoration: underline; text-underline-offset: 0.15em; }\n"
     # Code comments and variables, and the footer text, get a contrast of at least 4.5:1.
     '[data-md-color-scheme="default"] { --md-code-hl-comment-color: #616161; --md-code-hl-variable-color: #616161; }\n'
+    # Dark links (also linked inline code) on the code background of the shared identity: 4.5:1.
+    # #578ae8 is the nearest passing shade of Material's indigo link colour #5488e8.
+    '[data-md-color-scheme="slate"][data-md-color-primary="indigo"] { --md-typeset-a-color: #578ae8; }\n'
     ".md-copyright { color: var(--md-footer-fg-color--light); }\n"
 )
 ITEM = re.compile(r"(\s*)([*-]|\d+\.)\s+\S")
