@@ -45,6 +45,10 @@ EXTRA_CSS = (
     # #578ae8 is the nearest passing shade of Material's indigo link colour #5488e8.
     '[data-md-color-scheme="slate"][data-md-color-primary="indigo"] { --md-typeset-a-color: #578ae8; }\n'
     ".md-copyright { color: var(--md-footer-fg-color--light); }\n"
+    # Link hover uses the indigo accent #526cfe: 4.07:1 light, 4.26:1 dark. Material's indigo
+    # A400 (#3d5afe, 4.90:1 on #f8fafc) and A100 (#8c9eff, 7.29:1 on #14161a) pass 4.5:1.
+    '[data-md-color-scheme="default"][data-md-color-accent="indigo"] { --md-accent-fg-color: #3d5afe; }\n'
+    '[data-md-color-scheme="slate"][data-md-color-accent="indigo"] { --md-accent-fg-color: #8c9eff; }\n'
 )
 ITEM = re.compile(r"(\s*)([*-]|\d+\.)\s+\S")
 LINK = re.compile(r"(?<!!)\[([^\]]*)\]\(([^)\s]+)\)")
