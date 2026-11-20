@@ -10,7 +10,7 @@ edit_uri: ""
 copyright: >-
   By <a href="https://serhiichuk.dev/">Yurii Serhiichuk</a> ·
   <a href="https://serhiichuk.dev/blog/building-an-sre-agent-with-adk-and-antigravity/">Blog post about this workshop</a> ·
-  <a href="https://xsavikx.github.io/">Part of Yurii Serhiichuk's open-source projects</a>
+  <a class="ys-back-link" href="https://xsavikx.github.io/">More projects</a>
 docs_dir: build/site-src
 site_dir: site
 
